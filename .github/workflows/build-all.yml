@@ -1,0 +1,161 @@
+name: Compilar Multiplataforma (iOS & Android)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Compilar Android APK (Ubuntu + Gradle)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compilar APK (Release)
+        run: |
+          chmod +x gradlew
+          ./gradlew :androidApp:assembleRelease --stacktrace
+
+      - name: Subir artefacto APK (Android)
+        uses: actions/upload-artifact@v4
+        with:
+          name: EnduLink-Android-APK
+          path: androidApp/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  build-ios:
+    name: Compilar iOS IPA y Simulador (macOS + Xcode)
+    runs-on: macos-15
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Instalar XcodeGen
+        run: |
+          if ! command -v xcodegen &> /dev/null; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+          xcodebuild -version
+
+      - name: Compilar XCFramework KMP Compartido
+        run: |
+          chmod +x gradlew
+          ./gradlew :shared:assembleSharedAppReleaseXCFramework --stacktrace || ./gradlew :shared:assembleXCFramework --stacktrace
+
+      - name: Generar proyecto Xcode con XcodeGen
+        run: |
+          cd iosApp
+          xcodegen generate
+
+      - name: Compilar EnduLink (Release ARM64 sin firma)
+        run: |
+          xcodebuild -project iosApp/EnduLink.xcodeproj \
+            -scheme EnduLink \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+
+      - name: Empaquetar EnduLink-unsigned.ipa
+        run: |
+          rm -rf Payload EnduLink-unsigned.ipa
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/EnduLink.app Payload/
+          zip -qry EnduLink-unsigned.ipa Payload
+          ls -lh EnduLink-unsigned.ipa
+
+      - name: Subir artefacto IPA (para Sideloadly / SideStore)
+        uses: actions/upload-artifact@v4
+        with:
+          name: EnduLink-iOS-unsigned-ipa
+          path: EnduLink-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Compilar bundle Universal para Simulador iOS (Appetize.io)
+        run: |
+          xcodebuild -project iosApp/EnduLink.xcodeproj \
+            -scheme EnduLink \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath build-sim \
+            ARCHS="arm64 x86_64" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+          cd build-sim/Build/Products/Release-iphonesimulator
+          zip -qry "$GITHUB_WORKSPACE/EnduLink-appetize-simulator.zip" EnduLink.app
+          ls -lh "$GITHUB_WORKSPACE/EnduLink-appetize-simulator.zip"
+
+      - name: Subir artefacto Simulador (Appetize.io en navegador)
+        uses: actions/upload-artifact@v4
+        with:
+          name: EnduLink-appetize-simulator-zip
+          path: EnduLink-appetize-simulator.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publicar Release en GitHub (APK + IPA)
+    needs: [ build-android, build-ios ]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar artefactos Android
+        uses: actions/download-artifact@v4
+        with:
+          name: EnduLink-Android-APK
+          path: release-artifacts
+
+      - name: Descargar artefactos iOS IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: EnduLink-iOS-unsigned-ipa
+          path: release-artifacts
+
+      - name: Descargar artefactos Simulador iOS
+        uses: actions/download-artifact@v4
+        with:
+          name: EnduLink-appetize-simulator-zip
+          path: release-artifacts
+
+      - name: Publicar Release oficial
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
