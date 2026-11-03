@@ -54,6 +54,31 @@ data class OverzoomResult(
     }
 }
 
+private class TileLruCache<K, V>(private val maxSize: Int) {
+    private val map = LinkedHashMap<K, V>()
+
+    operator fun get(key: K): V? {
+        val value = map.remove(key) ?: return null
+        map[key] = value
+        return value
+    }
+
+    operator fun set(key: K, value: V) {
+        map.remove(key)
+        map[key] = value
+        if (map.size > maxSize) {
+            val eldest = map.keys.firstOrNull()
+            if (eldest != null) {
+                map.remove(eldest)
+            }
+        }
+    }
+
+    fun clear() {
+        map.clear()
+    }
+}
+
 class TileStore(
     private val httpClient: HttpClient = HttpClient()
 ) {
@@ -69,20 +94,12 @@ class TileStore(
     // Caché LRU de Bitmaps ya decodificados para render instantáneo en 60 FPS (1024 teselas = cubre varios niveles de zoom sin parpadeos)
     private val bitmapCacheLock = SynchronizedLock()
     private val maxBitmapCache = 1024
-    private val bitmapCache = object : LinkedHashMap<TileCoord, androidx.compose.ui.graphics.ImageBitmap>(maxBitmapCache, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<TileCoord, androidx.compose.ui.graphics.ImageBitmap>?): Boolean {
-            return size > maxBitmapCache
-        }
-    }
+    private val bitmapCache = TileLruCache<TileCoord, androidx.compose.ui.graphics.ImageBitmap>(maxBitmapCache)
 
     // Caché LRU en memoria de bytes (512 teselas)
     private val memoryCacheLock = SynchronizedLock()
     private val maxMemoryTiles = 512
-    private val memoryCache = object : LinkedHashMap<TileCoord, ByteArray>(maxMemoryTiles, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<TileCoord, ByteArray>?): Boolean {
-            return size > maxMemoryTiles
-        }
-    }
+    private val memoryCache = TileLruCache<TileCoord, ByteArray>(maxMemoryTiles)
 
     private val progressLock = SynchronizedLock()
 
