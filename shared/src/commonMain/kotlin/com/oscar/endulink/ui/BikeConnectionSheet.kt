@@ -62,6 +62,7 @@ fun BikeConnectionSheet(
     var qrTextInput by remember { mutableStateOf("") }
     var qrError by remember { mutableStateOf<String?>(null) }
     var showLogsDialog by remember { mutableStateOf(false) }
+    var showUpdateCheckDialog by remember { mutableStateOf(false) }
     var bikeIpInput by remember { mutableStateOf(wifiSnapshot?.gatewayCandidateIP ?: "192.168.43.1") }
     val clipboardManager = LocalClipboardManager.current
     val scrollState = rememberScrollState()
@@ -707,6 +708,51 @@ fun BikeConnectionSheet(
                         }
                     }
                 }
+
+                // ------------------------------------------
+                // TARJETA 5: Versión y Actualizaciones
+                // ------------------------------------------
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = EnduPalette.Surface),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "EnduLink v${com.oscar.endulink.platform.PlatformAppUpdater.getAppVersionName()}",
+                                color = EnduPalette.TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Comprobar nueva versión en GitHub",
+                                color = EnduPalette.TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        Button(
+                            onClick = { showUpdateCheckDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.SurfaceHigh),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "🔄 Actualizaciones",
+                                color = EnduPalette.Accent,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -858,5 +904,9 @@ fun BikeConnectionSheet(
             },
             containerColor = EnduPalette.Surface
         )
+    }
+
+    if (showUpdateCheckDialog) {
+        AppUpdateDialog(onDismiss = { showUpdateCheckDialog = false })
     }
 }

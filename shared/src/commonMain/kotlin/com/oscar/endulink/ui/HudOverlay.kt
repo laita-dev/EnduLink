@@ -69,6 +69,7 @@ fun HudOverlay(
     onToggleRecording: () -> Unit,
     onOpenLayers: () -> Unit,
     onOpenOffline: () -> Unit,
+    onOpenSettings: () -> Unit = {},
     onOpenRoutes: () -> Unit,
     onOpenBikeSheet: () -> Unit,
     onOpenQuickMarker: () -> Unit,
@@ -196,6 +197,18 @@ fun HudOverlay(
                             .clickable { onOpenOffline() }
                     ) {
                         Text(text = "⬇️", fontSize = 16.sp)
+                    }
+
+                    // Botón Ajustes y Actualizaciones
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(EnduPalette.Surface.copy(alpha = 0.94f))
+                            .clickable { onOpenSettings() }
+                    ) {
+                        Text(text = "⚙️", fontSize = 16.sp)
                     }
                 }
             }

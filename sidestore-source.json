@@ -1,0 +1,35 @@
+{
+  "name": "EnduLink Releases",
+  "identifier": "com.oscar.endulink.source",
+  "subtitle": "Navegación off-road para moto y enlace TFT",
+  "description": "Canal oficial de distribución de EnduLink para iOS.",
+  "iconURL": "https://raw.githubusercontent.com/laita-dev/EnduLink/main/iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+  "headerURL": "https://raw.githubusercontent.com/laita-dev/EnduLink/main/iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+  "website": "https://github.com/laita-dev/EnduLink",
+  "apps": [
+    {
+      "name": "EnduLink",
+      "bundleIdentifier": "com.oscar.endulink",
+      "developerName": "Oscar Laita",
+      "version": "0.1.0",
+      "versionDate": "2026-11-03",
+      "versionDescription": "Versión inicial multiplataforma (iOS & Android) con navegación de tracks GPX, enlace a pantalla TFT de moto por Wi-Fi y mapas offline.",
+      "downloadURL": "https://github.com/laita-dev/EnduLink/releases/latest/download/EnduLink-unsigned.ipa",
+      "localizedDescription": "App de navegación trail / enduro con visualización de tracks GPX, perfiles de elevación, grabación en vivo y espejo H.264 para cuadros TFT de motocicletas.",
+      "iconURL": "https://raw.githubusercontent.com/laita-dev/EnduLink/main/iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+      "tintColor": "00D4FF",
+      "size": 42000000
+    }
+  ],
+  "news": [
+    {
+      "title": "Bienvenido a EnduLink",
+      "identifier": "welcome-endulink",
+      "caption": "Tu sistema de navegación off-road y enlace con cuadro TFT",
+      "date": "2026-11-03",
+      "tintColor": "00D4FF",
+      "url": "https://github.com/laita-dev/EnduLink"
+    }
+  ]
+}
+

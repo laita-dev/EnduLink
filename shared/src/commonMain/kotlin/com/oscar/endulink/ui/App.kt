@@ -85,6 +85,7 @@ fun App() {
     var showElevationSheet by remember { mutableStateOf(false) }
     var showSaveRecordingDialog by remember { mutableStateOf(false) }
     var pendingRecordingStats by remember { mutableStateOf(Triple(0.0, 0.0, 0L)) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
 
     // Geocodificación inversa continua del centro de la pantalla en modo selección en el mapa
     LaunchedEffect(isPickingOnMap, center) {
@@ -102,6 +103,7 @@ fun App() {
     var lastBackPressTime by remember { mutableStateOf(0L) }
     PlatformBackHandler(enabled = true) {
         when {
+            showUpdateDialog -> showUpdateDialog = false
             showLayersPanel -> showLayersPanel = false
             showSearchSheet -> {
                 isSearchingForStop = false
@@ -226,6 +228,7 @@ fun App() {
                     },
                     onOpenLayers = { showLayersPanel = !showLayersPanel },
                     onOpenOffline = { showOfflineSheet = true },
+                    onOpenSettings = { showUpdateDialog = true },
                     onOpenRoutes = { showRoutesSheet = true },
                     onOpenBikeSheet = { showBikeSheet = true },
                     onOpenQuickMarker = { showQuickMarkerSheet = true },
@@ -578,6 +581,13 @@ fun App() {
                             }
                         )
                     }
+                }
+
+                // Diálogo de comprobación y descarga de actualizaciones
+                if (showUpdateDialog) {
+                    AppUpdateDialog(
+                        onDismiss = { showUpdateDialog = false }
+                    )
                 }
             }
         }

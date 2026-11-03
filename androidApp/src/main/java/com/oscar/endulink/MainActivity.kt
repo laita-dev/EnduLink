@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import com.oscar.endulink.bike.AndroidBikeKeysStorage
+import com.oscar.endulink.platform.AndroidAppContext
 import com.oscar.endulink.ui.App
 
 class MainActivity : ComponentActivity() {
@@ -29,6 +30,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AndroidBikeKeysStorage.appContext = applicationContext
+        AndroidAppContext.appContext = applicationContext
 
         val permissions = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
