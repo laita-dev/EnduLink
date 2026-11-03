@@ -55,12 +55,7 @@ actual class PlatformH264Encoder actual constructor(
 
                 // Stable pointer to this instance
                 val stableRef = StableRef.create(this@PlatformH264Encoder)
-                callbackRecord.outputCallback = staticCFunction { outputCallbackRefCon, _, status, flags, sampleBuffer ->
-                    if (status == 0 && sampleBuffer != null && outputCallbackRefCon != null) {
-                        val ref = outputCallbackRefCon.asStableRef<PlatformH264Encoder>().get()
-                        ref.handleSampleBuffer(sampleBuffer, flags)
-                    }
-                }
+                callbackRecord.outputCallback = staticCFunction(::h264OutputCallback)
                 callbackRecord.outputRefCon = stableRef.asCPointer()
 
                 val createStatus = VTCompressionSessionCreate(
@@ -236,10 +231,10 @@ actual class PlatformH264Encoder actual constructor(
         }
     }
 
-    private fun handleSampleBuffer(sampleBuffer: CMSampleBufferRef, flags: VTEncodeInfoFlags) {
+    internal fun handleSampleBuffer(sampleBuffer: CMSampleBufferRef, flags: VTEncodeInfoFlags) {
         val attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, false)
         val notSync = attachments?.let {
-            val dict = CFArrayGetValueAtIndex(it, 0) as? CFDictionaryRef
+            val dict = CFArrayGetValueAtIndex(it, 0)?.reinterpret<cnames.structs.__CFDictionary>()
             CFDictionaryContainsKey(dict, kCMSampleAttachmentKey_NotSync)
         } ?: false
         val isKeyFrame = !notSync
@@ -336,4 +331,19 @@ actual class PlatformH264Encoder actual constructor(
         return out.toByteArray()
     }
 }
+
+@OptIn(ExperimentalForeignApi::class)
+private fun h264OutputCallback(
+    outputCallbackRefCon: COpaquePointer?,
+    sourceFrameRefCon: COpaquePointer?,
+    status: OSStatus,
+    infoFlags: VTEncodeInfoFlags,
+    sampleBuffer: CMSampleBufferRef?
+) {
+    if (status == 0 && sampleBuffer != null && outputCallbackRefCon != null) {
+        val ref = outputCallbackRefCon.asStableRef<PlatformH264Encoder>().get()
+        ref.handleSampleBuffer(sampleBuffer, infoFlags)
+    }
+}
+
 

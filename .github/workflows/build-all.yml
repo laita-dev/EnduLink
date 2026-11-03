@@ -68,7 +68,7 @@ jobs:
       - name: Compilar XCFramework KMP Compartido
         run: |
           chmod +x gradlew
-          ./gradlew :shared:assembleSharedAppReleaseXCFramework --stacktrace || ./gradlew :shared:assembleXCFramework --stacktrace
+          ./gradlew :shared:assembleSharedAppReleaseXCFramework --stacktrace
 
       - name: Generar proyecto Xcode con XcodeGen
         run: |

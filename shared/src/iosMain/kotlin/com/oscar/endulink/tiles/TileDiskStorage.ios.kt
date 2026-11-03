@@ -38,12 +38,9 @@ actual object TileDiskStorage {
     }
 
     actual fun fileSize(path: String): Long {
-        memScoped {
-            val error = alloc<CPointerVar<CFErrorRefVar>>()
-            val attrs = NSFileManager.defaultManager.attributesOfItemAtPath(path, null) ?: return 0L
-            val sizeNum = attrs[NSFileSize] as? NSNumber ?: return 0L
-            return sizeNum.longLongValue
-        }
+        val attrs = NSFileManager.defaultManager.attributesOfItemAtPath(path, null) ?: return 0L
+        val sizeNum = attrs[NSFileSize] as? NSNumber ?: return 0L
+        return sizeNum.longLongValue
     }
 
     actual fun deleteDirectory(path: String) {

@@ -57,34 +57,35 @@ actual class BikeCrypto actual constructor() {
                 null
             )
 
-            val error = alloc<CPointerVar<CFErrorRefVar>>()
+            val error = alloc<CFErrorRefVar>()
+            val cfPrivData: CFDataRef = CFBridgingRetain(privData)?.reinterpret()
             val privateKey = SecKeyCreateWithData(
-                privData as CFDataRef,
+                cfPrivData,
                 attrs,
-                error.ptr.reinterpret()
+                error.ptr
             )
+            CFRelease(cfPrivData)
 
             if (privateKey == null) {
                 throw BikeWireException.Io("SecKeyCreateWithData falló al cargar clave privada")
             }
 
             val payloadBytes = bikeId.encodeToByteArray()
-            val payloadData = payloadBytes.usePinned { pinned ->
-                NSData.dataWithBytes(pinned.addressOf(0), payloadBytes.size.toULong())
-            }
+            val cfPayload = CFDataCreate(null, payloadBytes.usePinned { it.addressOf(0).reinterpret() }, payloadBytes.size.toLong())
 
             val sigData = SecKeyCreateSignature(
                 privateKey,
                 kSecKeyAlgorithmRSASignatureDigestPKCS1v15Raw,
-                payloadData as CFDataRef,
-                error.ptr.reinterpret()
+                cfPayload,
+                error.ptr
             )
+            cfPayload?.let { CFRelease(it) }
 
             if (sigData == null) {
                 throw BikeWireException.Io("SecKeyCreateSignature falló")
             }
 
-            val nsSigData = sigData as NSData
+            val nsSigData = CFBridgingRelease(sigData) as NSData
             return nsSigData.base64EncodedStringWithOptions(0u)
         }
     }
@@ -117,17 +118,17 @@ actual class BikeCrypto actual constructor() {
                 null
             )
 
-            val error = alloc<CPointerVar<CFErrorRefVar>>()
-            val privateKey = SecKeyCreateRandomKey(params, error.ptr.reinterpret())
+            val error = alloc<CFErrorRefVar>()
+            val privateKey = SecKeyCreateRandomKey(params, error.ptr)
                 ?: throw BikeWireException.Io("No se pudo crear par RSA-1024 en iOS")
 
             val publicKey = SecKeyCopyPublicKey(privateKey)
                 ?: throw BikeWireException.Io("No se pudo extraer clave pública en iOS")
 
-            val privPKCS1 = SecKeyCopyExternalRepresentation(privateKey, error.ptr.reinterpret()) as? NSData
+            val privPKCS1 = CFBridgingRelease(SecKeyCopyExternalRepresentation(privateKey, error.ptr)) as? NSData
                 ?: throw BikeWireException.Io("No se pudo exportar clave privada")
 
-            val pubPKCS1 = SecKeyCopyExternalRepresentation(publicKey, error.ptr.reinterpret()) as? NSData
+            val pubPKCS1 = CFBridgingRelease(SecKeyCopyExternalRepresentation(publicKey, error.ptr)) as? NSData
                 ?: throw BikeWireException.Io("No se pudo exportar clave pública")
 
             val pkcs1Bytes = ByteArray(pubPKCS1.length.toInt())
