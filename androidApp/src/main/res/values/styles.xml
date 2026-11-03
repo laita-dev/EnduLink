@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.EnduLink" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#14171C</item>
+        <item name="android:navigationBarColor">#14171C</item>
+        <item name="android:windowBackground">#14171C</item>
+    </style>
+</resources>
+
