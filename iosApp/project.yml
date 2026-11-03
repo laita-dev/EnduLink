@@ -1,0 +1,45 @@
+name: EnduLink
+options:
+  bundleIdPrefix: com.oscar
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  EnduLink:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: iosApp
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.oscar.endulink
+        PRODUCT_NAME: EnduLink
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: iosApp/Info.plist
+        ENABLE_BITCODE: NO
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(SRCROOT)/../shared/build/XCFrameworks/release"
+    dependencies:
+      - framework: ../shared/build/XCFrameworks/release/SharedApp.xcframework
+        embed: true
+      - sdk: CoreLocation.framework
+      - sdk: VideoToolbox.framework
+      - sdk: AVFoundation.framework
+      - sdk: Security.framework
+      - sdk: UIKit.framework
+      - sdk: SwiftUI.framework
+
