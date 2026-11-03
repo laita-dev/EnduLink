@@ -1,5 +1,8 @@
 package com.oscar.endulink.tiles
 
+import com.oscar.endulink.platform.SynchronizedLock
+import com.oscar.endulink.platform.withLock
+import kotlin.concurrent.Volatile
 import com.oscar.endulink.trail.GPXRoute
 import io.ktor.client.*
 import io.ktor.client.request.*
@@ -56,7 +59,7 @@ class TileStore(
 ) {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val inFlight = mutableSetOf<TileCoord>()
-    private val inFlightLock = Any()
+    private val inFlightLock = SynchronizedLock()
 
     @Volatile
     private var isCancelled = false
@@ -64,7 +67,7 @@ class TileStore(
     var onTileLoaded: (() -> Unit)? = null
 
     // Caché LRU de Bitmaps ya decodificados para render instantáneo en 60 FPS (1024 teselas = cubre varios niveles de zoom sin parpadeos)
-    private val bitmapCacheLock = Any()
+    private val bitmapCacheLock = SynchronizedLock()
     private val maxBitmapCache = 1024
     private val bitmapCache = object : LinkedHashMap<TileCoord, androidx.compose.ui.graphics.ImageBitmap>(maxBitmapCache, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<TileCoord, androidx.compose.ui.graphics.ImageBitmap>?): Boolean {
@@ -73,13 +76,15 @@ class TileStore(
     }
 
     // Caché LRU en memoria de bytes (512 teselas)
-    private val memoryCacheLock = Any()
+    private val memoryCacheLock = SynchronizedLock()
     private val maxMemoryTiles = 512
     private val memoryCache = object : LinkedHashMap<TileCoord, ByteArray>(maxMemoryTiles, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<TileCoord, ByteArray>?): Boolean {
             return size > maxMemoryTiles
         }
     }
+
+    private val progressLock = SynchronizedLock()
 
     // Registro persistente de paquetes y zonas descargadas
     private val _downloadedPackages = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
@@ -129,7 +134,7 @@ class TileStore(
 
     /** Devuelve el bitmap solo si ya está decodificado en RAM (cero E/S). */
     fun peekBitmap(coord: TileCoord): androidx.compose.ui.graphics.ImageBitmap? =
-        synchronized(bitmapCacheLock) { bitmapCache[coord] }
+        bitmapCacheLock.withLock { bitmapCache[coord] }
 
     /**
      * Versión no bloqueante para el render a 60 FPS: si el bitmap no está en RAM,
@@ -139,7 +144,7 @@ class TileStore(
     fun requestBitmap(coord: TileCoord, allowNetwork: Boolean = true): androidx.compose.ui.graphics.ImageBitmap? {
         peekBitmap(coord)?.let { return it }
         val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
-        val canStart = synchronized(inFlightLock) {
+        val canStart = inFlightLock.withLock {
             val lastFail = failedAt[coord]
             if (lastFail != null && now - lastFail < 3_000L) false else bitmapLoading.add(coord)
         }
@@ -148,23 +153,23 @@ class TileStore(
         scope.launch(Dispatchers.Default) {
             var ok = false
             try {
-                var bytes: ByteArray? = synchronized(memoryCacheLock) { memoryCache[coord] }
+                var bytes: ByteArray? = memoryCacheLock.withLock { memoryCache[coord] }
                     ?: TileDiskStorage.readBytes(diskPath(coord))?.takeIf { it.size > 100 }
                 if (bytes == null && allowNetwork) {
                     bytes = networkSemaphore.withPermit { downloadTileBytes(coord) }
                 }
                 if (bytes != null) {
-                    synchronized(memoryCacheLock) { memoryCache[coord] = bytes }
+                    memoryCacheLock.withLock { memoryCache[coord] = bytes }
                     val bmp = decodeByteArrayToBitmap(bytes)
                     if (bmp != null) {
-                        synchronized(bitmapCacheLock) { bitmapCache[coord] = bmp }
+                        bitmapCacheLock.withLock { bitmapCache[coord] = bmp }
                         ok = true
                         onTileLoaded?.invoke()
                     }
                 }
             } catch (_: Exception) {
             } finally {
-                synchronized(inFlightLock) {
+                inFlightLock.withLock {
                     bitmapLoading.remove(coord)
                     if (ok) failedAt.remove(coord) else if (allowNetwork) failedAt[coord] = now
                 }
@@ -196,7 +201,7 @@ class TileStore(
      * Obtiene el ImageBitmap decodificado para Compose DrawScope.
      */
     fun getTileBitmap(coord: TileCoord, allowAsyncFetch: Boolean = true): androidx.compose.ui.graphics.ImageBitmap? {
-        synchronized(bitmapCacheLock) {
+        bitmapCacheLock.withLock {
             val inCache = bitmapCache[coord]
             if (inCache != null) return inCache
         }
@@ -204,7 +209,7 @@ class TileStore(
         val bytes = getTileBytes(coord, allowAsyncFetch) ?: return null
         val decoded = decodeByteArrayToBitmap(bytes) ?: return null
 
-        synchronized(bitmapCacheLock) {
+        bitmapCacheLock.withLock {
             bitmapCache[coord] = decoded
         }
         return decoded
@@ -216,7 +221,7 @@ class TileStore(
      */
     fun getTileBytes(coord: TileCoord, allowAsyncFetch: Boolean = true): ByteArray? {
         // 1. RAM
-        synchronized(memoryCacheLock) {
+        memoryCacheLock.withLock {
             val inRam = memoryCache[coord]
             if (inRam != null) return inRam
         }
@@ -225,7 +230,7 @@ class TileStore(
         val path = diskPath(coord)
         val fromDisk = TileDiskStorage.readBytes(path)
         if (fromDisk != null && fromDisk.size > 100) {
-            synchronized(memoryCacheLock) {
+            memoryCacheLock.withLock {
                 memoryCache[coord] = fromDisk
             }
             return fromDisk
@@ -259,7 +264,7 @@ class TileStore(
         if (parentBmp == null) {
             parentBmp = decodeByteArrayToBitmap(oz.parentTileBytes)
             if (parentBmp != null) {
-                synchronized(bitmapCacheLock) {
+                bitmapCacheLock.withLock {
                     bitmapCache[parentCoord] = parentBmp
                 }
             }
@@ -283,7 +288,7 @@ class TileStore(
             val parentCoord = TileCoord(coord.layer, pZ, pX, pY)
 
             // Buscar padre en RAM o Disco (sin disparar descarga del padre)
-            val parentBytes = synchronized(memoryCacheLock) { memoryCache[parentCoord] }
+            val parentBytes = memoryCacheLock.withLock { memoryCache[parentCoord] }
                 ?: TileDiskStorage.readBytes(diskPath(parentCoord))
 
             if (parentBytes != null && parentBytes.size > 100) {
@@ -306,10 +311,10 @@ class TileStore(
     }
 
     private fun fetchTileAsync(coord: TileCoord) {
-        val inserted = synchronized(inFlightLock) { inFlight.add(coord) }
+        val inserted = inFlightLock.withLock { inFlight.add(coord) }
         if (!inserted) return
         val url = coord.layer.tileURL(coord.z, coord.x, coord.y) ?: run {
-            synchronized(inFlightLock) { inFlight.remove(coord) }
+            inFlightLock.withLock { inFlight.remove(coord) }
             return
         }
 
@@ -324,7 +329,7 @@ class TileStore(
                 if (response.status == HttpStatusCode.OK) {
                     val bytes = response.readBytes()
                     if (bytes.size > 100) {
-                        synchronized(memoryCacheLock) {
+                        memoryCacheLock.withLock {
                             memoryCache[coord] = bytes
                         }
                         TileDiskStorage.writeBytes(diskPath(coord), bytes)
@@ -333,7 +338,7 @@ class TileStore(
                 }
             } catch (_: Exception) {
             } finally {
-                synchronized(inFlightLock) { inFlight.remove(coord) }
+                inFlightLock.withLock { inFlight.remove(coord) }
             }
         }
     }
@@ -391,7 +396,7 @@ class TileStore(
 
                     val path = diskPath(coord)
                     if (TileDiskStorage.fileExists(path) && TileDiskStorage.fileSize(path) > 120) {
-                        val c = synchronized(this@TileStore) { ++completed }
+                        val c = progressLock.withLock { ++completed }
                         if (c % 20 == 0 || c == total) {
                             onProgress(OfflineDownloadProgress(isDownloading = true, label = label, completed = c, total = total, failed = failed))
                         }
@@ -399,7 +404,7 @@ class TileStore(
                     }
 
                     val url = coord.layer.tileURL(coord.z, coord.x, coord.y) ?: run {
-                        synchronized(this@TileStore) { ++failed }
+                        progressLock.withLock { ++failed }
                         return@launch
                     }
 
@@ -427,7 +432,7 @@ class TileStore(
                             }
                         }
 
-                        val (c, f) = synchronized(this@TileStore) {
+                        val (c, f) = progressLock.withLock {
                             if (success) completed++ else failed++
                             Pair(completed, failed)
                         }
@@ -447,8 +452,8 @@ class TileStore(
     }
 
     fun clearDiskCache() {
-        synchronized(memoryCacheLock) { memoryCache.clear() }
-        synchronized(bitmapCacheLock) { bitmapCache.clear() }
+        memoryCacheLock.withLock { memoryCache.clear() }
+        bitmapCacheLock.withLock { bitmapCache.clear() }
         _downloadedPackages.value = emptySet()
         TileDiskStorage.deleteDirectory(PlatformPaths.getTileCacheDir())
     }

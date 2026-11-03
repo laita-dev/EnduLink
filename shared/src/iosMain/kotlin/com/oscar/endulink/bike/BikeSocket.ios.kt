@@ -4,6 +4,11 @@ import kotlinx.cinterop.*
 import platform.posix.*
 import platform.darwin.*
 
+private fun htons(value: UShort): UShort {
+    val v = value.toInt()
+    return (((v and 0xFF) shl 8) or ((v ushr 8) and 0xFF)).toUShort()
+}
+
 @OptIn(ExperimentalForeignApi::class)
 class IosBikeSocket(
     private var fd: Int,
@@ -124,9 +129,12 @@ class IosBikeServerSocket(private var serverFd: Int) : BikeServerSocket {
 
             IosBikeSocket.disableSigPipe(clientFd)
 
-            val ipBuf = allocArray<ByteVar>(INET_ADDRSTRLEN)
-            inet_ntop(AF_INET, clientAddr.sin_addr.ptr, ipBuf, INET_ADDRSTRLEN.toUInt())
-            val remoteIp = ipBuf.toKString()
+            val ipInt = clientAddr.sin_addr.s_addr
+            val b1 = (ipInt and 0xFFu).toUInt()
+            val b2 = ((ipInt shr 8) and 0xFFu).toUInt()
+            val b3 = ((ipInt shr 16) and 0xFFu).toUInt()
+            val b4 = ((ipInt shr 24) and 0xFFu).toUInt()
+            val remoteIp = "$b1.$b2.$b3.$b4"
 
             return IosBikeSocket(clientFd, remoteIP = remoteIp)
         }

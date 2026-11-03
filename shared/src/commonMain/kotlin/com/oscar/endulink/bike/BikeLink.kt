@@ -1,5 +1,9 @@
 package com.oscar.endulink.bike
 
+import com.oscar.endulink.platform.SynchronizedLock
+import com.oscar.endulink.platform.platformSleep
+import com.oscar.endulink.platform.withLock
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.*
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
@@ -54,9 +58,13 @@ class BikeLink(
 
     @Volatile
     private var isClosed = false
+    private val doorsLock = SynchronizedLock()
     private val doors = mutableListOf<BikeServerSocket>()
+    private val socketsLock = SynchronizedLock()
     private val openSockets = mutableListOf<BikeSocket>()
+    private val saidOnceLock = SynchronizedLock()
     private val saidOnce = mutableSetOf<String>()
+    private val refusedLock = SynchronizedLock()
     private val refusedIPs = mutableSetOf<String>()
 
     @Volatile
@@ -82,7 +90,7 @@ class BikeLink(
         private set
 
     private val toAsk = ArrayDeque<PxcMessage>()
-    private val askLock = Any()
+    private val askLock = SynchronizedLock()
 
     companion object {
         private const val FRAME_WAIT_MS = 40
@@ -142,15 +150,15 @@ class BikeLink(
         if (isClosed) return
         isClosed = true
 
-        val allDoors: List<BikeServerSocket>
-        val allSockets: List<BikeSocket>
-        synchronized(doors) {
-            allDoors = doors.toList()
+        val allDoors = doorsLock.withLock {
+            val list = doors.toList()
             doors.clear()
+            list
         }
-        synchronized(openSockets) {
-            allSockets = openSockets.toList()
+        val allSockets = socketsLock.withLock {
+            val list = openSockets.toList()
             openSockets.clear()
+            list
         }
 
         allDoors.forEach { it.close() }
@@ -162,7 +170,7 @@ class BikeLink(
 
     private fun listen(name: String, port: Int, serve: (BikeSocket) -> Unit) {
         val server = BikeSocketFactory.createServer(port, backlog = 50)
-        synchronized(doors) { doors.add(server) }
+        doorsLock.withLock { doors.add(server) }
 
         scope.launch(Dispatchers.Default) {
             while (!isClosed) {
@@ -174,10 +182,9 @@ class BikeLink(
 
                 val remote = client.remoteIP ?: ""
                 if (remote.isNotEmpty() && !allow(remote, client.localIP)) {
-                    synchronized(refusedIPs) {
-                        if (refusedIPs.add(remote)) {
-                            events.log("Conexión rechazada de $remote")
-                        }
+                    val isNew = refusedLock.withLock { refusedIPs.add(remote) }
+                    if (isNew) {
+                        events.log("Conexión rechazada de $remote")
                     }
                     client.close()
                     continue
@@ -185,7 +192,7 @@ class BikeLink(
 
                 var shouldBreak = false
                 var shouldContinue = false
-                synchronized(openSockets) {
+                socketsLock.withLock {
                     if (isClosed) {
                         client.close()
                         shouldBreak = true
@@ -204,7 +211,7 @@ class BikeLink(
                     try {
                         serve(client)
                     } finally {
-                        synchronized(openSockets) { openSockets.remove(client) }
+                        socketsLock.withLock { openSockets.remove(client) }
                         client.close()
                     }
                 }
@@ -282,7 +289,7 @@ class BikeLink(
                     put("errMsg", "Network Not Available")
                     put("id", serial)
                 }
-                synchronized(askLock) {
+                askLock.withLock {
                     toAsk.addLast(PxcMessage(Pxc.serialChecked, verdict.toString().encodeToByteArray()))
                 }
             }
@@ -324,11 +331,11 @@ class BikeLink(
                 once("ok${next.command}") { "La moto acepta comando 0x${next.command.toString(16)}" }
             }
 
-            next = synchronized(askLock) {
+            next = askLock.withLock {
                 if (toAsk.isNotEmpty()) toAsk.removeFirst() else inFront
             }
             // Pequeña pausa entre preguntas
-            Thread.sleep(1000)
+            platformSleep(1000)
         }
     }
 
@@ -556,10 +563,9 @@ class BikeLink(
     }
 
     private fun once(key: String, message: () -> String) {
-        synchronized(saidOnce) {
-            if (saidOnce.add(key)) {
-                events.log(message())
-            }
+        val isNew = saidOnceLock.withLock { saidOnce.add(key) }
+        if (isNew) {
+            events.log(message())
         }
     }
 }

@@ -58,7 +58,7 @@ actual class BikeCrypto actual constructor() {
             )
 
             val error = alloc<CFErrorRefVar>()
-            val cfPrivData: CFDataRef = CFBridgingRetain(privData)?.reinterpret()
+            val cfPrivData = CFBridgingRetain(privData)!!.reinterpret<cnames.structs.__CFData>()
             val privateKey = SecKeyCreateWithData(
                 cfPrivData,
                 attrs,
@@ -71,7 +71,7 @@ actual class BikeCrypto actual constructor() {
             }
 
             val payloadBytes = bikeId.encodeToByteArray()
-            val cfPayload = CFDataCreate(null, payloadBytes.usePinned { it.addressOf(0).reinterpret() }, payloadBytes.size.toLong())
+            val cfPayload = CFDataCreate(null, payloadBytes.usePinned { it.addressOf(0).reinterpret() }, payloadBytes.size.toLong())!!
 
             val sigData = SecKeyCreateSignature(
                 privateKey,
@@ -79,7 +79,7 @@ actual class BikeCrypto actual constructor() {
                 cfPayload,
                 error.ptr
             )
-            cfPayload?.let { CFRelease(it) }
+            CFRelease(cfPayload)
 
             if (sigData == null) {
                 throw BikeWireException.Io("SecKeyCreateSignature falló")

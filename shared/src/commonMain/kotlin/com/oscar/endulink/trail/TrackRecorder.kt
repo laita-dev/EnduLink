@@ -1,5 +1,8 @@
 package com.oscar.endulink.trail
 
+import com.oscar.endulink.platform.SynchronizedLock
+import com.oscar.endulink.platform.withLock
+import kotlin.concurrent.Volatile
 import kotlinx.datetime.Clock
 import kotlin.math.roundToInt
 
@@ -15,7 +18,7 @@ data class RecordedPoint(
 
 class TrackRecorder {
 
-    private val lock = Any()
+    private val lock = SynchronizedLock()
     private val points = mutableListOf<RecordedPoint>()
 
     @Volatile
@@ -33,13 +36,13 @@ class TrackRecorder {
         private set
 
     val recordedPoints: List<RecordedPoint>
-        get() = synchronized(lock) { points.toList() }
+        get() = lock.withLock { points.toList() }
 
     val pointsCount: Int
-        get() = synchronized(lock) { points.size }
+        get() = lock.withLock { points.size }
 
     val elevationGainM: Double
-        get() = synchronized(lock) {
+        get() = lock.withLock {
             var gain = 0.0
             for (i in 1 until points.size) {
                 val prev = points[i - 1].elevation ?: continue
@@ -55,7 +58,7 @@ class TrackRecorder {
         }
 
     fun reset() {
-        synchronized(lock) {
+        lock.withLock {
             points.clear()
             isRecording = false
             isPaused = false
@@ -65,7 +68,7 @@ class TrackRecorder {
     }
 
     fun start() {
-        synchronized(lock) {
+        lock.withLock {
             points.clear()
             isRecording = true
             isPaused = false
@@ -83,10 +86,10 @@ class TrackRecorder {
     }
 
     fun stop(): List<RecordedPoint> {
-        synchronized(lock) {
+        return lock.withLock {
             isRecording = false
             isPaused = false
-            return points.toList()
+            points.toList()
         }
     }
 
@@ -98,13 +101,13 @@ class TrackRecorder {
         val newCoord = GeoCoord(latitude, longitude)
         val now = Clock.System.now().toEpochMilliseconds()
 
-        synchronized(lock) {
+        return lock.withLock {
             if (points.isNotEmpty()) {
                 val last = points.last()
                 val distM = last.coordinate.distanceTo(newCoord)
                 // Filtrar puntos erráticos en parado
                 if (distM < 1.5 && speedKmh < 1.2) {
-                    return false
+                    return@withLock false
                 }
                 totalDistanceKm += (distM / 1000.0)
             }
@@ -117,12 +120,12 @@ class TrackRecorder {
                     timestampEpochMs = now
                 )
             )
-            return true
+            true
         }
     }
 
     fun toGPXString(trackName: String = "Track Grabado EnduLink"): String {
-        val pts = synchronized(lock) { points.toList() }
+        val pts = lock.withLock { points.toList() }
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         sb.append("<gpx version=\"1.1\" creator=\"EnduLink KMP\">\n")

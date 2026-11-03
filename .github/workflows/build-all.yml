@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   build-android:
@@ -40,6 +41,10 @@ jobs:
           path: androidApp/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Cancelar el resto de jobs si falla
+        if: failure()
+        uses: andymckay/cancel-action@0.4
 
   build-ios:
     name: Compilar iOS IPA y Simulador (macOS + Xcode)
@@ -130,6 +135,10 @@ jobs:
           path: EnduLink-appetize-simulator.zip
           if-no-files-found: error
           retention-days: 30
+
+      - name: Cancelar el resto de jobs si falla
+        if: failure()
+        uses: andymckay/cancel-action@0.4
 
   release:
     name: Publicar Release en GitHub (APK + IPA)
