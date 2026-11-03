@@ -31,15 +31,27 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: iosApp/Info.plist
         ENABLE_BITCODE: NO
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
         FRAMEWORK_SEARCH_PATHS:
           - "$(SRCROOT)/../shared/build/XCFrameworks/release"
     dependencies:
       - framework: ../shared/build/XCFrameworks/release/SharedApp.xcframework
-        embed: true
+        embed: false
       - sdk: CoreLocation.framework
       - sdk: VideoToolbox.framework
       - sdk: AVFoundation.framework
       - sdk: Security.framework
       - sdk: UIKit.framework
       - sdk: SwiftUI.framework
+
+schemes:
+  EnduLink:
+    build:
+      targets:
+        EnduLink: all
+    run:
+      config: Release
+    archive:
+      config: Release
 

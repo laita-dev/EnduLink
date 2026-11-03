@@ -86,7 +86,8 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM=""
 
       - name: Empaquetar EnduLink-unsigned.ipa
         run: |
@@ -110,12 +111,14 @@ jobs:
             -scheme EnduLink \
             -configuration Release \
             -sdk iphonesimulator \
+            -destination "generic/platform=iOS Simulator" \
             -derivedDataPath build-sim \
             ARCHS="arm64 x86_64" \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM=""
           cd build-sim/Build/Products/Release-iphonesimulator
           zip -qry "$GITHUB_WORKSPACE/EnduLink-appetize-simulator.zip" EnduLink.app
           ls -lh "$GITHUB_WORKSPACE/EnduLink-appetize-simulator.zip"

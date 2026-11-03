@@ -48,6 +48,7 @@ Payload/
 # Crash logs y depuración
 hs_err_pid*
 replay_pid*
+*.log
 
 # Archivos de Sistema Operativo
 .DS_Store
