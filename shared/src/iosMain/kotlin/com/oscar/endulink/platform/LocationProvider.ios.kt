@@ -1,7 +1,7 @@
 package com.oscar.endulink.platform
 
 import com.oscar.endulink.trail.GeoCoord
-import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -47,7 +47,7 @@ actual class LocationProvider actual constructor() : NSObject(), CLLocationManag
 
     override fun locationManager(manager: CLLocationManager, didUpdateLocations: List<*>) {
         val loc = didUpdateLocations.lastOrNull() as? CLLocation ?: return
-        val coord = GeoCoord(loc.coordinate.useContents { latitude }, loc.coordinate.useContents { longitude })
+        val coord = loc.coordinate.useContents { GeoCoord(latitude, longitude) }
         val speedKmh = (loc.speed * 3.6).let { if (it < 0) 0.0 else (it * 10.0).roundToInt() / 10.0 }
 
         val course = if (loc.course >= 0.0 && speedKmh > 3.0) {

@@ -1,7 +1,9 @@
 package com.oscar.endulink.tiles
 
+import kotlinx.cinterop.ExperimentalForeignApi
 import platform.Foundation.*
 
+@OptIn(ExperimentalForeignApi::class)
 actual object PlatformPaths {
     actual fun getTileCacheDir(): String {
         val paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, true)
