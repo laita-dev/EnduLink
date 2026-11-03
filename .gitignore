@@ -1,0 +1,62 @@
+# Documentación interna de desarrollo
+COMO-FUNCIONA-LA-CONEXION.md
+KMP_MIGRATION_GUIDE.md
+GEMINI.md
+PROJECT_CONTEXT.md
+
+# Almacenamiento local de teselas y caché de mapas
+endulink_tiles/
+*.tile
+*.pbf
+
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Kotlin
+.kotlin/
+
+# Android
+local.properties
+captures/
+*.apk
+*.aab
+.externalNativeBuild/
+.cxx/
+
+# Xcode / iOS
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+*.xcworkspace/*
+!*.xcworkspace/contents.xcworkspacedata
+xcuserdata/
+DerivedData/
+.build/
+*.xcarchive/
+Payload/
+*.ipa
+
+# IDEs (Android Studio, IntelliJ, VS Code)
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+
+# Crash logs y depuración
+hs_err_pid*
+replay_pid*
+
+# Archivos de Sistema Operativo
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Código de referencia MotIOS (mantenido aislado en desarrollo)
+MotIOS/
+salida.h264
+__pycache__/
+*.pyc
+
