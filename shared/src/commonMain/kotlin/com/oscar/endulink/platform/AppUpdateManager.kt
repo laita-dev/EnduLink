@@ -58,6 +58,25 @@ object AppUpdateManager {
                 }
             }
 
+            if (response.status == HttpStatusCode.NotFound) {
+                // Aún no hay ninguna release publicada en el repositorio de GitHub
+                return Result.success(
+                    AppReleaseInfo(
+                        tagName = "v$currentVersion",
+                        versionName = currentVersion,
+                        title = "Versión $currentVersion",
+                        releaseNotes = "Aún no hay ninguna release publicada en GitHub.",
+                        publishedAt = "",
+                        apkDownloadUrl = null,
+                        apkSizeMb = null,
+                        ipaDownloadUrl = null,
+                        ipaSizeMb = null,
+                        htmlUrl = "https://github.com/$owner/$repo/releases",
+                        isNewer = false
+                    )
+                )
+            }
+
             if (response.status != HttpStatusCode.OK) {
                 return Result.failure(Exception("GitHub API respondió con código: ${response.status.value}"))
             }
