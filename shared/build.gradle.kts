@@ -18,11 +18,16 @@ kotlin {
     }
 
     val xcf = XCFramework("SharedApp")
-    listOf(
-        iosArm64(),
-        iosSimulatorArm64(),
-        iosX64()
-    ).forEach { iosTarget ->
+    val iosTargets = if (project.hasProperty("iosArm64Only")) {
+        listOf(iosArm64())
+    } else {
+        listOf(
+            iosArm64(),
+            iosSimulatorArm64(),
+            iosX64()
+        )
+    }
+    iosTargets.forEach { iosTarget ->
         iosTarget.binaries.framework {
             baseName = "SharedApp"
             isStatic = true
