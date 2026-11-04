@@ -186,7 +186,6 @@ fun PlaceSearchSheet(
                     .background(EnduPalette.SurfaceHigh)
                     .border(1.dp, EnduPalette.Accent.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
                     .clickable {
-                        onClose()
                         onPickOnMap()
                     }
                     .padding(horizontal = 14.dp, vertical = 11.dp),

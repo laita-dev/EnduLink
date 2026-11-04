@@ -244,9 +244,9 @@ fun App() {
                     },
                     onOpenWaypoints = { showWaypointsSheet = true },
                     isPickingOnMap = isPickingOnMap,
+                    isSearchingForStop = isSearchingForStop,
                     pickingCoordAddress = pickingAddress,
                     onPickOnMap = {
-                        isSearchingForStop = false
                         isPickingOnMap = true
                     },
                     onConfirmPickOnMap = {
@@ -268,6 +268,7 @@ fun App() {
                     },
                     onCancelPickOnMap = {
                         isPickingOnMap = false
+                        isSearchingForStop = false
                     }
                 )
 

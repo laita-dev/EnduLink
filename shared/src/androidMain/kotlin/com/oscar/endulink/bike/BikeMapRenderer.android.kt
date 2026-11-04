@@ -3,7 +3,9 @@ package com.oscar.endulink.bike
 import android.graphics.*
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import com.oscar.endulink.platform.BatteryStatus
 import com.oscar.endulink.platform.RiderTelemetry
+import com.oscar.endulink.platform.getPlatformBatteryStatus
 import com.oscar.endulink.tiles.MapLayer
 import com.oscar.endulink.tiles.TileCoord
 import com.oscar.endulink.tiles.TileMath
@@ -113,6 +115,39 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         color = android.graphics.Color.WHITE
         style = Paint.Style.FILL
         isAntiAlias = true
+    }
+    private val batteryOutlinePaint = Paint().apply {
+        color = android.graphics.Color.rgb(160, 175, 195)
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        isAntiAlias = true
+    }
+    private val batteryFillPaint = Paint().apply {
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val batteryBoltPaint = Paint().apply {
+        color = android.graphics.Color.rgb(0, 212, 255)
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val batteryTextPaint = Paint().apply {
+        color = android.graphics.Color.WHITE
+        textSize = 15f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        isAntiAlias = true
+    }
+
+    private var lastBatteryCheckMs: Long = 0L
+    private var cachedBatteryStatus: BatteryStatus = BatteryStatus()
+
+    private fun getFreshBatteryStatus(): BatteryStatus {
+        val now = System.currentTimeMillis()
+        if (now - lastBatteryCheckMs > 2000L || cachedBatteryStatus.percentage < 0) {
+            lastBatteryCheckMs = now
+            cachedBatteryStatus = getPlatformBatteryStatus()
+        }
+        return cachedBatteryStatus
     }
 
     actual fun renderRgba(
@@ -370,15 +405,91 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             canvas.drawText(altStr, infoBox.left + 12f, infoBox.bottom - 14f, textPrimaryPaint)
         }
 
-        // 8. HUD de Moto: Próximo giro / Instrucción (Barra superior)
-        if (isNavigating && !nextInstruction.isNullOrBlank()) {
-            val navBox = RectF(14f, 12f, w - 14f, 58f)
-            canvas.drawRoundRect(navBox, 10f, 10f, hudCardPaint)
-            canvas.drawRoundRect(navBox, 10f, 10f, hudBorderPaint)
-            canvas.drawText("↳ $nextInstruction", navBox.left + 14f, navBox.top + 30f, textPrimaryPaint)
+        // 8. HUD de Moto: Batería del móvil en tiempo real (Esquina superior derecha)
+        val battStatus = getFreshBatteryStatus()
+        val pct = if (battStatus.percentage >= 0) battStatus.percentage.coerceIn(0, 100) else 100
+        val isCharging = battStatus.isCharging
+
+        val battBoxWidth = if (isCharging) 108f else 96f
+        val battBox = RectF(w - battBoxWidth - 14f, 12f, w - 14f, 50f)
+        canvas.drawRoundRect(battBox, 10f, 10f, hudCardPaint)
+        canvas.drawRoundRect(battBox, 10f, 10f, hudBorderPaint)
+
+        // Icono de contorno de batería: 22px ancho x 13px alto
+        val iconLeft = battBox.left + 10f
+        val iconTop = battBox.top + 12f
+        val iconRight = iconLeft + 22f
+        val iconBottom = iconTop + 14f
+        val iconBody = RectF(iconLeft, iconTop, iconRight, iconBottom)
+        canvas.drawRoundRect(iconBody, 3f, 3f, batteryOutlinePaint)
+
+        // Terminal positivo de la batería
+        val tipRect = RectF(iconRight + 1f, iconTop + 4f, iconRight + 3.5f, iconBottom - 4f)
+        canvas.drawRoundRect(tipRect, 1f, 1f, batteryOutlinePaint)
+
+        // Nivel de llenado
+        val fillPadding = 2.5f
+        val maxFillWidth = (iconRight - iconLeft) - (fillPadding * 2)
+        val fillWidth = maxFillWidth * (pct / 100f)
+        if (fillWidth > 1f) {
+            val fillRect = RectF(
+                iconLeft + fillPadding,
+                iconTop + fillPadding,
+                iconLeft + fillPadding + fillWidth,
+                iconBottom - fillPadding
+            )
+            batteryFillPaint.color = when {
+                isCharging -> android.graphics.Color.rgb(0, 212, 255) // Cyan en carga
+                pct <= 15 -> android.graphics.Color.rgb(255, 69, 58)  // Rojo alarma (< 15%)
+                pct <= 30 -> android.graphics.Color.rgb(255, 159, 10) // Naranja advertencia (< 30%)
+                else -> android.graphics.Color.rgb(48, 209, 88)       // Verde
+            }
+            canvas.drawRoundRect(fillRect, 2f, 2f, batteryFillPaint)
         }
 
-        // 9. BlackEdges (Márgenes negros de 4px arriba y abajo requeridos por el escalador Carbit EasyConn)
+        // Rayo de carga o texto del porcentaje
+        val pctStr = "$pct%"
+        val textX = if (isCharging) {
+            // Dibujar pequeño rayo vector ⚡
+            val bx = iconRight + 9f
+            val by = battBox.centerY()
+            val boltPath = Path().apply {
+                moveTo(bx + 4f, by - 7f)
+                lineTo(bx - 1f, by + 1f)
+                lineTo(bx + 3f, by + 1f)
+                lineTo(bx - 3f, by + 8f)
+                lineTo(bx + 1f, by + 2f)
+                lineTo(bx - 3f, by + 2f)
+                close()
+            }
+            canvas.drawPath(boltPath, batteryBoltPaint)
+            iconRight + 20f
+        } else {
+            iconRight + 8f
+        }
+        canvas.drawText(pctStr, textX, battBox.bottom - 13f, batteryTextPaint)
+
+        // 9. HUD de Moto: Próximo giro / Instrucción (Barra superior a la izquierda de la batería)
+        if (isNavigating && !nextInstruction.isNullOrBlank()) {
+            val navRight = battBox.left - 10f
+            val navBox = RectF(14f, 12f, navRight, 50f)
+            canvas.drawRoundRect(navBox, 10f, 10f, hudCardPaint)
+            canvas.drawRoundRect(navBox, 10f, 10f, hudBorderPaint)
+
+            val maxTextWidth = navBox.width() - 28f
+            val instruction = nextInstruction
+            var displayInstruction = "↳ $instruction"
+            if (textPrimaryPaint.measureText(displayInstruction) > maxTextWidth) {
+                var trimmed: String = instruction
+                while (trimmed.isNotEmpty() && textPrimaryPaint.measureText("↳ $trimmed…") > maxTextWidth) {
+                    trimmed = trimmed.dropLast(1)
+                }
+                displayInstruction = "↳ $trimmed…"
+            }
+            canvas.drawText(displayInstruction, navBox.left + 14f, navBox.bottom - 13f, textPrimaryPaint)
+        }
+
+        // 10. BlackEdges (Márgenes negros de 4px arriba y abajo requeridos por el escalador Carbit EasyConn)
         canvas.drawRect(0f, 0f, w, 4f, blackEdgePaint)
         canvas.drawRect(0f, h - 4f, w, h, blackEdgePaint)
     }

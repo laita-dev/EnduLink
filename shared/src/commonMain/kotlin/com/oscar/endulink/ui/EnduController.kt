@@ -404,10 +404,13 @@ class EnduController {
         _intermediateWaypoints.value = current
 
         val dest = _searchPin.value
+        val route = selectedRoute
         if (dest != null) {
             calculateRouteToSearchPin(dest)
+        } else if (route != null) {
+            calculateApproachToGPX(toNearestPoint = true, autoStart = false)
         } else {
-            // Si aún no había destino, este primer punto pasa a ser el destino
+            // Si aún no había destino ni track, este primer punto pasa a ser el destino
             selectSearchResult(item)
         }
     }
@@ -418,8 +421,15 @@ class EnduController {
             current.removeAt(index)
             _intermediateWaypoints.value = current
             val dest = _searchPin.value
+            val route = selectedRoute
             if (dest != null) {
                 calculateRouteToSearchPin(dest)
+            } else if (route != null) {
+                if (_intermediateWaypoints.value.isEmpty()) {
+                    _approachRoadRoute.value = null
+                } else {
+                    calculateApproachToGPX(toNearestPoint = true, autoStart = false)
+                }
             }
         }
     }
@@ -528,8 +538,10 @@ class EnduController {
         _isCalculatingApproach.value = true
         scope.launch {
             try {
-                val routes = RoadRouter.calculateRoutes(
+                val waypoints = _intermediateWaypoints.value.map { it.coordinate }
+                val routes = RoadRouter.calculateMultiWaypointRoute(
                     origin = gps,
+                    waypoints = waypoints,
                     destination = targetCoord,
                     destinationName = if (toNearestPoint) "Enlace a ${route.name}" else "Inicio de ${route.name}",
                     requestAlternatives = false,

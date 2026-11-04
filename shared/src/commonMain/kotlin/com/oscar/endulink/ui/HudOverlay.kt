@@ -76,6 +76,7 @@ fun HudOverlay(
     onSaveDroppedPinAsWaypoint: () -> Unit = {},
     onOpenWaypoints: () -> Unit = {},
     isPickingOnMap: Boolean = false,
+    isSearchingForStop: Boolean = false,
     pickingCoordAddress: String? = null,
     onPickOnMap: () -> Unit = {},
     onConfirmPickOnMap: () -> Unit = {},
@@ -328,20 +329,12 @@ fun HudOverlay(
                     )
                     .clickable { onToggleOrientation() }
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = if (followMode == MapFollowMode.FOLLOW_HEADING) "▲" else "N",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Black,
-                        color = if (followMode == MapFollowMode.FOLLOW_HEADING) EnduPalette.Accent else Color(0xFFFF5252)
-                    )
-                    Text(
-                        text = "${heading.roundToInt()}°",
-                        fontSize = 8.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EnduPalette.TextMuted
-                    )
-                }
+                Text(
+                    text = if (followMode == MapFollowMode.FOLLOW_HEADING) "▲" else "N",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                    color = if (followMode == MapFollowMode.FOLLOW_HEADING) EnduPalette.Accent else Color(0xFFFF5252)
+                )
             }
 
             // 2. Zoom + y -
@@ -450,7 +443,7 @@ fun HudOverlay(
                                 maxLines = 1
                             )
                             Text(
-                                text = "Punto fijado en el centro de la pantalla",
+                                text = if (isSearchingForStop) "Parada intermedia fijada en el centro" else "Punto fijado en el centro de la pantalla",
                                 color = EnduPalette.TextMuted,
                                 fontSize = 10.5.sp
                             )
@@ -480,7 +473,12 @@ fun HudOverlay(
                                 .background(EnduPalette.Accent)
                                 .clickable { onConfirmPickOnMap() }
                         ) {
-                            Text(text = "✓ Confirmar este punto", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (isSearchingForStop) "✓ Añadir como parada" else "✓ Confirmar este punto",
+                                color = Color.White,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -787,55 +785,135 @@ fun HudOverlay(
                 }
             }
 
-            // Tarjeta informativa de Track GPX Seleccionado (con botón ✕ para deseleccionar)
+            // Tarjeta informativa de Track GPX Seleccionado (con paradas y botón ✕ para deseleccionar)
             if (selectedRoute != null && searchPin == null) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
                         .background(EnduPalette.Surface.copy(alpha = 0.95f))
                         .padding(horizontal = 12.dp, vertical = 7.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Track: ${selectedRoute.name}",
-                            color = EnduPalette.TextPrimary,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-                        Text(
-                            text = "${(selectedRoute.totalDistanceKm * 10.0).roundToInt() / 10.0} km · +${selectedRoute.elevationGainM.roundToInt()} m",
-                            color = EnduPalette.TextMuted,
-                            fontSize = 10.5.sp
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Track: ${selectedRoute.name}",
+                                color = EnduPalette.TextPrimary,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "${(selectedRoute.totalDistanceKm * 10.0).roundToInt() / 10.0} km · +${selectedRoute.elevationGainM.roundToInt()} m",
+                                color = EnduPalette.TextMuted,
+                                fontSize = 10.5.sp
+                            )
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Botón para añadir parada intermedia hacia el track
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF00D4FF).copy(alpha = 0.18f))
+                                    .border(1.dp, Color(0xFF00D4FF).copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                                    .clickable { onOpenAddStopSearch() }
+                                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = "➕ Parada",
+                                    color = Color(0xFF00D4FF),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            // Botón para deseleccionar track y quitar "Iniciar ruta"
+                            if (!isNavigating) {
+                                Text(
+                                    text = "✕ Quitar",
+                                    color = EnduPalette.Accent,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier
+                                        .clickable { onDeselectRoute() }
+                                        .padding(horizontal = 4.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
                     }
 
-                    // Botón para deseleccionar track y quitar "Iniciar ruta"
-                    if (!isNavigating) {
-                        Text(
-                            text = "✕ Quitar",
-                            color = EnduPalette.Accent,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier
-                                .clickable { onDeselectRoute() }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
+                    // Lista de paradas intermedias hacia el track
+                    if (intermediateWaypoints.isNotEmpty()) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            intermediateWaypoints.forEachIndexed { idx, wpt ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(EnduPalette.SurfaceHigh.copy(alpha = 0.7f))
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(15.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF00D4FF))
+                                    ) {
+                                        Text(
+                                            text = "${idx + 1}",
+                                            color = Color.Black,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = wpt.title,
+                                        color = EnduPalette.TextPrimary,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "✕",
+                                        color = EnduPalette.TextMuted,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier
+                                            .clickable { onRemoveIntermediateWaypoint(idx) }
+                                            .padding(2.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            // Barra inferior compacta
+            // Barra inferior compacta con scroll horizontal para asegurar que ningún botón (incluida la Moto) se corte
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
                     .background(EnduPalette.Surface.copy(alpha = 0.95f))
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // 1. Botón INICIAR RUTA / PARAR
@@ -850,7 +928,7 @@ fun HudOverlay(
                             .clickable {
                                 if (isNavigating) onStopNavigation() else onRequestStartNavigation()
                             }
-                            .padding(horizontal = 12.dp)
+                            .padding(horizontal = 9.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
@@ -861,7 +939,7 @@ fun HudOverlay(
                             Text(
                                 text = if (isNavigating) "Parar" else "Iniciar ruta",
                                 color = Color.White,
-                                fontSize = 12.sp,
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -878,12 +956,12 @@ fun HudOverlay(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(EnduPalette.Accent.copy(alpha = 0.22f))
                                 .clickable { onClearApproach() }
-                                .padding(horizontal = 8.dp)
+                                .padding(horizontal = 7.dp)
                         ) {
                             Text(
                                 text = "✕ Enlace",
                                 color = EnduPalette.Accent,
-                                fontSize = 11.sp,
+                                fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -895,12 +973,12 @@ fun HudOverlay(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(EnduPalette.SurfaceHigh)
                                 .clickable { onRequestApproach() }
-                                .padding(horizontal = 8.dp)
+                                .padding(horizontal = 7.dp)
                         ) {
                             Text(
                                 text = "↗️ Enlace",
                                 color = EnduPalette.TextPrimary,
-                                fontSize = 11.sp,
+                                fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -915,7 +993,7 @@ fun HudOverlay(
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (isRecording) EnduPalette.Danger.copy(alpha = 0.22f) else EnduPalette.SurfaceHigh)
                         .clickable { onToggleRecording() }
-                        .padding(horizontal = 8.dp)
+                        .padding(horizontal = 7.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
@@ -942,7 +1020,7 @@ fun HudOverlay(
                         .clip(RoundedCornerShape(8.dp))
                         .background(EnduPalette.SurfaceHigh)
                         .clickable { onOpenRoutes() }
-                        .padding(horizontal = 8.dp)
+                        .padding(horizontal = 7.dp)
                 ) {
                     Text(
                         text = "Tracks",
@@ -960,7 +1038,7 @@ fun HudOverlay(
                         .clip(RoundedCornerShape(8.dp))
                         .background(EnduPalette.SurfaceHigh)
                         .clickable { onOpenWaypoints() }
-                        .padding(horizontal = 8.dp)
+                        .padding(horizontal = 7.dp)
                 ) {
                     Text(
                         text = "Puntos",
@@ -970,9 +1048,7 @@ fun HudOverlay(
                     )
                 }
 
-                Spacer(modifier = Modifier.weight(1f))
-
-                // 5. Conexión Pantalla Moto
+                // 6. Conexión Pantalla Moto
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
@@ -983,7 +1059,7 @@ fun HudOverlay(
                             else EnduPalette.SurfaceHigh
                         )
                         .clickable { onOpenBikeSheet() }
-                        .padding(horizontal = 9.dp)
+                        .padding(horizontal = 8.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
@@ -1004,7 +1080,7 @@ fun HudOverlay(
                             text = if (bikeState == BikeState.SHOWING) "En moto" else "Moto",
                             color = EnduPalette.TextPrimary,
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
