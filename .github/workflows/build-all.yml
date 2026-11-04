@@ -168,6 +168,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release-artifacts/*
+          generate_release_notes: true
+          body: |
+            ### 🏍️ Novedades de EnduLink
+            - Mejoras de rendimiento en navegación y renderizado de mapas
+            - Estabilidad en la conexión Wi-Fi y transmisión con cuadro TFT
+            - Correcciones menores de interfaz y compatibilidad
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

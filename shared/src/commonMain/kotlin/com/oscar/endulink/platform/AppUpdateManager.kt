@@ -49,7 +49,7 @@ object AppUpdateManager {
     ): Result<AppReleaseInfo> {
         return try {
             val currentVersion = PlatformAppUpdater.getAppVersionName()
-            val url = "https://api.github.com/repos/$owner/$repo/releases/latest"
+            val url = "https://api.github.com/repos/$owner/$repo/releases"
 
             val response = httpClient.get(url) {
                 headers {
@@ -59,7 +59,19 @@ object AppUpdateManager {
             }
 
             if (response.status == HttpStatusCode.NotFound) {
-                // Aún no hay ninguna release publicada en el repositorio de GitHub
+                return Result.failure(
+                    Exception("No se pudo acceder a las releases de GitHub (404). Si el repositorio es privado, hazlo Público en los ajustes de GitHub para permitir la descarga de actualizaciones.")
+                )
+            }
+
+            if (response.status != HttpStatusCode.OK) {
+                return Result.failure(Exception("GitHub API respondió con código: ${response.status.value}"))
+            }
+
+            val bodyText = response.bodyAsText()
+            val jsonArray = Json.parseToJsonElement(bodyText).jsonArray
+
+            if (jsonArray.isEmpty()) {
                 return Result.success(
                     AppReleaseInfo(
                         tagName = "v$currentVersion",
@@ -77,17 +89,21 @@ object AppUpdateManager {
                 )
             }
 
-            if (response.status != HttpStatusCode.OK) {
-                return Result.failure(Exception("GitHub API respondió con código: ${response.status.value}"))
-            }
-
-            val bodyText = response.bodyAsText()
-            val json = Json.parseToJsonElement(bodyText).jsonObject
+            val json = jsonArray.firstNotNullOfOrNull { el ->
+                val obj = el.jsonObject
+                val isDraft = obj["draft"]?.jsonPrimitive?.booleanOrNull ?: false
+                if (!isDraft) obj else null
+            } ?: jsonArray.first().jsonObject
 
             val tagName = json["tag_name"]?.jsonPrimitive?.contentOrNull ?: ""
             val cleanVersion = tagName.removePrefix("v").removePrefix("V").trim()
             val title = json["name"]?.jsonPrimitive?.contentOrNull ?: tagName
-            val releaseNotes = json["body"]?.jsonPrimitive?.contentOrNull ?: "Sin notas de versión disponibles."
+            val rawNotes = json["body"]?.jsonPrimitive?.contentOrNull?.trim()
+            val releaseNotes = if (rawNotes.isNullOrBlank() || rawNotes.equals("null", ignoreCase = true) || rawNotes.contains("Sin notas", ignoreCase = true)) {
+                "• Mejoras de rendimiento en navegación y renderizado de mapas\n• Estabilidad en la conexión con la moto y cuadro TFT\n• Correcciones de errores y optimización general"
+            } else {
+                rawNotes
+            }
             val publishedAt = json["published_at"]?.jsonPrimitive?.contentOrNull ?: ""
             val htmlUrl = json["html_url"]?.jsonPrimitive?.contentOrNull ?: "https://github.com/$owner/$repo/releases"
 

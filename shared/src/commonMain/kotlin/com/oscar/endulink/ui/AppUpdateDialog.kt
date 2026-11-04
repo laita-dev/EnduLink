@@ -116,15 +116,25 @@ fun AppUpdateDialog(
                         }
                     }
 
-                    Text(
-                        text = "✕",
-                        color = EnduPalette.TextMuted,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clickable { onDismiss() }
-                            .padding(4.dp)
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "🔄",
+                            fontSize = 15.sp,
+                            modifier = Modifier
+                                .clickable { checkUpdates() }
+                                .padding(6.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "✕",
+                            color = EnduPalette.TextMuted,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { onDismiss() }
+                                .padding(4.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -156,7 +166,7 @@ fun AppUpdateDialog(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 16.dp),
+                                .padding(vertical = 14.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Box(
@@ -181,6 +191,20 @@ fun AppUpdateDialog(
                                 color = EnduPalette.TextMuted,
                                 fontSize = 12.sp
                             )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = { checkUpdates() },
+                                colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.SurfaceHigh),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.height(40.dp)
+                            ) {
+                                Text(
+                                    text = "🔄 Buscar actualizaciones",
+                                    color = EnduPalette.TextPrimary,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
                     }
 
