@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>es</string>
     <key>CFBundleDisplayName</key>
-    <string>EnduLink</string>
+    <string>motIOS</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -23,11 +23,11 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>EnduLink necesita tu ubicación para situarte en el mapa y calcular el progreso de la ruta.</string>
+    <string>motIOS necesita tu ubicación para situarte en el mapa y calcular el progreso de la ruta.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>EnduLink necesita acceder a tu ubicación continua para seguir transmitiendo la navegación a la pantalla de la moto con el móvil en el bolsillo.</string>
+    <string>motIOS necesita acceder a tu ubicación continua para seguir transmitiendo la navegación a la pantalla de la moto con el móvil en el bolsillo.</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>EnduLink se conecta por Wi-Fi local a la pantalla de tu moto para enviarle el mapa en directo.</string>
+    <string>motIOS se conecta por Wi-Fi local a la pantalla de tu moto para enviarle el mapa en directo.</string>
     <key>UIBackgroundModes</key>
     <array>
         <string>location</string>

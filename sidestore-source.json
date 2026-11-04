@@ -8,14 +8,14 @@
   "website": "https://github.com/laita-dev/EnduLink",
   "apps": [
     {
-      "name": "EnduLink",
+      "name": "motIOS",
       "bundleIdentifier": "com.oscar.endulink",
       "developerName": "Oscar Laita",
       "version": "0.1.0",
       "versionDate": "2026-11-03",
-      "versionDescription": "Versión inicial multiplataforma (iOS & Android) con navegación de tracks GPX, enlace a pantalla TFT de moto por Wi-Fi y mapas offline.",
+      "versionDescription": "Versión oficial motIOS para iPhone con navegación de tracks GPX, enlace a pantalla TFT de moto por Wi-Fi y mapas offline.",
       "downloadURL": "https://github.com/laita-dev/EnduLink/releases/latest/download/EnduLink-unsigned.ipa",
-      "localizedDescription": "App de navegación trail / enduro con visualización de tracks GPX, perfiles de elevación, grabación en vivo y espejo H.264 para cuadros TFT de motocicletas.",
+      "localizedDescription": "App de navegación trail / enduro motIOS con visualización de tracks GPX, perfiles de elevación, grabación en vivo y espejo H.264 para cuadros TFT de motocicletas.",
       "iconURL": "https://raw.githubusercontent.com/laita-dev/EnduLink/main/iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
       "tintColor": "00D4FF",
       "size": 42000000
