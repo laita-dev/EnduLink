@@ -13,4 +13,9 @@ expect class PlatformH264Encoder(
     renderFrameRgba: (width: Int, height: Int) -> ByteArray?,
     onStats: ((EncoderStats) -> Unit)? = null,
     log: (String) -> Unit = {}
-) : BikePicture
+) : BikePicture {
+    override fun start(request: PictureRequest): Boolean
+    override fun fresh()
+    override fun next(waitMs: Int): ByteArray?
+    override fun stop()
+}

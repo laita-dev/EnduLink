@@ -31,7 +31,7 @@ object GPXParser {
         }
 
         // Parseo de trkpt y rtept
-        val ptRegex = Regex("<(trkpt|rtept|wpt)\\s+([^>]+)>(.*?)</\\1>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+        val ptRegex = Regex("(?s)<(trkpt|rtept|wpt)\\s+([^>]+)>(.*?)</\\1>", RegexOption.IGNORE_CASE)
         val latRegex = Regex("lat=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE)
         val lonRegex = Regex("lon=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE)
         val eleRegex = Regex("<ele>([^<]+)</ele>", RegexOption.IGNORE_CASE)

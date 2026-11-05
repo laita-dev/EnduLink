@@ -1,7 +1,8 @@
 package com.oscar.endulink.platform
 
 import platform.UIKit.UIDevice
-import platform.UIKit.UIDeviceBatteryState
+import platform.UIKit.UIDeviceBatteryStateCharging
+import platform.UIKit.UIDeviceBatteryStateFull
 import kotlin.math.roundToInt
 
 actual fun getPlatformBatteryStatus(): BatteryStatus {
@@ -13,10 +14,10 @@ actual fun getPlatformBatteryStatus(): BatteryStatus {
         val level = device.batteryLevel
         val percent = if (level >= 0f) (level * 100f).roundToInt() else -1
         val state = device.batteryState
-        val isCharging = state == UIDeviceBatteryState.UIDeviceBatteryStateCharging ||
-                         state == UIDeviceBatteryState.UIDeviceBatteryStateFull
+        val isCharging = state == UIDeviceBatteryStateCharging ||
+                         state == UIDeviceBatteryStateFull
         BatteryStatus(percentage = percent, isCharging = isCharging)
-    } catch (_: Exception) {
+    } catch (_: Throwable) {
         BatteryStatus(percentage = -1, isCharging = false)
     }
 }

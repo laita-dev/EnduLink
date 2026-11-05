@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -127,7 +128,7 @@ fun SettingsGearIcon(
 
         // 6 dientes engranados limpios
         for (i in 0 until 6) {
-            val angleRad = Math.toRadians((i * 60.0))
+            val angleRad = (i * 60.0) * (PI / 180.0)
             val x1 = (c.x + (innerR + 1.dp.toPx()) * cos(angleRad)).toFloat()
             val y1 = (c.y + (innerR + 1.dp.toPx()) * sin(angleRad)).toFloat()
             val x2 = (c.x + outerR * cos(angleRad)).toFloat()

@@ -30,7 +30,7 @@ actual class PlatformH264Encoder actual constructor(
         private const val FRAME_INTERVAL_MS = 66L // ~15 FPS
     }
 
-    override fun start(request: PictureRequest): Boolean {
+    actual override fun start(request: PictureRequest): Boolean {
         stop()
         val width = request.encodedWidth
         val height = request.encodedHeight
@@ -66,12 +66,12 @@ actual class PlatformH264Encoder actual constructor(
         }
     }
 
-    override fun fresh() {
+    actual override fun fresh() {
         chunkQueue.clear()
         forceKeyFrame()
     }
 
-    override fun next(waitMs: Int): ByteArray? {
+    actual override fun next(waitMs: Int): ByteArray? {
         return try {
             chunkQueue.poll(waitMs.toLong(), TimeUnit.MILLISECONDS)
         } catch (_: InterruptedException) {
@@ -79,7 +79,7 @@ actual class PlatformH264Encoder actual constructor(
         }
     }
 
-    override fun stop() {
+    actual override fun stop() {
         isRunning = false
         encoderJob?.cancel()
         encoderJob = null

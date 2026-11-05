@@ -15,14 +15,14 @@ actual class PlatformH264Encoder actual constructor(
     private val log: (String) -> Unit
 ) : BikePicture {
 
-    override fun start(request: PictureRequest): Boolean {
+    actual override fun start(request: PictureRequest): Boolean {
         log("H264Encoder iOS: Inicializado (modo KMP / nativo Swift)")
         return true
     }
 
-    override fun next(waitMs: Int): ByteArray? = null
+    actual override fun next(waitMs: Int): ByteArray? = null
 
-    override fun fresh() {}
+    actual override fun fresh() {}
 
-    override fun stop() {}
+    actual override fun stop() {}
 }
