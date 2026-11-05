@@ -337,7 +337,7 @@ fun App() {
                 // Búsqueda de Destino o Parada Intermedia
                 if (showSearchSheet) {
                     PlaceSearchSheet(
-                        riderCoord = rider.coordinate,
+                        riderCoord = rider.coordinate ?: center,
                         title = if (isSearchingForStop) "Añadir Parada Intermedia" else "Buscar Destino",
                         hasActiveRoute = (searchPin != null || activeRoute != null),
                         isSearchingForStop = isSearchingForStop,

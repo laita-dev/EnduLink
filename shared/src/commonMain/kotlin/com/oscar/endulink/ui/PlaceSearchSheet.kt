@@ -55,7 +55,7 @@ fun PlaceSearchSheet(
         } catch (_: Exception) {}
     }
 
-    // Búsqueda reactiva con debounce de 300 ms conforme el usuario escribe
+    // Búsqueda reactiva con debounce ágil de 200 ms conforme el usuario escribe
     LaunchedEffect(query) {
         searchJob?.cancel()
         val q = query.trim()
@@ -65,10 +65,10 @@ fun PlaceSearchSheet(
             errorMessage = null
             return@LaunchedEffect
         }
-        isLoading = true
-        errorMessage = null
         searchJob = scope.launch {
-            delay(280) // Debounce
+            delay(200) // Debounce ágil para tecleo fluido
+            isLoading = true
+            errorMessage = null
             val list = PlaceSearchEngine.autocomplete(q, near = riderCoord)
             isLoading = false
             results = list

@@ -17,8 +17,8 @@ android {
         val envVersionName = project.findProperty("appVersionName") as? String
         val envVersionCode = (project.findProperty("appVersionCode") as? String)?.toIntOrNull()
 
-        versionCode = envVersionCode ?: 7
-        versionName = envVersionName ?: "0.1.7"
+        versionCode = envVersionCode ?: 8
+        versionName = envVersionName ?: "0.1.8"
     }
 
     signingConfigs {
