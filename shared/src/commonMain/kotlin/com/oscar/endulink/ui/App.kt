@@ -266,6 +266,19 @@ fun App() {
                         isPickingOnMap = false
                         isSearchingForStop = false
                     },
+                    onConfirmPickAsStop = {
+                        val pos = rider.coordinate
+                        val dist = pos?.let { it.distanceTo(center) / 1000.0 }
+                        val item = SearchResultItem(
+                            title = pickingAddress ?: "Parada en el mapa",
+                            subtitle = PlaceSearchEngine.formatCoord(center),
+                            coordinate = center,
+                            distanceKm = dist
+                        )
+                        controller.addIntermediateWaypoint(item)
+                        isPickingOnMap = false
+                        isSearchingForStop = false
+                    },
                     onCancelPickOnMap = {
                         isPickingOnMap = false
                         isSearchingForStop = false
@@ -326,12 +339,15 @@ fun App() {
                     PlaceSearchSheet(
                         riderCoord = rider.coordinate,
                         title = if (isSearchingForStop) "Añadir Parada Intermedia" else "Buscar Destino",
+                        hasActiveRoute = (searchPin != null || activeRoute != null),
+                        isSearchingForStop = isSearchingForStop,
                         onSelectDestination = { item ->
-                            if (isSearchingForStop) {
-                                controller.addIntermediateWaypoint(item)
-                            } else {
-                                controller.selectSearchResult(item)
-                            }
+                            controller.selectSearchResult(item)
+                            isSearchingForStop = false
+                            showSearchSheet = false
+                        },
+                        onAddIntermediateStop = { item ->
+                            controller.addIntermediateWaypoint(item)
                             isSearchingForStop = false
                             showSearchSheet = false
                         },

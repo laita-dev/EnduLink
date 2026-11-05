@@ -31,7 +31,10 @@ import kotlin.math.roundToInt
 fun PlaceSearchSheet(
     riderCoord: GeoCoord?,
     title: String = "Buscar Destino",
+    hasActiveRoute: Boolean = false,
+    isSearchingForStop: Boolean = false,
     onSelectDestination: (SearchResultItem) -> Unit,
+    onAddIntermediateStop: (SearchResultItem) -> Unit = {},
     onPickOnMap: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
@@ -236,8 +239,13 @@ fun PlaceSearchSheet(
                             .clip(RoundedCornerShape(12.dp))
                             .background(EnduPalette.Surface)
                             .clickable {
-                                onSelectDestination(item)
-                                onClose()
+                                if (isSearchingForStop) {
+                                    onAddIntermediateStop(item)
+                                    onClose()
+                                } else if (!hasActiveRoute) {
+                                    onSelectDestination(item)
+                                    onClose()
+                                }
                             }
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -268,6 +276,50 @@ fun PlaceSearchSheet(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+
+                        // Si ya hay una ruta o track activo y no venimos de pulsar "Añadir parada",
+                        // ofrecemos explícitamente elegir entre parada intermedia o nuevo destino.
+                        if (hasActiveRoute && !isSearchingForStop) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF00D4FF).copy(alpha = 0.2f))
+                                    .border(1.dp, Color(0xFF00D4FF), RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        onAddIntermediateStop(item)
+                                        onClose()
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = "➕ Parada",
+                                    color = Color(0xFF00D4FF),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(EnduPalette.Accent)
+                                    .clickable {
+                                        onSelectDestination(item)
+                                        onClose()
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = "🏁 Destino",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }

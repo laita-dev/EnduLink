@@ -80,6 +80,7 @@ fun HudOverlay(
     pickingCoordAddress: String? = null,
     onPickOnMap: () -> Unit = {},
     onConfirmPickOnMap: () -> Unit = {},
+    onConfirmPickAsStop: () -> Unit = {},
     onCancelPickOnMap: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -460,21 +461,76 @@ fun HudOverlay(
                         ) {
                             Text(text = "Cancelar", color = EnduPalette.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .weight(1.5f)
-                                .height(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(EnduPalette.Accent)
-                                .clickable { onConfirmPickOnMap() }
-                        ) {
-                            Text(
-                                text = if (isSearchingForStop) "✓ Añadir como parada" else "✓ Confirmar este punto",
-                                color = Color.White,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+
+                        val hasActiveRoute = (searchPin != null || selectedRoute != null)
+                        if (isSearchingForStop) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .weight(1.5f)
+                                    .height(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF00D4FF))
+                                    .clickable { onConfirmPickAsStop() }
+                            ) {
+                                Text(
+                                    text = "✓ Añadir como parada",
+                                    color = Color.Black,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else if (hasActiveRoute) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .weight(1.2f)
+                                    .height(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF00D4FF).copy(alpha = 0.22f))
+                                    .border(1.dp, Color(0xFF00D4FF), RoundedCornerShape(8.dp))
+                                    .clickable { onConfirmPickAsStop() }
+                            ) {
+                                Text(
+                                    text = "➕ Parada",
+                                    color = Color(0xFF00D4FF),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .weight(1.2f)
+                                    .height(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(EnduPalette.Accent)
+                                    .clickable { onConfirmPickOnMap() }
+                            ) {
+                                Text(
+                                    text = "🏁 Destino",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .weight(1.5f)
+                                    .height(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(EnduPalette.Accent)
+                                    .clickable { onConfirmPickOnMap() }
+                            ) {
+                                Text(
+                                    text = "✓ Confirmar este punto",
+                                    color = Color.White,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
