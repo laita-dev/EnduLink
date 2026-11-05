@@ -142,8 +142,8 @@ fun HudOverlay(
                                 .clickable { onOpenSearch() },
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(text = "🔍", fontSize = 13.sp)
-                            Spacer(modifier = Modifier.width(6.dp))
+                            SearchLensIcon(color = EnduPalette.TextSecondary, size = 15.dp)
+                            Spacer(modifier = Modifier.width(7.dp))
                             Text(
                                 text = searchPin?.title ?: "Buscar pueblo, dirección...",
                                 color = if (searchPin != null) EnduPalette.TextPrimary else EnduPalette.TextMuted,
@@ -171,7 +171,7 @@ fun HudOverlay(
                                     .background(EnduPalette.SurfaceHigh)
                                     .clickable { onPickOnMap() }
                             ) {
-                                Text(text = "🎯", fontSize = 12.sp)
+                                MapPinTargetIcon(color = EnduPalette.Accent, size = 15.dp)
                             }
                         }
                     }
@@ -185,7 +185,7 @@ fun HudOverlay(
                             .background(EnduPalette.Surface.copy(alpha = 0.94f))
                             .clickable { onOpenLayers() }
                     ) {
-                        Text(text = "🗺️", fontSize = 16.sp)
+                        LayersIcon(color = EnduPalette.TextPrimary, size = 19.dp)
                     }
 
                     // Botón Mapas Offline
@@ -197,7 +197,7 @@ fun HudOverlay(
                             .background(EnduPalette.Surface.copy(alpha = 0.94f))
                             .clickable { onOpenOffline() }
                     ) {
-                        Text(text = "⬇️", fontSize = 16.sp)
+                        DownloadTrayIcon(color = EnduPalette.TextPrimary, size = 19.dp)
                     }
 
                     // Botón Ajustes y Actualizaciones
@@ -209,7 +209,7 @@ fun HudOverlay(
                             .background(EnduPalette.Surface.copy(alpha = 0.94f))
                             .clickable { onOpenSettings() }
                     ) {
-                        Text(text = "⚙️", fontSize = 16.sp)
+                        SettingsGearIcon(color = EnduPalette.TextPrimary, size = 19.dp)
                     }
                 }
             }
@@ -351,7 +351,7 @@ fun HudOverlay(
                         .size(38.dp, 34.dp)
                         .clickable { onZoomIn() }
                 ) {
-                    Text(text = "➕", fontSize = 12.sp, color = EnduPalette.TextPrimary)
+                    ZoomPlusIcon(color = EnduPalette.TextPrimary)
                 }
                 Box(
                     modifier = Modifier
@@ -365,25 +365,21 @@ fun HudOverlay(
                         .size(38.dp, 34.dp)
                         .clickable { onZoomOut() }
                 ) {
-                    Text(text = "➖", fontSize = 12.sp, color = EnduPalette.TextPrimary)
+                    ZoomMinusIcon(color = EnduPalette.TextPrimary)
                 }
             }
 
             // 3. Ver ruta completa en pantalla (solo si hay ruta activa)
             if (roadOptions.isNotEmpty() || selectedRoute != null) {
-                MapCircleButton(
-                    icon = "⤢",
-                    defaultIconColor = EnduPalette.Accent,
-                    onClick = onFitMap
-                )
+                MapCircleButton(onClick = onFitMap) {
+                    FitRouteBoundsIcon(color = EnduPalette.Accent)
+                }
             }
 
             // 5. Marcador rápido
-            MapCircleButton(
-                icon = "📍",
-                defaultIconColor = Color(0xFF00E5FF),
-                onClick = onOpenQuickMarker
-            )
+            MapCircleButton(onClick = onOpenQuickMarker) {
+                QuickPinIcon(color = Color(0xFF00E5FF))
+            }
 
             // 6. Centrar en mi ubicación GPS (con auto-zoom y sin emojis bugueados)
             Box(
@@ -905,150 +901,160 @@ fun HudOverlay(
                 }
             }
 
-            // Barra inferior compacta con scroll horizontal para asegurar que ningún botón (incluida la Moto) se corte
+            // Barra inferior con controles de ruta y botón MOTO anclado a la derecha
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
                     .background(EnduPalette.Surface.copy(alpha = 0.95f))
-                    .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 6.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 1. Botón INICIAR RUTA / PARAR
-                val hasTarget = (roadOptions.isNotEmpty() || (selectedRoute?.isVisible == true))
-                if (isNavigating || hasTarget) {
+                // Zona izquierda desplazable para los controles de ruta y navegación
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 1. Botón INICIAR RUTA / PARAR
+                    val hasTarget = (roadOptions.isNotEmpty() || (selectedRoute?.isVisible == true))
+                    if (isNavigating || hasTarget) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .height(34.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isNavigating) EnduPalette.Danger else EnduPalette.Success)
+                                .clickable {
+                                    if (isNavigating) onStopNavigation() else onRequestStartNavigation()
+                                }
+                                .padding(horizontal = 9.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isNavigating) {
+                                    StopSquareIcon(color = Color.White)
+                                } else {
+                                    NavArrowIcon(color = Color.White)
+                                }
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = if (isNavigating) "Parar" else "Iniciar ruta",
+                                    color = Color.White,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // 2. Enlace a ruta GPX
+                    if (selectedRoute != null && searchPin == null) {
+                        if (approachRoute != null) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .height(34.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(EnduPalette.Accent.copy(alpha = 0.22f))
+                                    .clickable { onClearApproach() }
+                                    .padding(horizontal = 7.dp)
+                            ) {
+                                Text(
+                                    text = "✕ Enlace",
+                                    color = EnduPalette.Accent,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .height(34.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(EnduPalette.SurfaceHigh)
+                                    .clickable { onRequestApproach() }
+                                    .padding(horizontal = 7.dp)
+                            ) {
+                                Text(
+                                    text = "↗️ Enlace",
+                                    color = EnduPalette.TextPrimary,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // 3. REC (Grabación en vivo)
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .height(34.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isNavigating) EnduPalette.Danger else EnduPalette.Success)
-                            .clickable {
-                                if (isNavigating) onStopNavigation() else onRequestStartNavigation()
-                            }
-                            .padding(horizontal = 9.dp)
+                            .background(if (isRecording) EnduPalette.Danger.copy(alpha = 0.22f) else EnduPalette.SurfaceHigh)
+                            .clickable { onToggleRecording() }
+                            .padding(horizontal = 7.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = if (isNavigating) "⏹️" else "🚀",
-                                fontSize = 11.sp
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isRecording) EnduPalette.Danger else EnduPalette.TextMuted)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (isNavigating) "Parar" else "Iniciar ruta",
-                                color = Color.White,
-                                fontSize = 11.5.sp,
+                                text = "REC",
+                                color = if (isRecording) EnduPalette.Danger else EnduPalette.TextPrimary,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
-                }
 
-                // 2. Enlace a ruta GPX
-                if (selectedRoute != null && searchPin == null) {
-                    if (approachRoute != null) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .height(34.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(EnduPalette.Accent.copy(alpha = 0.22f))
-                                .clickable { onClearApproach() }
-                                .padding(horizontal = 7.dp)
-                        ) {
-                            Text(
-                                text = "✕ Enlace",
-                                color = EnduPalette.Accent,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    } else {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .height(34.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(EnduPalette.SurfaceHigh)
-                                .clickable { onRequestApproach() }
-                                .padding(horizontal = 7.dp)
-                        ) {
-                            Text(
-                                text = "↗️ Enlace",
-                                color = EnduPalette.TextPrimary,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-
-                // 3. REC (Grabación en vivo)
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isRecording) EnduPalette.Danger.copy(alpha = 0.22f) else EnduPalette.SurfaceHigh)
-                        .clickable { onToggleRecording() }
-                        .padding(horizontal = 7.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(if (isRecording) EnduPalette.Danger else EnduPalette.TextMuted)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
+                    // 4. Gestor de Tracks GPX
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(EnduPalette.SurfaceHigh)
+                            .clickable { onOpenRoutes() }
+                            .padding(horizontal = 7.dp)
+                    ) {
                         Text(
-                            text = "REC",
-                            color = if (isRecording) EnduPalette.Danger else EnduPalette.TextPrimary,
+                            text = "Tracks",
+                            color = EnduPalette.Accent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // 5. Gestor de Waypoints
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(EnduPalette.SurfaceHigh)
+                            .clickable { onOpenWaypoints() }
+                            .padding(horizontal = 7.dp)
+                    ) {
+                        Text(
+                            text = "Puntos",
+                            color = Color(0xFF00E5FF),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
 
-                // 4. Gestor de Tracks GPX
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(EnduPalette.SurfaceHigh)
-                        .clickable { onOpenRoutes() }
-                        .padding(horizontal = 7.dp)
-                ) {
-                    Text(
-                        text = "Tracks",
-                        color = EnduPalette.Accent,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                Spacer(modifier = Modifier.width(6.dp))
 
-                // 5. Gestor de Waypoints
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(EnduPalette.SurfaceHigh)
-                        .clickable { onOpenWaypoints() }
-                        .padding(horizontal = 7.dp)
-                ) {
-                    Text(
-                        text = "Puntos",
-                        color = Color(0xFF00E5FF),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                // 6. Conexión Pantalla Moto
+                // 6. Conexión Pantalla Moto (Anclado siempre a la derecha)
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
@@ -1062,9 +1068,19 @@ fun HudOverlay(
                         .padding(horizontal = 8.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        MotorcycleSilhouetteIcon(
+                            color = when (bikeState) {
+                                BikeState.SHOWING -> EnduPalette.Success
+                                BikeState.GREETED -> EnduPalette.AccentBlue
+                                BikeState.LISTENING -> EnduPalette.Warning
+                                BikeState.CLOSED -> EnduPalette.TextSecondary
+                            },
+                            size = 15.dp
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
                         Box(
                             modifier = Modifier
-                                .size(7.dp)
+                                .size(5.dp)
                                 .clip(CircleShape)
                                 .background(
                                     when (bikeState) {
@@ -1075,11 +1091,11 @@ fun HudOverlay(
                                     }
                                 )
                         )
-                        Spacer(modifier = Modifier.width(5.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = if (bikeState == BikeState.SHOWING) "En moto" else "Moto",
                             color = EnduPalette.TextPrimary,
-                            fontSize = 11.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -1124,13 +1140,11 @@ private fun TelemetryItem(
 
 @Composable
 private fun MapCircleButton(
-    icon: String,
     isActive: Boolean = false,
     activeBgColor: Color = EnduPalette.Accent,
-    activeIconColor: Color = Color.White,
     defaultBgColor: Color = EnduPalette.Surface.copy(alpha = 0.92f),
-    defaultIconColor: Color = EnduPalette.TextPrimary,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    content: @Composable () -> Unit
 ) {
     Box(
         contentAlignment = Alignment.Center,
@@ -1145,11 +1159,7 @@ private fun MapCircleButton(
             )
             .clickable { onClick() }
     ) {
-        Text(
-            text = icon,
-            fontSize = 15.sp,
-            color = if (isActive) activeIconColor else defaultIconColor
-        )
+        content()
     }
 }
 

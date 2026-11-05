@@ -24,23 +24,27 @@ object AppUpdateManager {
 
     private val httpClient = HttpClient()
 
-    fun isVersionNewer(remote: String, current: String): Boolean {
+    fun compareVersions(v1: String, v2: String): Int {
         fun parseParts(v: String): List<Int> {
             val clean = v.trim().removePrefix("v").removePrefix("V").substringBefore("-").substringBefore("+")
             return clean.split(".").mapNotNull { it.toIntOrNull() }
         }
 
-        val remoteParts = parseParts(remote)
-        val currentParts = parseParts(current)
+        val p1 = parseParts(v1)
+        val p2 = parseParts(v2)
 
-        val maxLen = maxOf(remoteParts.size, currentParts.size)
+        val maxLen = maxOf(p1.size, p2.size)
         for (i in 0 until maxLen) {
-            val r = remoteParts.getOrElse(i) { 0 }
-            val c = currentParts.getOrElse(i) { 0 }
-            if (r > c) return true
-            if (r < c) return false
+            val r1 = p1.getOrElse(i) { 0 }
+            val r2 = p2.getOrElse(i) { 0 }
+            if (r1 > r2) return 1
+            if (r1 < r2) return -1
         }
-        return false
+        return 0
+    }
+
+    fun isVersionNewer(remote: String, current: String): Boolean {
+        return compareVersions(remote, current) > 0
     }
 
     suspend fun checkForUpdate(
@@ -89,10 +93,16 @@ object AppUpdateManager {
                 )
             }
 
-            val json = jsonArray.firstNotNullOfOrNull { el ->
+            val nonDrafts = jsonArray.mapNotNull { el ->
                 val obj = el.jsonObject
                 val isDraft = obj["draft"]?.jsonPrimitive?.booleanOrNull ?: false
                 if (!isDraft) obj else null
+            }
+
+            val json = nonDrafts.maxWithOrNull { a, b ->
+                val tagA = a["tag_name"]?.jsonPrimitive?.contentOrNull ?: ""
+                val tagB = b["tag_name"]?.jsonPrimitive?.contentOrNull ?: ""
+                compareVersions(tagA, tagB)
             } ?: jsonArray.first().jsonObject
 
             val tagName = json["tag_name"]?.jsonPrimitive?.contentOrNull ?: ""

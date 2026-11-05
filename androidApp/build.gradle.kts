@@ -13,8 +13,12 @@ android {
         applicationId = "com.oscar.endulink"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 3
-        versionName = "0.1.3"
+
+        val envVersionName = project.findProperty("appVersionName") as? String
+        val envVersionCode = (project.findProperty("appVersionCode") as? String)?.toIntOrNull()
+
+        versionCode = envVersionCode ?: 5
+        versionName = envVersionName ?: "0.1.5"
     }
 
     signingConfigs {

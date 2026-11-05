@@ -32,7 +32,15 @@ jobs:
       - name: Compilar APK (Release)
         run: |
           chmod +x gradlew
-          ./gradlew :androidApp:assembleRelease --stacktrace
+          GRADLE_ARGS=":androidApp:assembleRelease --stacktrace"
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG_VER="${GITHUB_REF_NAME#v}"
+            IFS='.' read -r major minor patch <<< "$TAG_VER"
+            V_CODE=$(( ${major:-0} * 10000 + ${minor:-0} * 100 + ${patch:-0} ))
+            echo "Sincronizando APK con tag $TAG_VER (code: $V_CODE)"
+            GRADLE_ARGS=":androidApp:assembleRelease -PappVersionName=$TAG_VER -PappVersionCode=$V_CODE --stacktrace"
+          fi
+          ./gradlew $GRADLE_ARGS
 
       - name: Subir artefacto APK (Android)
         uses: actions/upload-artifact@v4
@@ -74,6 +82,13 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :shared:assembleSharedAppReleaseXCFramework -PiosArm64Only=true --stacktrace
+
+      - name: Sincronizar versión con Tag en Info.plist (si aplica)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          echo "Sincronizando iOS Info.plist con tag: $TAG_VER"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $TAG_VER" iosApp/iosApp/Info.plist || true
 
       - name: Generar proyecto Xcode con XcodeGen
         run: |

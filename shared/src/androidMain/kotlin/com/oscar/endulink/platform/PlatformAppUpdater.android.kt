@@ -42,7 +42,10 @@ actual object PlatformAppUpdater {
         try {
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.instanceFollowRedirects = true
+            connection.useCaches = false
             connection.setRequestProperty("User-Agent", "EnduLink-App")
+            connection.setRequestProperty("Cache-Control", "no-cache")
+            connection.setRequestProperty("Pragma", "no-cache")
             connection.connect()
 
             val totalBytes = connection.contentLengthLong
@@ -50,7 +53,13 @@ actual object PlatformAppUpdater {
 
             val updatesDir = File(ctx.cacheDir, "updates")
             if (!updatesDir.exists()) updatesDir.mkdirs()
-            val apkFile = File(updatesDir, "endulink-update.apk")
+            // Limpiar descargas anteriores para evitar residuos
+            try {
+                updatesDir.listFiles()?.forEach { it.delete() }
+            } catch (_: Exception) {}
+
+            // Nombre único para que el instalador de paquetes de Android no reutilice metadatos en caché
+            val apkFile = File(updatesDir, "endulink-update-${System.currentTimeMillis()}.apk")
             if (apkFile.exists()) apkFile.delete()
 
             val output = FileOutputStream(apkFile)
