@@ -2,5 +2,6 @@
 <paths>
     <cache-path name="updates" path="updates/" />
     <external-cache-path name="ext_updates" path="updates/" />
+    <cache-path name="shared_gpx" path="shared_gpx/" />
 </paths>
 

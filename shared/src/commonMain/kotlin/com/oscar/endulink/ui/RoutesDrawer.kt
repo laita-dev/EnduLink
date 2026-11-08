@@ -27,6 +27,8 @@ fun RoutesDrawer(
     onInvertRoute: (GPXRoute) -> Unit,
     onCycleColor: (GPXRoute) -> Unit,
     onOpenElevation: (GPXRoute) -> Unit = {},
+    onDownloadCorridor: (GPXRoute) -> Unit = {},
+    onShareRoute: (GPXRoute) -> Unit = {},
     onDeleteRoute: (GPXRoute) -> Unit = {},
     onImportGPX: () -> Unit,
     onLoadSample: () -> Unit,
@@ -109,6 +111,8 @@ fun RoutesDrawer(
                             onInvert = { onInvertRoute(route) },
                             onCycleColor = { onCycleColor(route) },
                             onOpenElevation = { onOpenElevation(route) },
+                            onDownloadCorridor = { onDownloadCorridor(route) },
+                            onShare = { onShareRoute(route) },
                             onDelete = { onDeleteRoute(route) }
                         )
                     }
@@ -127,6 +131,8 @@ private fun RouteItemRow(
     onInvert: () -> Unit,
     onCycleColor: () -> Unit,
     onOpenElevation: () -> Unit,
+    onDownloadCorridor: () -> Unit,
+    onShare: () -> Unit,
     onDelete: () -> Unit
 ) {
     Row(
@@ -166,7 +172,19 @@ private fun RouteItemRow(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Descargar corredor de mapa offline alrededor del track
+            Text(
+                text = "⬇️",
+                fontSize = 14.sp,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onDownloadCorridor() }.padding(4.dp)
+            )
+            // Compartir / Exportar .GPX
+            Text(
+                text = "📤",
+                fontSize = 14.sp,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onShare() }.padding(4.dp)
+            )
             // Perfil de altitud
             Text(
                 text = "📈",

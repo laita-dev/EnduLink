@@ -35,6 +35,7 @@ fun HudOverlay(
     followMode: MapFollowMode,
     isNavigating: Boolean,
     isRecording: Boolean,
+    recordingStats: Triple<Double, Double, Long> = Triple(0.0, 0.0, 0L),
     heading: Double,
     searchPin: SearchResultItem?,
     droppedPin: SearchResultItem?,
@@ -76,6 +77,7 @@ fun HudOverlay(
     onSaveDroppedPinAsWaypoint: () -> Unit = {},
     onOpenWaypoints: () -> Unit = {},
     onOpenElevation: () -> Unit = {},
+    onShareSelectedRoute: () -> Unit = {},
     isPickingOnMap: Boolean = false,
     isSearchingForStop: Boolean = false,
     pickingCoordAddress: String? = null,
@@ -275,6 +277,54 @@ fun HudOverlay(
                             maxLines = 1
                         )
                     }
+                }
+            }
+
+            // Banner en vivo durante Grabación REC
+            if (isRecording) {
+                val recKm = (recordingStats.first * 100.0).roundToInt() / 100.0
+                val recElev = recordingStats.second.roundToInt()
+                val totalSec = recordingStats.third
+                val hrs = totalSec / 3600
+                val mins = (totalSec % 3600) / 60
+                val secs = totalSec % 60
+                val timeStr = if (hrs > 0) {
+                    "${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}"
+                } else {
+                    "${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}"
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF2B1216).copy(alpha = 0.94f))
+                        .border(1.dp, EnduPalette.Danger.copy(alpha = 0.65f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(EnduPalette.Danger)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "REC EN VIVO",
+                            color = EnduPalette.Danger,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                    Text(
+                        text = "$recKm km · +$recElev m · $timeStr",
+                        color = EnduPalette.TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
@@ -871,6 +921,24 @@ fun HudOverlay(
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Botón para compartir / exportar el archivo .GPX
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(EnduPalette.SurfaceHigh)
+                                    .clickable { onShareSelectedRoute() }
+                                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = "📤",
+                                    color = EnduPalette.TextPrimary,
+                                    fontSize = 11.sp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(5.dp))
+
                             // Botón para ver el perfil de altitud del track GPX
                             Box(
                                 contentAlignment = Alignment.Center,

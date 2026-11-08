@@ -5,8 +5,11 @@ import com.oscar.endulink.platform.RiderTelemetry
 import com.oscar.endulink.tiles.MapLayer
 import com.oscar.endulink.tiles.TileStore
 import com.oscar.endulink.trail.GPXRoute
+import com.oscar.endulink.trail.GPXWaypoint
 import com.oscar.endulink.trail.GeoCoord
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class BikeMapConfig(
     val zoom: Int = 15,
     val orientation: String = "heading", // "heading" or "north"
@@ -37,7 +40,9 @@ expect class BikeMapRenderer(tileStore: TileStore) {
         roadRouteCoordinates: List<GeoCoord>?,
         isNavigating: Boolean,
         remainingKm: Double?,
-        nextInstruction: String?
+        nextInstruction: String?,
+        waypoints: List<GPXWaypoint> = emptyList(),
+        intermediateStops: List<GeoCoord> = emptyList()
     ): ByteArray?
 
     fun renderPreview(
@@ -50,6 +55,8 @@ expect class BikeMapRenderer(tileStore: TileStore) {
         roadRouteCoordinates: List<GeoCoord>?,
         isNavigating: Boolean,
         remainingKm: Double?,
-        nextInstruction: String?
+        nextInstruction: String?,
+        waypoints: List<GPXWaypoint> = emptyList(),
+        intermediateStops: List<GeoCoord> = emptyList()
     ): ImageBitmap?
 }

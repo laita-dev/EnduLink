@@ -53,6 +53,7 @@ fun App() {
 
     val isRecording by controller.isRecording.collectAsState()
     val recordedCoords by controller.recordedCoords.collectAsState()
+    val recordingStats by controller.recordingStats.collectAsState()
 
     val bikeState by controller.bikeState.collectAsState()
     val bikeLogs by controller.bikeLogs.collectAsState()
@@ -177,6 +178,7 @@ fun App() {
                     followMode = followMode,
                     isNavigating = isNavigating,
                     isRecording = isRecording,
+                    recordingStats = recordingStats,
                     heading = heading,
                     searchPin = searchPin,
                     droppedPin = droppedPin,
@@ -244,6 +246,9 @@ fun App() {
                     },
                     onOpenWaypoints = { showWaypointsSheet = true },
                     onOpenElevation = { showElevationSheet = true },
+                    onShareSelectedRoute = {
+                        activeRoute?.let { controller.shareRoute(it) }
+                    },
                     isPickingOnMap = isPickingOnMap,
                     isSearchingForStop = isSearchingForStop,
                     pickingCoordAddress = pickingAddress,
@@ -421,6 +426,11 @@ fun App() {
                             showRoutesSheet = false
                             showElevationSheet = true
                         },
+                        onDownloadCorridor = { route ->
+                            controller.downloadRouteCorridor(route)
+                            showRoutesSheet = false
+                        },
+                        onShareRoute = { controller.shareRoute(it) },
                         onDeleteRoute = { controller.deleteRoute(it) },
                         onImportGPX = {
                             pickGPX()

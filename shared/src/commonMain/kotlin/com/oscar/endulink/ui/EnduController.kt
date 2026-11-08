@@ -138,6 +138,9 @@ class EnduController {
     private val _recordedCoords = MutableStateFlow<List<GeoCoord>>(emptyList())
     val recordedCoords: StateFlow<List<GeoCoord>> = _recordedCoords.asStateFlow()
 
+    private val _recordingStats = MutableStateFlow(Triple(0.0, 0.0, 0L))
+    val recordingStats: StateFlow<Triple<Double, Double, Long>> = _recordingStats.asStateFlow()
+
     // Conexión Pantalla Moto (EasyConn / Carbit)
     private val bikeCrypto = BikeCrypto()
     private val _bikeState = MutableStateFlow(BikeState.CLOSED)
@@ -182,18 +185,29 @@ class EnduController {
     val destination: StateFlow<SearchResultItem?> get() = _searchPin
 
     init {
-        // Cargar waypoints persistidos en almacenamiento local
+        // Cargar ajustes, waypoints y tracks GPX persistidos en almacenamiento local
+        val savedSettings = SettingsStore.loadSettings()
+        _selectedLayer.value = MapLayer.fromRaw(savedSettings.selectedLayerRaw)
+        _bikeMapConfig.value = savedSettings.bikeMapConfig
         _quickMarkers.value = WaypointStore.loadWaypoints()
+        _routes.value = RouteStore.loadRoutes()
 
         tileStore.onTileLoaded = {
             _tileRevision.value++
         }
 
-        // Monitor periódico de la red Wi-Fi de la pantalla
+        // Monitor periódico de la red Wi-Fi de la pantalla y cronómetro REC en vivo
         scope.launch {
+            var tick = 0
             while (isActive) {
-                _wifiSnapshot.value = getWifiSnapshot()
-                delay(2000)
+                if (tick % 2 == 0) {
+                    _wifiSnapshot.value = getWifiSnapshot()
+                }
+                if (_isRecording.value) {
+                    _recordingStats.value = getRecordingStats()
+                }
+                tick++
+                delay(1000)
             }
         }
 
@@ -212,6 +226,7 @@ class EnduController {
                     if (trackRecorder.isRecording) {
                         if (trackRecorder.addPoint(pos.latitude, pos.longitude, telemetry.altitudeM, telemetry.speedKmh)) {
                             _recordedCoords.value = trackRecorder.recordedPoints.map { it.coordinate }
+                            _recordingStats.value = getRecordingStats()
                         }
                     }
 
@@ -351,6 +366,7 @@ class EnduController {
 
     fun setLayer(layer: MapLayer) {
         _selectedLayer.value = layer
+        SettingsStore.saveSettings(layer, _bikeMapConfig.value)
     }
 
     fun toggleCrowFlies() {
@@ -628,6 +644,11 @@ class EnduController {
         val current = _routes.value.toMutableList()
         current.add(route)
         _routes.value = current
+        RouteStore.saveRoutes(current)
+    }
+
+    fun shareRoute(route: GPXRoute) {
+        shareGPXFile(route.name, route.toGPXXml())
     }
 
     fun addAndActivateRoute(route: GPXRoute) {
@@ -686,6 +707,7 @@ class EnduController {
         _routes.value = _routes.value.map {
             if (it.id == route.id) updated else it
         }
+        RouteStore.saveRoutes(_routes.value)
         if (_selectedRouteId.value == route.id) {
             _activeRouteFlow.value = updated
             if (!updated.isVisible && _isNavigating.value && destinationRoadRoute == null && _approachRoadRoute.value == null) {
@@ -699,6 +721,7 @@ class EnduController {
         _routes.value = _routes.value.map {
             if (it.id == route.id) inverted else it
         }
+        RouteStore.saveRoutes(_routes.value)
         if (_selectedRouteId.value == route.id) {
             _activeRouteFlow.value = inverted
             _trackProgress.value = null
@@ -711,6 +734,7 @@ class EnduController {
         _routes.value = _routes.value.map {
             if (it.id == route.id) updated else it
         }
+        RouteStore.saveRoutes(_routes.value)
         if (_selectedRouteId.value == route.id) {
             _activeRouteFlow.value = updated
         }
@@ -721,6 +745,7 @@ class EnduController {
             deselectRoute()
         }
         _routes.value = _routes.value.filter { it.id != route.id }
+        RouteStore.saveRoutes(_routes.value)
     }
 
     fun fitActiveContentOnMap() {
@@ -775,6 +800,7 @@ class EnduController {
         trackRecorder.start()
         _isRecording.value = true
         _recordedCoords.value = emptyList()
+        _recordingStats.value = Triple(0.0, 0.0, 0L)
         updateBackgroundKeepAlive()
     }
 
@@ -785,10 +811,18 @@ class EnduController {
     fun saveRecordedTrack(customName: String) {
         val pts = trackRecorder.stop()
         _isRecording.value = false
+        _recordingStats.value = Triple(0.0, 0.0, 0L)
         updateBackgroundKeepAlive()
         if (pts.size >= 2) {
             val gpxText = trackRecorder.toGPXString(customName)
-            loadSampleRoute(customName, gpxText)
+            try {
+                val route = GPXParser.parse(gpxText, fallbackName = "$customName.gpx")
+                addRoute(route)
+                selectRoute(route)
+                _statusBannerMessage.value = "Track guardado: ${route.name} (${(route.totalDistanceKm * 10.0).roundToInt() / 10.0} km)"
+            } catch (_: Exception) {}
+        } else {
+            _statusBannerMessage.value = "Grabación descartada: menos de 2 puntos GPS registrados"
         }
         _recordedCoords.value = emptyList()
     }
@@ -796,6 +830,7 @@ class EnduController {
     fun discardRecordedTrack() {
         trackRecorder.reset()
         _isRecording.value = false
+        _recordingStats.value = Triple(0.0, 0.0, 0L)
         updateBackgroundKeepAlive()
         _recordedCoords.value = emptyList()
     }
@@ -957,6 +992,8 @@ class EnduController {
         val activeRoad = destinationRoadRoute ?: _approachRoadRoute.value
         val remKm = _trackProgress.value?.remainingKm ?: activeRoad?.distanceKm ?: selectedRoute?.totalDistanceKm
         val nextStep = activeRoad?.currentInstruction(riderTelemetry.value.coordinate)
+        val stops = _intermediateWaypoints.value.map { it.coordinate }
+        val wpts = _quickMarkers.value
 
         // Actualizar preview en directo periódicamente (~1.5 veces por segundo)
         if (++previewDecimator % 10 == 0) {
@@ -971,7 +1008,9 @@ class EnduController {
                     roadRouteCoordinates = activeRoad?.coordinates,
                     isNavigating = _isNavigating.value,
                     remainingKm = remKm,
-                    nextInstruction = nextStep
+                    nextInstruction = nextStep,
+                    waypoints = wpts,
+                    intermediateStops = stops
                 )
                 if (preview != null) {
                     _livePreviewBitmap.value = preview
@@ -989,32 +1028,39 @@ class EnduController {
             roadRouteCoordinates = activeRoad?.coordinates,
             isNavigating = _isNavigating.value,
             remainingKm = remKm,
-            nextInstruction = nextStep
+            nextInstruction = nextStep,
+            waypoints = wpts,
+            intermediateStops = stops
         )
     }
 
     fun setBikeZoom(zoom: Int) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(zoom = zoom.coerceIn(8, 18))
+        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
         refreshStaticPreview()
     }
 
     fun setBikeOrientation(orientation: String) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(orientation = orientation)
+        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
         refreshStaticPreview()
     }
 
     fun setBikeTileMagnification(magnification: Double) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(tileMagnification = magnification)
+        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
         refreshStaticPreview()
     }
 
     fun setBikeAutoZoomBySpeed(enabled: Boolean) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(autoZoomBySpeed = enabled)
+        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
         refreshStaticPreview()
     }
 
     fun setBikeBitrate(bitrateKbps: Int) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(bitrateKbps = bitrateKbps)
+        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
     }
 
     fun setAllowLocalLanTesting(allow: Boolean) {
@@ -1026,6 +1072,8 @@ class EnduController {
             val activeRoad = destinationRoadRoute ?: _approachRoadRoute.value
             val remKm = _trackProgress.value?.remainingKm ?: activeRoad?.distanceKm ?: selectedRoute?.totalDistanceKm
             val nextStep = activeRoad?.currentInstruction(riderTelemetry.value.coordinate)
+            val stops = _intermediateWaypoints.value.map { it.coordinate }
+            val wpts = _quickMarkers.value
 
             val preview = bikeMapRenderer.renderPreview(
                 width = 296,
@@ -1037,7 +1085,9 @@ class EnduController {
                 roadRouteCoordinates = activeRoad?.coordinates,
                 isNavigating = _isNavigating.value,
                 remainingKm = remKm,
-                nextInstruction = nextStep
+                nextInstruction = nextStep,
+                waypoints = wpts,
+                intermediateStops = stops
             )
             if (preview != null) {
                 _livePreviewBitmap.value = preview
@@ -1058,6 +1108,21 @@ class EnduController {
             label = "${preset.name} (${layer.shortBadge})",
             packageKey = packageKey,
             onProgress = { _offlineProgress.value = it }
+        )
+    }
+
+    fun downloadRouteCorridor(route: GPXRoute) {
+        val targetLayer = if (_selectedLayer.value == MapLayer.IGN_TOPO) MapLayer.IGN_TOPO else MapLayer.TRAIL_OSM
+        _statusBannerMessage.value = "Descargando mapa offline del track «${route.name}» (${targetLayer.shortBadge})..."
+        tileStore.downloadCorridor(
+            route = route,
+            layer = targetLayer,
+            onProgress = { prog ->
+                _offlineProgress.value = prog
+                if (!prog.isDownloading && prog.total > 0 && prog.completed > 0) {
+                    _statusBannerMessage.value = "Mapa offline del track listo: ${route.name} (${prog.completed} teselas)"
+                }
+            }
         )
     }
 

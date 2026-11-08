@@ -11,6 +11,7 @@ import com.oscar.endulink.tiles.TileCoord
 import com.oscar.endulink.tiles.TileMath
 import com.oscar.endulink.tiles.TileStore
 import com.oscar.endulink.trail.GPXRoute
+import com.oscar.endulink.trail.GPXWaypoint
 import com.oscar.endulink.trail.GeoCoord
 import java.nio.ByteBuffer
 import kotlin.math.floor
@@ -140,6 +141,16 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         isAntiAlias = true
     }
+    private val waypointPinPaint = Paint().apply {
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val waypointLabelPaint = Paint().apply {
+        color = android.graphics.Color.WHITE
+        textSize = 11.5f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        isAntiAlias = true
+    }
 
     private var lastBatteryCheckMs: Long = 0L
     private var cachedBatteryStatus: BatteryStatus = BatteryStatus()
@@ -164,7 +175,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         roadRouteCoordinates: List<GeoCoord>?,
         isNavigating: Boolean,
         remainingKm: Double?,
-        nextInstruction: String?
+        nextInstruction: String?,
+        waypoints: List<GPXWaypoint>,
+        intermediateStops: List<GeoCoord>
     ): ByteArray? {
         val bmp = getOrCreateBitmap(width, height)
         val canvas = cachedCanvas ?: Canvas(bmp).also { cachedCanvas = it }
@@ -181,7 +194,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             roadRouteCoordinates = roadRouteCoordinates,
             isNavigating = isNavigating,
             remainingKm = remainingKm,
-            nextInstruction = nextInstruction
+            nextInstruction = nextInstruction,
+            waypoints = waypoints,
+            intermediateStops = intermediateStops
         )
 
         bmp.copyPixelsToBuffer(ByteBuffer.wrap(buffer))
@@ -199,7 +214,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         roadRouteCoordinates: List<GeoCoord>?,
         isNavigating: Boolean,
         remainingKm: Double?,
-        nextInstruction: String?
+        nextInstruction: String?,
+        waypoints: List<GPXWaypoint>,
+        intermediateStops: List<GeoCoord>
     ): ImageBitmap? {
         val cur = previewBitmap
         val bmp = if (cur != null && cur.width == width && cur.height == height) cur else {
@@ -220,7 +237,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             roadRouteCoordinates = roadRouteCoordinates,
             isNavigating = isNavigating,
             remainingKm = remainingKm,
-            nextInstruction = nextInstruction
+            nextInstruction = nextInstruction,
+            waypoints = waypoints,
+            intermediateStops = intermediateStops
         )
         return bmp.asImageBitmap()
     }
@@ -236,7 +255,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         roadRouteCoordinates: List<GeoCoord>?,
         isNavigating: Boolean,
         remainingKm: Double?,
-        nextInstruction: String?
+        nextInstruction: String?,
+        waypoints: List<GPXWaypoint>,
+        intermediateStops: List<GeoCoord>
     ) {
         val w = width
         val h = height
@@ -368,6 +389,57 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                 path.lineTo(p.first, p.second)
             }
             canvas.drawPath(path, approachPaint)
+        }
+
+        // 4b. Paradas intermedias en el cuadro TFT
+        for (stopCoord in intermediateStops) {
+            val (sx, sy) = geoToLocal(stopCoord)
+            if (sx in -w..w && sy in -h..h) {
+                waypointPinPaint.color = android.graphics.Color.BLACK
+                canvas.drawCircle(sx, sy, 10f, waypointPinPaint)
+                waypointPinPaint.color = android.graphics.Color.rgb(0, 212, 255)
+                canvas.drawCircle(sx, sy, 8f, waypointPinPaint)
+                waypointPinPaint.color = android.graphics.Color.WHITE
+                canvas.drawCircle(sx, sy, 4f, waypointPinPaint)
+            }
+        }
+
+        // 4c. Waypoints y Puntos de Interés (Peligros, Cancelas, Gasolineras, etc.) en el cuadro TFT
+        val allWaypoints = if (activeRoute != null && activeRoute.isVisible) {
+            activeRoute.waypoints + waypoints
+        } else {
+            waypoints
+        }
+        for (wpt in allWaypoints) {
+            val (wx, wy) = geoToLocal(wpt.coordinate)
+            if (wx in -w..w && wy in -h..h) {
+                val sym = wpt.symbol?.lowercase().orEmpty()
+                val pinColor = when {
+                    sym.contains("danger") || sym.contains("hazard") || sym.contains("alert") -> android.graphics.Color.rgb(255, 69, 58)
+                    sym.contains("gate") || sym.contains("obstacle") || sym.contains("rock") -> android.graphics.Color.rgb(255, 159, 10)
+                    sym.contains("water") || sym.contains("fountain") -> android.graphics.Color.rgb(0, 212, 255)
+                    sym.contains("fuel") || sym.contains("gas") -> android.graphics.Color.rgb(48, 209, 88)
+                    else -> android.graphics.Color.rgb(0, 229, 255)
+                }
+                waypointPinPaint.color = android.graphics.Color.BLACK
+                canvas.drawCircle(wx, wy, 9.5f, waypointPinPaint)
+                waypointPinPaint.color = pinColor
+                canvas.drawCircle(wx, wy, 7.5f, waypointPinPaint)
+                waypointPinPaint.color = android.graphics.Color.WHITE
+                canvas.drawCircle(wx, wy, 3f, waypointPinPaint)
+
+                if (wpt.name.isNotBlank()) {
+                    canvas.save()
+                    canvas.translate(wx, wy)
+                    canvas.rotate(heading.toFloat())
+                    val label = if (wpt.name.length > 16) wpt.name.take(15) + "…" else wpt.name
+                    val tw = waypointLabelPaint.measureText(label)
+                    val tagRect = RectF(-tw / 2f - 6f, -26f, tw / 2f + 6f, -11f)
+                    canvas.drawRoundRect(tagRect, 5f, 5f, hudCardPaint)
+                    canvas.drawText(label, -tw / 2f, -15f, waypointLabelPaint)
+                    canvas.restore()
+                }
+            }
         }
 
         canvas.restore()

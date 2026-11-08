@@ -3,6 +3,7 @@ package com.oscar.endulink.trail
 import kotlinx.serialization.Serializable
 import kotlin.math.*
 
+@Serializable
 enum class TrackColor(val id: String, val rgbHex: Long) {
     ORANGE("orange", 0xFFFF600AL),
     RED("red", 0xFFF23842L),
@@ -94,6 +95,42 @@ data class GPXRoute(
             color = color,
             isInverted = !isInverted
         )
+    }
+
+    fun toGPXXml(): String {
+        fun esc(s: String): String = s
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&apos;")
+
+        val sb = StringBuilder()
+        sb.appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
+        sb.appendLine("""<gpx version="1.1" creator="EnduLink" xmlns="http://www.topografix.com/GPX/1/1">""")
+        sb.appendLine("  <metadata><name>${esc(name)}</name></metadata>")
+        for (wpt in waypoints) {
+            sb.append("""  <wpt lat="${wpt.latitude}" lon="${wpt.longitude}">""")
+            wpt.elevation?.let { sb.append("<ele>${(it * 10.0).roundToInt() / 10.0}</ele>") }
+            sb.append("<name>${esc(wpt.name)}</name>")
+            wpt.symbol?.let { sb.append("<sym>${esc(it)}</sym>") }
+            sb.appendLine("</wpt>")
+        }
+        sb.appendLine("  <trk>")
+        sb.appendLine("    <name>${esc(name)}</name>")
+        sb.appendLine("    <trkseg>")
+        for (pt in points) {
+            if (pt.elevation != null) {
+                val ele = (pt.elevation * 10.0).roundToInt() / 10.0
+                sb.appendLine("""      <trkpt lat="${pt.latitude}" lon="${pt.longitude}"><ele>$ele</ele></trkpt>""")
+            } else {
+                sb.appendLine("""      <trkpt lat="${pt.latitude}" lon="${pt.longitude}"/>""")
+            }
+        }
+        sb.appendLine("    </trkseg>")
+        sb.appendLine("  </trk>")
+        sb.appendLine("</gpx>")
+        return sb.toString()
     }
 
     companion object {
