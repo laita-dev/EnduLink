@@ -28,34 +28,48 @@ fun ByteArray.readUInt32LE(offset: Int): UInt {
 
 fun ByteArray.readInt32LE(offset: Int): Int = readUInt32LE(offset).toInt()
 
-fun ByteArrayBuilder(): ByteArrayOutput = ByteArrayOutput()
+fun ByteArrayBuilder(initialCapacity: Int = 64): ByteArrayOutput = ByteArrayOutput(initialCapacity)
 
-class ByteArrayOutput {
-    private val buffer = ArrayList<Byte>()
+class ByteArrayOutput(initialCapacity: Int = 64) {
+    private var buffer = ByteArray(initialCapacity.coerceAtLeast(16))
+    private var size = 0
+
+    private fun ensureCapacity(additional: Int) {
+        val needed = size + additional
+        if (needed <= buffer.size) return
+        var newCap = buffer.size * 2
+        if (newCap < needed) newCap = needed
+        buffer = buffer.copyOf(newCap)
+    }
 
     fun writeUInt16LE(value: UShort) {
+        ensureCapacity(2)
         val v = value.toInt()
-        buffer.add((v and 0xFF).toByte())
-        buffer.add(((v shr 8) and 0xFF).toByte())
+        buffer[size++] = (v and 0xFF).toByte()
+        buffer[size++] = ((v shr 8) and 0xFF).toByte()
     }
 
     fun writeInt16LE(value: Short) = writeUInt16LE(value.toUShort())
 
     fun writeUInt32LE(value: UInt) {
+        ensureCapacity(4)
         val v = value.toLong()
-        buffer.add((v and 0xFF).toByte())
-        buffer.add(((v shr 8) and 0xFF).toByte())
-        buffer.add(((v shr 16) and 0xFF).toByte())
-        buffer.add(((v shr 24) and 0xFF).toByte())
+        buffer[size++] = (v and 0xFF).toByte()
+        buffer[size++] = ((v shr 8) and 0xFF).toByte()
+        buffer[size++] = ((v shr 16) and 0xFF).toByte()
+        buffer[size++] = ((v shr 24) and 0xFF).toByte()
     }
 
     fun writeInt32LE(value: Int) = writeUInt32LE(value.toUInt())
 
     fun writeBytes(bytes: ByteArray) {
-        for (b in bytes) buffer.add(b)
+        if (bytes.isEmpty()) return
+        ensureCapacity(bytes.size)
+        bytes.copyInto(buffer, destinationOffset = size)
+        size += bytes.size
     }
 
-    fun toByteArray(): ByteArray = buffer.toByteArray()
+    fun toByteArray(): ByteArray = buffer.copyOf(size)
 }
 
 // MARK: - Framing Messages
@@ -233,9 +247,9 @@ data class PictureRequest(
             var displayId = 0
             var extended = 0
             if (body.size >= 32) {
-                orientation = body[26].toInt()
-                displayId = body[27].toInt()
-                extended = body[29].toInt()
+                orientation = body[26].toInt() and 0xFF
+                displayId = body[27].toInt() and 0xFF
+                extended = body[29].toInt() and 0xFF
             }
             val signedId = if (body.size > 32) {
                 body.copyOfRange(32, body.size).decodeToString()

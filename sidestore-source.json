@@ -8,14 +8,14 @@
   "website": "https://github.com/laita-dev/EnduLink",
   "apps": [
     {
-      "name": "motIOS",
+      "name": "motIllOS",
       "bundleIdentifier": "com.oscar.endulink",
       "developerName": "Oscar Laita",
-      "version": "0.1.8",
-      "versionDate": "2026-11-05",
-      "versionDescription": "Versión 0.1.8: Motor de búsqueda de calles optimizado con geolocalización de alta precisión en España, eliminación de resultados lejanos y autocompletado en paralelo.",
+      "version": "0.1.9",
+      "versionDate": "2026-11-08",
+      "versionDescription": "Versión 0.1.9: Auditoría integral de código y funcionalidades: instrucciones giro a giro dinámicas en móvil y TFT, transición automática de enlace a track GPX, acceso a perfil de altitud, caché de teselas en renderizador TFT y mejoras de estabilidad.",
       "downloadURL": "https://github.com/laita-dev/EnduLink/releases/latest/download/EnduLink-unsigned.ipa",
-      "localizedDescription": "App de navegación trail / enduro motIOS con visualización de tracks GPX, perfiles de elevación, grabación en vivo y espejo H.264 para cuadros TFT de motocicletas.",
+      "localizedDescription": "App de navegación trail / enduro motIllOS con visualización de tracks GPX, perfiles de elevación, grabación en vivo y espejo H.264 para cuadros TFT de motocicletas.",
       "iconURL": "https://raw.githubusercontent.com/laita-dev/EnduLink/main/iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
       "tintColor": "00D4FF",
       "size": 42000000

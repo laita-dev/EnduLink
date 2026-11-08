@@ -243,6 +243,7 @@ fun App() {
                         }
                     },
                     onOpenWaypoints = { showWaypointsSheet = true },
+                    onOpenElevation = { showElevationSheet = true },
                     isPickingOnMap = isPickingOnMap,
                     isSearchingForStop = isSearchingForStop,
                     pickingCoordAddress = pickingAddress,
@@ -309,17 +310,17 @@ fun App() {
                         onApproachToStart = {
                             pendingApproachRoute = null
                             controller.selectRoute(appRoute)
-                            controller.calculateApproachToGPX(toNearestPoint = false, autoStart = true)
+                            controller.calculateApproachToGPX(target = ApproachTarget.START, autoStart = true)
                         },
                         onApproachToFinish = {
                             pendingApproachRoute = null
                             controller.selectRoute(appRoute)
-                            controller.calculateApproachToGPX(toNearestPoint = true, autoStart = true)
+                            controller.calculateApproachToGPX(target = ApproachTarget.FINISH, autoStart = true)
                         },
                         onApproachToNearest = {
                             pendingApproachRoute = null
                             controller.selectRoute(appRoute)
-                            controller.calculateApproachToGPX(toNearestPoint = true, autoStart = true)
+                            controller.calculateApproachToGPX(target = ApproachTarget.NEAREST, autoStart = true)
                         },
                         onStartWithoutApproach = {
                             pendingApproachRoute = null
@@ -415,6 +416,12 @@ fun App() {
                         onToggleVisibility = { controller.toggleRouteVisibility(it) },
                         onInvertRoute = { controller.invertRoute(it) },
                         onCycleColor = { controller.cycleRouteColor(it) },
+                        onOpenElevation = { route ->
+                            controller.selectRoute(route)
+                            showRoutesSheet = false
+                            showElevationSheet = true
+                        },
+                        onDeleteRoute = { controller.deleteRoute(it) },
                         onImportGPX = {
                             pickGPX()
                         },

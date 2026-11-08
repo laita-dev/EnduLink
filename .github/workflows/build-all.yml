@@ -89,6 +89,7 @@ jobs:
           TAG_VER="${GITHUB_REF_NAME#v}"
           echo "Sincronizando iOS Info.plist con tag: $TAG_VER"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $TAG_VER" iosApp/iosApp/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $TAG_VER" iosApp/iosApp/Info.plist || true
 
       - name: Generar proyecto Xcode con XcodeGen
         run: |

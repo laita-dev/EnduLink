@@ -10,6 +10,13 @@ import kotlinx.serialization.json.*
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+/** Maniobra individual de una ruta por carretera con su coordenada exacta. */
+data class RoadStep(
+    val coordinate: GeoCoord,
+    val instruction: String,
+    val distanceMeters: Double = 0.0
+)
+
 /**
  * Ruta por carretera calculada (equivalente a `CalculatedRoadRoute` de MotIOS).
  * NO se guarda en el gestor de tracks GPX: vive solo mientras el destino / enlace está activo.
@@ -23,8 +30,37 @@ data class CalculatedRoadRoute(
     val expectedMinutes: Int,
     val hasTolls: Boolean,
     val firstInstruction: String?,
+    val steps: List<RoadStep> = emptyList(),
     val asGPXRoute: GPXRoute
-)
+) {
+    /**
+     * Devuelve la instrucción de giro activa o más próxima por delante del piloto,
+     * actualizándose en tiempo real a lo largo de todos los tramos y paradas.
+     */
+    fun currentInstruction(riderCoord: GeoCoord?): String? {
+        if (steps.isEmpty()) return firstInstruction
+        if (riderCoord == null) return firstInstruction ?: steps.firstOrNull()?.instruction
+
+        var bestIdx = 0
+        var bestDist = Double.MAX_VALUE
+        for (i in steps.indices) {
+            val d = riderCoord.distanceTo(steps[i].coordinate)
+            if (d < bestDist) {
+                bestDist = d
+                bestIdx = i
+            }
+        }
+        val targetIdx = if (bestDist < 28.0 && bestIdx + 1 < steps.size) bestIdx + 1 else bestIdx
+        val targetStep = steps[targetIdx]
+        val distToTurn = riderCoord.distanceTo(targetStep.coordinate)
+        val distPrefix = when {
+            distToTurn < 35.0 -> "Ahora: "
+            distToTurn < 1000.0 -> "A ${max(10, (distToTurn / 10.0).roundToInt() * 10)} m · "
+            else -> "A ${(distToTurn / 100.0).roundToInt() / 10.0} km · "
+        }
+        return "$distPrefix${targetStep.instruction}"
+    }
+}
 
 /**
  * Cálculo de rutas por carretera mediante OSRM (equivalente Android/KMP a `MKDirections`).
@@ -101,17 +137,24 @@ object RoadRouter {
             }
             if (coords.size < 2) return@forEachIndexed
 
+            // Combinar todos los tramos (legs) para soportar múltiples paradas intermedias
             val legs = r["legs"]?.jsonArray ?: JsonArray(emptyList())
-            val firstLeg = legs.firstOrNull()?.jsonObject
-            val summary = firstLeg?.get("summary")?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
-            val steps = firstLeg?.get("steps")?.jsonArray ?: JsonArray(emptyList())
+            val summaries = legs.mapNotNull {
+                it.jsonObject["summary"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() }
+            }
+            val summary = summaries.firstOrNull().orEmpty()
+            val allStepElements = legs.flatMap { leg ->
+                leg.jsonObject["steps"]?.jsonArray?.toList().orEmpty()
+            }
 
-            val hasTolls = steps.any { step ->
+            val hasTolls = allStepElements.any { step ->
                 val inters = step.jsonObject["intersections"]?.jsonArray ?: return@any false
                 inters.any { inter ->
                     inter.jsonObject["classes"]?.jsonArray?.any { it.jsonPrimitive.contentOrNull == "toll" } == true
                 }
             }
+
+            val parsedSteps = parseRoadSteps(allStepElements)
 
             val label = when {
                 customSingleLabel != null -> customSingleLabel
@@ -130,7 +173,8 @@ object RoadRouter {
                     distanceKm = distM / 1000.0,
                     expectedMinutes = max(1, (durS / 60.0).roundToInt()),
                     hasTolls = hasTolls,
-                    firstInstruction = firstInstructionText(steps),
+                    firstInstruction = parsedSteps.firstOrNull()?.instruction,
+                    steps = parsedSteps,
                     asGPXRoute = gpx
                 )
             )
@@ -146,17 +190,26 @@ object RoadRouter {
         }
     }
 
-    /** Construye una instrucción breve en castellano a partir de la primera maniobra relevante de OSRM. */
-    private fun firstInstructionText(steps: JsonArray): String? {
+    /** Extrae todas las maniobras relevantes en castellano a lo largo de todos los tramos de la ruta. */
+    private fun parseRoadSteps(steps: List<JsonElement>): List<RoadStep> {
+        val list = mutableListOf<RoadStep>()
         for (s in steps) {
             val step = s.jsonObject
             val man = step["maneuver"]?.jsonObject ?: continue
             val type = man["type"]?.jsonPrimitive?.contentOrNull ?: continue
             if (type == "depart" || type == "arrive") continue
+
+            val loc = man["location"]?.jsonArray
+            val lon = loc?.getOrNull(0)?.jsonPrimitive?.doubleOrNull ?: continue
+            val lat = loc.getOrNull(1)?.jsonPrimitive?.doubleOrNull ?: continue
+            val stepDist = step["distance"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+
             val modifier = man["modifier"]?.jsonPrimitive?.contentOrNull
+            val exitNum = man["exit"]?.jsonPrimitive?.intOrNull
             val name = step["name"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
             val ref = step["ref"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
-            val road = name ?: ref
+            val road = if (name != null && ref != null && name != ref) "$name ($ref)" else (name ?: ref)
+
             val dir = when (modifier) {
                 "left" -> "Gira a la izquierda"
                 "right" -> "Gira a la derecha"
@@ -168,15 +221,19 @@ object RoadRouter {
                 else -> "Continúa"
             }
             val verb = when (type) {
-                "roundabout", "rotary" -> "En la rotonda, toma la salida"
+                "roundabout", "rotary" -> {
+                    if (exitNum != null) "En la rotonda, toma la ${exitNum}ª salida"
+                    else "En la rotonda, toma la salida"
+                }
                 "merge" -> "Incorpórate"
                 "on ramp" -> "Toma la entrada"
                 "off ramp" -> "Toma la salida"
                 "fork" -> dir
                 else -> dir
             }
-            return if (road != null) "$verb por $road" else verb
+            val text = if (road != null) "$verb por $road" else verb
+            list.add(RoadStep(coordinate = GeoCoord(lat, lon), instruction = text, distanceMeters = stepDist))
         }
-        return null
+        return list
     }
 }

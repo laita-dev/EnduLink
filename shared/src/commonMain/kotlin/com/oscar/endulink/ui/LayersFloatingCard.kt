@@ -71,7 +71,8 @@ fun LayersFloatingCard(
                 Triple(MapLayer.SATELITE_HIBRIDO, "🛰️ Satélite Híbrido", "Foto aérea con carreteras y nombres"),
                 Triple(MapLayer.SATELITE_PURO, "🌍 Satélite Puro", "Foto aérea sin rótulos"),
                 Triple(MapLayer.TRAIL_OSM, "🚵 Trail OSM", "Pistas de tierra, senderos y curvas"),
-                Triple(MapLayer.IGN_TOPO, "⛰️ IGN Topográfico", "MTN25 España oficial con curvas de nivel")
+                Triple(MapLayer.IGN_TOPO, "⛰️ IGN Topográfico", "MTN25 España oficial con curvas de nivel"),
+                Triple(MapLayer.WORLD_TOPO, "🗺️ Topo Mundial", "Cartografía topográfica global Esri")
             )
 
             for ((lay, label, desc) in layers) {

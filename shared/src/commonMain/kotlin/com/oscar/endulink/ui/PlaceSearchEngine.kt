@@ -1,5 +1,7 @@
 package com.oscar.endulink.ui
 
+import com.oscar.endulink.platform.SynchronizedLock
+import com.oscar.endulink.platform.withLock
 import com.oscar.endulink.trail.GeoCoord
 import io.ktor.client.*
 import io.ktor.client.request.*
@@ -33,7 +35,8 @@ object PlaceSearchEngine {
 
     private val client = HttpClient()
 
-    // Caché en memoria para autocompletado instantáneo al escribir o borrar
+    // Caché en memoria protegida por cerrojo para autocompletado instantáneo al escribir o borrar
+    private val cacheLock = SynchronizedLock()
     private val queryCache = mutableMapOf<String, List<SearchResultItem>>()
 
     suspend fun autocomplete(query: String, near: GeoCoord?): List<SearchResultItem> = withContext(Dispatchers.Default) {
@@ -45,7 +48,7 @@ object PlaceSearchEngine {
         val q = normalizeQuery(raw)
         val cacheKey = "$q|${near?.latitude?.let { (it * 100).roundToInt() }}|${near?.longitude?.let { (it * 100).roundToInt() }}"
 
-        queryCache[cacheKey]?.let { return@withContext it }
+        cacheLock.withLock { queryCache[cacheKey] }?.let { return@withContext it }
 
         // Consultas concurrentes en paralelo con límite de tiempo para respuesta inmediata
         val photonDeferred = async {
@@ -66,11 +69,13 @@ object PlaceSearchEngine {
         val merged = nominatimResults + photonResults
         val ranked = rankByProximity(merged, q, near)
 
-        if (queryCache.size > 120) {
-            queryCache.clear()
-        }
-        if (ranked.isNotEmpty()) {
-            queryCache[cacheKey] = ranked
+        cacheLock.withLock {
+            if (queryCache.size > 120) {
+                queryCache.clear()
+            }
+            if (ranked.isNotEmpty()) {
+                queryCache[cacheKey] = ranked
+            }
         }
 
         ranked
@@ -102,10 +107,16 @@ object PlaceSearchEngine {
         val isNationalQuery = listOf("madrid", "barcelona", "sevilla", "valencia", "bilbao", "zaragoza", "málaga", "malaga")
             .any { query.contains(it, ignoreCase = true) }
 
-        // Si tenemos la ubicación del usuario y no ha buscado una gran capital lejana explícitamente,
-        // descartamos coincidencias absurdas a más de 250 km (ej. México o ciudades lejanas)
+        // Si tenemos la ubicación del usuario, priorizamos resultados en un radio de 250 km
+        // pero conservamos también poblaciones o lugares de España/Europa cuyo nombre coincida exactamente
+        val isStreetQuery = listOf("calle ", "carrer ", "avenida ", "avul ", "plaza ", "plaça ", "paseo ", "camino ", "carretera ")
+            .any { query.startsWith(it, ignoreCase = true) }
+
         val filtered = if (near != null && !isNationalQuery) {
-            items.filter { (it.distanceKm ?: 0.0) <= 250.0 }
+            items.filter { item ->
+                val dist = item.distanceKm ?: 0.0
+                dist <= 250.0 || (!isStreetQuery && dist <= 1200.0 && item.title.equals(query, ignoreCase = true))
+            }
         } else {
             items
         }

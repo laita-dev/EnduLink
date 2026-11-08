@@ -14,28 +14,41 @@ object GPXParser {
         return clean
     }
 
+    private fun cleanXmlText(raw: String): String {
+        var s = raw.trim()
+        if (s.startsWith("<![CDATA[") && s.endsWith("]]>")) {
+            s = s.removePrefix("<![CDATA[").removeSuffix("]]>").trim()
+        }
+        return s
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .trim()
+    }
+
     fun parse(xmlContent: String, fallbackName: String, color: TrackColor = TrackColor.ORANGE): GPXRoute {
         var routeName = ""
         val trkPoints = mutableListOf<GPXPoint>()
         val rtePoints = mutableListOf<GPXPoint>()
         val waypoints = mutableListOf<GPXWaypoint>()
 
-        // Extracción sencilla y robusta de nombre de ruta
-        val nameRegex = Regex("<name>(.*?)</name>", RegexOption.IGNORE_CASE)
-        val nameMatch = nameRegex.find(xmlContent)
-        if (nameMatch != null) {
-            val candidate = nameMatch.groupValues[1].trim()
-            if (candidate.isNotEmpty() && !candidate.startsWith("http")) {
-                routeName = candidate
-            }
-        }
+        // Extraer nombre priorizando <trk><name>, <metadata><name> o <rte><name> para no confundirlo con <wpt><name>
+        val trkNameRegex = Regex("(?s)<(?:trk|metadata|rte)\\b[^>]*>.*?<name>(.*?)</name>", RegexOption.IGNORE_CASE)
+        val fallbackNameRegex = Regex("(?s)<name>(.*?)</name>", RegexOption.IGNORE_CASE)
 
-        // Parseo de trkpt y rtept
-        val ptRegex = Regex("(?s)<(trkpt|rtept|wpt)\\s+([^>]+)>(.*?)</\\1>", RegexOption.IGNORE_CASE)
+        val candidates = trkNameRegex.findAll(xmlContent).map { cleanXmlText(it.groupValues[1]) }.toList() +
+            fallbackNameRegex.findAll(xmlContent).map { cleanXmlText(it.groupValues[1]) }.toList()
+
+        routeName = candidates.firstOrNull { it.isNotEmpty() && !it.startsWith("http", ignoreCase = true) }.orEmpty()
+
+        // Soporta tanto etiquetas con cuerpo (<trkpt ...>...</trkpt>) como autocerradas (<trkpt .../>)
+        val ptRegex = Regex("(?s)<(trkpt|rtept|wpt)\\s+([^/>]+?)(?:/>|>(.*?)</\\1>)", RegexOption.IGNORE_CASE)
         val latRegex = Regex("lat=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE)
         val lonRegex = Regex("lon=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE)
         val eleRegex = Regex("<ele>([^<]+)</ele>", RegexOption.IGNORE_CASE)
-        val wptNameRegex = Regex("<name>([^<]+)</name>", RegexOption.IGNORE_CASE)
+        val wptNameRegex = Regex("(?s)<name>(.*?)</name>", RegexOption.IGNORE_CASE)
         val symRegex = Regex("<sym>([^<]+)</sym>", RegexOption.IGNORE_CASE)
 
         for (match in ptRegex.findAll(xmlContent)) {
@@ -47,7 +60,7 @@ object GPXParser {
             val lonStr = lonRegex.find(attrs)?.groupValues?.get(1)
             val lat = latStr?.toDoubleOrNull() ?: continue
             val lon = lonStr?.toDoubleOrNull() ?: continue
-            val ele = eleRegex.find(body)?.groupValues?.get(1)?.toDoubleOrNull()
+            val ele = if (body.isNotEmpty()) eleRegex.find(body)?.groupValues?.get(1)?.trim()?.toDoubleOrNull() else null
 
             when (tag) {
                 "trkpt" -> {
@@ -57,8 +70,9 @@ object GPXParser {
                     rtePoints.add(GPXPoint(lat, lon, ele))
                 }
                 "wpt" -> {
-                    val wptName = wptNameRegex.find(body)?.groupValues?.get(1)?.trim() ?: "Punto"
-                    val sym = symRegex.find(body)?.groupValues?.get(1)?.trim()
+                    val rawWptName = if (body.isNotEmpty()) wptNameRegex.find(body)?.groupValues?.get(1) else null
+                    val wptName = rawWptName?.let { cleanXmlText(it) }?.takeIf { it.isNotEmpty() } ?: "Punto"
+                    val sym = if (body.isNotEmpty()) symRegex.find(body)?.groupValues?.get(1)?.trim() else null
                     waypoints.add(
                         GPXWaypoint(
                             id = "$wptName-$lat-$lon",
@@ -132,4 +146,3 @@ object GPXParser {
         return Pair(totalMeters / 1000.0, gain)
     }
 }
-

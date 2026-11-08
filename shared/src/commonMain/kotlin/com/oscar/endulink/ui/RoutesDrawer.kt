@@ -26,6 +26,8 @@ fun RoutesDrawer(
     onToggleVisibility: (GPXRoute) -> Unit,
     onInvertRoute: (GPXRoute) -> Unit,
     onCycleColor: (GPXRoute) -> Unit,
+    onOpenElevation: (GPXRoute) -> Unit = {},
+    onDeleteRoute: (GPXRoute) -> Unit = {},
     onImportGPX: () -> Unit,
     onLoadSample: () -> Unit,
     onClose: () -> Unit,
@@ -105,7 +107,9 @@ fun RoutesDrawer(
                             onSelect = { onSelectRoute(route) },
                             onToggleVisibility = { onToggleVisibility(route) },
                             onInvert = { onInvertRoute(route) },
-                            onCycleColor = { onCycleColor(route) }
+                            onCycleColor = { onCycleColor(route) },
+                            onOpenElevation = { onOpenElevation(route) },
+                            onDelete = { onDeleteRoute(route) }
                         )
                     }
                 }
@@ -121,7 +125,9 @@ private fun RouteItemRow(
     onSelect: () -> Unit,
     onToggleVisibility: () -> Unit,
     onInvert: () -> Unit,
-    onCycleColor: () -> Unit
+    onCycleColor: () -> Unit,
+    onOpenElevation: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -160,18 +166,30 @@ private fun RouteItemRow(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Perfil de altitud
+            Text(
+                text = "📈",
+                fontSize = 15.sp,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onOpenElevation() }.padding(4.dp)
+            )
             // Invertir
             Text(
                 text = "🔄",
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onInvert() }.padding(4.dp)
             )
             // Visibilidad
             Text(
                 text = if (route.isVisible) "👁️" else "🙈",
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onToggleVisibility() }.padding(4.dp)
+            )
+            // Eliminar
+            Text(
+                text = "🗑️",
+                fontSize = 15.sp,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onDelete() }.padding(4.dp)
             )
         }
     }

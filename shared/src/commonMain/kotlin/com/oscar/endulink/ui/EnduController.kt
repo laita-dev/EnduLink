@@ -17,6 +17,12 @@ enum class MapFollowMode {
     FOLLOW_HEADING
 }
 
+enum class ApproachTarget {
+    START,
+    NEAREST,
+    FINISH
+}
+
 class EnduController {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -168,6 +174,9 @@ class EnduController {
     val wifiSnapshot: StateFlow<WifiSnapshot?> = _wifiSnapshot.asStateFlow()
 
     private var previewDecimator = 0
+    private var routeCalcJob: Job? = null
+    private var approachCalcJob: Job? = null
+    private var lastApproachTarget = ApproachTarget.NEAREST
 
     // Compatibilidad para búsqueda
     val destination: StateFlow<SearchResultItem?> get() = _searchPin
@@ -206,10 +215,27 @@ class EnduController {
                         }
                     }
 
+                    // Transición automática del enlace por carretera al track GPX al llegar al punto de enlace
+                    val currentApproach = _approachRoadRoute.value
+                    val gpxRoute = selectedRoute
+                    if (_isNavigating.value && currentApproach != null && gpxRoute != null) {
+                        val distToApproachEnd = pos.distanceTo(currentApproach.destinationCoordinate)
+                        val distToTrack = gpxRoute.points.minOfOrNull { it.coordinate.distanceTo(pos) } ?: Double.MAX_VALUE
+                        if (distToApproachEnd <= 60.0 || distToTrack <= 45.0) {
+                            _approachRoadRoute.value = null
+                            _trackProgress.value = null
+                            _statusBannerMessage.value = "Enlace completado · Siguiendo track ${gpxRoute.name}"
+                        }
+                    }
+
                     // Progreso de navegación sobre la ruta activa (Destino buscado, Enlace o GPX)
                     val navRoute = activeNavigationRoute
                     if (navRoute != null) {
-                        _trackProgress.value = RouteNavigator.calculateProgress(navRoute, pos)
+                        _trackProgress.value = RouteNavigator.calculateProgress(
+                            route = navRoute,
+                            currentLocation = pos,
+                            lastSegmentIndex = _trackProgress.value?.nearestIndex
+                        )
                     } else {
                         _trackProgress.value = null
                     }
@@ -264,7 +290,7 @@ class EnduController {
     }
 
     fun setZoom(zoom: Double) {
-        _mapZoom.value = minOf(maxOf(zoom, 3.0), 18.0)
+        _mapZoom.value = minOf(maxOf(zoom, 3.0), 20.0)
     }
 
     fun setCenter(coord: GeoCoord) {
@@ -342,6 +368,7 @@ class EnduController {
         _selectedRouteId.value = null
         _activeRouteFlow.value = null
         _approachRoadRoute.value = null
+        _trackProgress.value = null
         _destinationRouteOptions.value = emptyList()
         _selectedDestinationOptionIndex.value = 0
         if (!keepWaypoints) {
@@ -408,7 +435,7 @@ class EnduController {
         if (dest != null) {
             calculateRouteToSearchPin(dest)
         } else if (route != null) {
-            calculateApproachToGPX(toNearestPoint = true, autoStart = false)
+            calculateApproachToGPX(target = lastApproachTarget, autoStart = false)
         } else {
             // Si aún no había destino ni track, este primer punto pasa a ser el destino
             selectSearchResult(item)
@@ -428,18 +455,19 @@ class EnduController {
                 if (_intermediateWaypoints.value.isEmpty()) {
                     _approachRoadRoute.value = null
                 } else {
-                    calculateApproachToGPX(toNearestPoint = true, autoStart = false)
+                    calculateApproachToGPX(target = lastApproachTarget, autoStart = false)
                 }
             }
         }
     }
 
     fun calculateRouteToSearchPin(dest: SearchResultItem) {
+        routeCalcJob?.cancel()
         val origin = riderTelemetry.value.coordinate ?: _mapCenter.value
         val waypoints = _intermediateWaypoints.value.map { it.coordinate }
         _isCalculatingDestinationRoute.value = true
 
-        scope.launch {
+        routeCalcJob = scope.launch {
             try {
                 val routes = RoadRouter.calculateMultiWaypointRoute(
                     origin = origin,
@@ -451,6 +479,7 @@ class EnduController {
                 )
                 _destinationRouteOptions.value = routes
                 _selectedDestinationOptionIndex.value = 0
+                _trackProgress.value = null
                 _isCalculatingDestinationRoute.value = false
 
                 // Encuadrar la ruta en el mapa
@@ -460,6 +489,8 @@ class EnduController {
                     val stopsMsg = if (waypoints.isNotEmpty()) " (${waypoints.size} parada${if (waypoints.size > 1) "s" else ""})" else ""
                     _statusBannerMessage.value = "Ruta a ${dest.title}$stopsMsg: ${(first.distanceKm * 10.0).roundToInt() / 10.0} km (~${first.expectedMinutes} min)"
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _isCalculatingDestinationRoute.value = false
                 _statusBannerMessage.value = "No se pudo calcular ruta: ${e.message}"
@@ -470,15 +501,19 @@ class EnduController {
     fun selectDestinationAlternative(index: Int) {
         if (index in _destinationRouteOptions.value.indices) {
             _selectedDestinationOptionIndex.value = index
+            _trackProgress.value = null
         }
     }
 
     fun clearSearchAndDestinationRoute() {
+        routeCalcJob?.cancel()
+        _isCalculatingDestinationRoute.value = false
         _searchPin.value = null
         _droppedPin.value = null
         _intermediateWaypoints.value = emptyList()
         _destinationRouteOptions.value = emptyList()
         _selectedDestinationOptionIndex.value = 0
+        _trackProgress.value = null
         if (_isNavigating.value && selectedRoute == null) {
             stopNavigation()
         }
@@ -526,29 +561,42 @@ class EnduController {
 
     // --- Enlace a Track GPX ---
 
-    fun calculateApproachToGPX(toNearestPoint: Boolean, autoStart: Boolean = false) {
+    fun calculateApproachToGPX(
+        toNearestPoint: Boolean = true,
+        autoStart: Boolean = false,
+        target: ApproachTarget = if (toNearestPoint) ApproachTarget.NEAREST else ApproachTarget.START
+    ) {
         val route = selectedRoute ?: return
+        if (route.points.isEmpty()) return
+        lastApproachTarget = target
         val gps = riderTelemetry.value.coordinate ?: _mapCenter.value
-        val targetCoord = if (toNearestPoint) {
-            route.points.minByOrNull { it.coordinate.distanceTo(gps) }?.coordinate ?: route.points.first().coordinate
-        } else {
-            route.points.first().coordinate
+        val targetCoord = when (target) {
+            ApproachTarget.START -> route.points.first().coordinate
+            ApproachTarget.FINISH -> route.points.last().coordinate
+            ApproachTarget.NEAREST -> route.points.minByOrNull { it.coordinate.distanceTo(gps) }?.coordinate ?: route.points.first().coordinate
+        }
+        val destLabel = when (target) {
+            ApproachTarget.START -> "Inicio de ${route.name}"
+            ApproachTarget.FINISH -> "Final de ${route.name}"
+            ApproachTarget.NEAREST -> "Enlace a ${route.name}"
         }
 
+        approachCalcJob?.cancel()
         _isCalculatingApproach.value = true
-        scope.launch {
+        approachCalcJob = scope.launch {
             try {
                 val waypoints = _intermediateWaypoints.value.map { it.coordinate }
                 val routes = RoadRouter.calculateMultiWaypointRoute(
                     origin = gps,
                     waypoints = waypoints,
                     destination = targetCoord,
-                    destinationName = if (toNearestPoint) "Enlace a ${route.name}" else "Inicio de ${route.name}",
+                    destinationName = destLabel,
                     requestAlternatives = false,
                     color = TrackColor.CYAN,
                     customSingleLabel = "Enlace"
                 )
                 _approachRoadRoute.value = routes.firstOrNull()
+                _trackProgress.value = null
                 _isCalculatingApproach.value = false
 
                 if (autoStart) {
@@ -557,6 +605,8 @@ class EnduController {
                     val allCoords = (routes.firstOrNull()?.coordinates ?: emptyList()) + route.points.map { it.coordinate }
                     fitCoordinates(allCoords)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _isCalculatingApproach.value = false
                 _statusBannerMessage.value = "Error al calcular enlace: ${e.message}"
@@ -566,7 +616,10 @@ class EnduController {
     }
 
     fun clearApproachRoute() {
+        approachCalcJob?.cancel()
+        _isCalculatingApproach.value = false
         _approachRoadRoute.value = null
+        _trackProgress.value = null
     }
 
     // --- Rutas GPX ---
@@ -607,24 +660,37 @@ class EnduController {
     fun selectRoute(route: GPXRoute) {
         // Al seleccionar un GPX, limpiamos el destino de búsqueda
         clearSearchAndDestinationRoute()
+        approachCalcJob?.cancel()
+        _isCalculatingApproach.value = false
         _approachRoadRoute.value = null
+        _trackProgress.value = null
         _selectedRouteId.value = route.id
         _activeRouteFlow.value = route
         fitCoordinates(route.points.map { it.coordinate })
     }
 
     fun deselectRoute() {
+        approachCalcJob?.cancel()
+        _isCalculatingApproach.value = false
         _selectedRouteId.value = null
         _activeRouteFlow.value = null
         _approachRoadRoute.value = null
+        _trackProgress.value = null
         if (_isNavigating.value && destinationRoadRoute == null) {
             stopNavigation()
         }
     }
 
     fun toggleRouteVisibility(route: GPXRoute) {
+        val updated = route.copy(isVisible = !route.isVisible)
         _routes.value = _routes.value.map {
-            if (it.id == route.id) it.copy(isVisible = !it.isVisible) else it
+            if (it.id == route.id) updated else it
+        }
+        if (_selectedRouteId.value == route.id) {
+            _activeRouteFlow.value = updated
+            if (!updated.isVisible && _isNavigating.value && destinationRoadRoute == null && _approachRoadRoute.value == null) {
+                stopNavigation()
+            }
         }
     }
 
@@ -635,13 +701,18 @@ class EnduController {
         }
         if (_selectedRouteId.value == route.id) {
             _activeRouteFlow.value = inverted
+            _trackProgress.value = null
         }
     }
 
     fun cycleRouteColor(route: GPXRoute) {
         val nextCol = route.color.nextColor
+        val updated = route.copy(color = nextCol)
         _routes.value = _routes.value.map {
-            if (it.id == route.id) it.copy(color = nextCol) else it
+            if (it.id == route.id) updated else it
+        }
+        if (_selectedRouteId.value == route.id) {
+            _activeRouteFlow.value = updated
         }
     }
 
@@ -885,7 +956,7 @@ class EnduController {
     private fun renderTftFrame(width: Int, height: Int): ByteArray? {
         val activeRoad = destinationRoadRoute ?: _approachRoadRoute.value
         val remKm = _trackProgress.value?.remainingKm ?: activeRoad?.distanceKm ?: selectedRoute?.totalDistanceKm
-        val nextStep = activeRoad?.firstInstruction
+        val nextStep = activeRoad?.currentInstruction(riderTelemetry.value.coordinate)
 
         // Actualizar preview en directo periódicamente (~1.5 veces por segundo)
         if (++previewDecimator % 10 == 0) {
@@ -954,7 +1025,7 @@ class EnduController {
         scope.launch(Dispatchers.Default) {
             val activeRoad = destinationRoadRoute ?: _approachRoadRoute.value
             val remKm = _trackProgress.value?.remainingKm ?: activeRoad?.distanceKm ?: selectedRoute?.totalDistanceKm
-            val nextStep = activeRoad?.firstInstruction
+            val nextStep = activeRoad?.currentInstruction(riderTelemetry.value.coordinate)
 
             val preview = bikeMapRenderer.renderPreview(
                 width = 296,

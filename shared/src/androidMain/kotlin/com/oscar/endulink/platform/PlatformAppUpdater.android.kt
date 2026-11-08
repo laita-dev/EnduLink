@@ -48,6 +48,11 @@ actual object PlatformAppUpdater {
             connection.setRequestProperty("Pragma", "no-cache")
             connection.connect()
 
+            if (connection.responseCode !in 200..299) {
+                connection.disconnect()
+                return@withContext false
+            }
+
             val totalBytes = connection.contentLengthLong
             val input = connection.inputStream
 
@@ -65,6 +70,7 @@ actual object PlatformAppUpdater {
             val output = FileOutputStream(apkFile)
             val buffer = ByteArray(32 * 1024)
             var downloaded = 0L
+            var lastReportedPct = -1
             var read: Int
 
             while (input.read(buffer).also { read = it } != -1) {
@@ -72,7 +78,11 @@ actual object PlatformAppUpdater {
                 downloaded += read
                 if (totalBytes > 0) {
                     val progress = (downloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-                    onProgress(progress)
+                    val pct = (progress * 100).toInt()
+                    if (pct != lastReportedPct) {
+                        lastReportedPct = pct
+                        onProgress(progress)
+                    }
                 }
             }
 

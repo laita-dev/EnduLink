@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>es</string>
     <key>CFBundleDisplayName</key>
-    <string>motIOS</string>
+    <string>motIllOS</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -17,17 +17,17 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.8</string>
+    <string>0.1.9</string>
     <key>CFBundleVersion</key>
-    <string>8</string>
+    <string>9</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>motIOS necesita tu ubicación para situarte en el mapa y calcular el progreso de la ruta.</string>
+    <string>motIllOS necesita tu ubicación para situarte en el mapa y calcular el progreso de la ruta.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>motIOS necesita acceder a tu ubicación continua para seguir transmitiendo la navegación a la pantalla de la moto con el móvil en el bolsillo.</string>
+    <string>motIllOS necesita acceder a tu ubicación continua para seguir transmitiendo la navegación a la pantalla de la moto con el móvil en el bolsillo.</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>motIOS se conecta por Wi-Fi local a la pantalla de tu moto para enviarle el mapa en directo.</string>
+    <string>motIllOS se conecta por Wi-Fi local a la pantalla de tu moto para enviarle el mapa en directo.</string>
     <key>UIBackgroundModes</key>
     <array>
         <string>location</string>

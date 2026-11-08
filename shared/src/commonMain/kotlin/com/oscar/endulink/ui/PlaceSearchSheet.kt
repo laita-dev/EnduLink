@@ -136,7 +136,11 @@ fun PlaceSearchSheet(
                     keyboardActions = KeyboardActions(onSearch = {
                         val parsed = PlaceSearchEngine.parseCoordinateInput(query)
                         if (parsed != null) {
-                            onSelectDestination(parsed)
+                            if (isSearchingForStop) {
+                                onAddIntermediateStop(parsed)
+                            } else {
+                                onSelectDestination(parsed)
+                            }
                             onClose()
                         }
                     }),

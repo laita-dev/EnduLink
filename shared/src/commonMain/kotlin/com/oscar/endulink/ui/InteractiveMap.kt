@@ -69,6 +69,7 @@ fun InteractiveMap(
     val scrubbedPoint by controller.scrubbedPoint.collectAsState()
     val textMeasurer = rememberTextMeasurer()
     val currentOnSelectWaypoint by rememberUpdatedState(onSelectWaypoint)
+    val currentIsPickingOnMap by rememberUpdatedState(isPickingOnMap)
 
     Canvas(
         modifier = modifier
@@ -76,12 +77,14 @@ fun InteractiveMap(
             .pointerInput(Unit) {
                 detectMapInteractions(
                     onTap = { tapOffset ->
+                        if (currentIsPickingOnMap) return@detectMapInteractions
                         val screenCenterX = size.width / 2.0
                         val screenCenterY = size.height / 2.0
                         val curHeading = controller.mapHeading.value
                         val curZoom = controller.mapZoom.value
                         val curCenter = controller.mapCenter.value
-                        val curMarkers = controller.quickMarkers.value
+                        val routeWpts = controller.activeRoute.value?.takeIf { it.isVisible }?.waypoints.orEmpty()
+                        val curMarkers = routeWpts + controller.quickMarkers.value
                         val rad = -curHeading * PI / 180.0
                         val zInt = curZoom.toInt()
                         val tileSizePx = 256.0 * (2.0.pow(curZoom - zInt))
@@ -107,6 +110,7 @@ fun InteractiveMap(
                         }
                     },
                     onLongPress = { offset ->
+                        if (currentIsPickingOnMap) return@detectMapInteractions
                         // Pulsación larga: calcular coordenadas geográficas reales compensando centro, zoom y rumbo
                         val w = size.width.toFloat()
                         val h = size.height.toFloat()
@@ -318,7 +322,13 @@ fun InteractiveMap(
                 drawCircle(color = EnduPalette.Accent, radius = 6f, center = scrubPos)
             }
 
-            // 14. Marcadores y Waypoints con chinchetas visuales y etiquetas
+            // 14. Marcadores y Waypoints con chinchetas visuales y etiquetas (incluyendo los embebidos en el GPX activo)
+            if (activeRoute != null && activeRoute.isVisible) {
+                for (wpt in activeRoute.waypoints) {
+                    val pt = geoToScreen(wpt.coordinate)
+                    drawWaypointMarker(pt, wpt, heading, textMeasurer)
+                }
+            }
             for (wpt in quickMarkers) {
                 val pt = geoToScreen(wpt.coordinate)
                 drawWaypointMarker(pt, wpt, heading, textMeasurer)

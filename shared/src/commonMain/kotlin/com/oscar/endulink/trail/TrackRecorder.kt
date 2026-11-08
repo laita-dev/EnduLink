@@ -4,6 +4,7 @@ import com.oscar.endulink.platform.SynchronizedLock
 import com.oscar.endulink.platform.withLock
 import kotlin.concurrent.Volatile
 import kotlinx.datetime.Clock
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 data class RecordedPoint(
@@ -32,6 +33,10 @@ class TrackRecorder {
     var startTimestampEpochMs: Long = 0L
         private set
 
+    private var stopTimestampEpochMs: Long = 0L
+    private var pauseStartEpochMs: Long = 0L
+    private var pausedAccumulatedMs: Long = 0L
+
     var totalDistanceKm: Double = 0.0
         private set
 
@@ -44,17 +49,30 @@ class TrackRecorder {
     val elevationGainM: Double
         get() = lock.withLock {
             var gain = 0.0
+            var lastEle: Double? = points.firstOrNull()?.elevation
             for (i in 1 until points.size) {
-                val prev = points[i - 1].elevation ?: continue
-                val curr = points[i].elevation ?: continue
-                if (curr > prev) gain += (curr - prev)
+                val e = points[i].elevation ?: continue
+                val le = lastEle
+                if (le != null && e > le + 1.5) {
+                    gain += (e - le)
+                    lastEle = e
+                } else if (le == null || e < le - 1.5) {
+                    lastEle = e
+                }
             }
             gain
         }
 
     val durationSeconds: Long
-        get() = if (startTimestampEpochMs == 0L) 0L else {
-            (Clock.System.now().toEpochMilliseconds() - startTimestampEpochMs) / 1000L
+        get() = lock.withLock {
+            if (startTimestampEpochMs == 0L) return@withLock 0L
+            val now = Clock.System.now().toEpochMilliseconds()
+            val endRef = when {
+                !isRecording && stopTimestampEpochMs > 0L -> stopTimestampEpochMs
+                isPaused && pauseStartEpochMs > 0L -> pauseStartEpochMs
+                else -> now
+            }
+            max(0L, (endRef - startTimestampEpochMs - pausedAccumulatedMs) / 1000L)
         }
 
     fun reset() {
@@ -64,6 +82,9 @@ class TrackRecorder {
             isPaused = false
             totalDistanceKm = 0.0
             startTimestampEpochMs = 0L
+            stopTimestampEpochMs = 0L
+            pauseStartEpochMs = 0L
+            pausedAccumulatedMs = 0L
         }
     }
 
@@ -73,20 +94,41 @@ class TrackRecorder {
             isRecording = true
             isPaused = false
             startTimestampEpochMs = Clock.System.now().toEpochMilliseconds()
+            stopTimestampEpochMs = 0L
+            pauseStartEpochMs = 0L
+            pausedAccumulatedMs = 0L
             totalDistanceKm = 0.0
         }
     }
 
     fun pause() {
-        isPaused = true
+        lock.withLock {
+            if (isRecording && !isPaused) {
+                isPaused = true
+                pauseStartEpochMs = Clock.System.now().toEpochMilliseconds()
+            }
+        }
     }
 
     fun resume() {
-        isPaused = false
+        lock.withLock {
+            if (isRecording && isPaused) {
+                if (pauseStartEpochMs > 0L) {
+                    pausedAccumulatedMs += max(0L, Clock.System.now().toEpochMilliseconds() - pauseStartEpochMs)
+                }
+                pauseStartEpochMs = 0L
+                isPaused = false
+            }
+        }
     }
 
     fun stop(): List<RecordedPoint> {
         return lock.withLock {
+            if (isPaused && pauseStartEpochMs > 0L) {
+                pausedAccumulatedMs += max(0L, Clock.System.now().toEpochMilliseconds() - pauseStartEpochMs)
+                pauseStartEpochMs = 0L
+            }
+            stopTimestampEpochMs = Clock.System.now().toEpochMilliseconds()
             isRecording = false
             isPaused = false
             points.toList()
@@ -124,16 +166,24 @@ class TrackRecorder {
         }
     }
 
+    private fun escapeXml(s: String): String = s
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&apos;")
+
     fun toGPXString(trackName: String = "Track Grabado EnduLink"): String {
         val pts = lock.withLock { points.toList() }
+        val safeName = escapeXml(trackName)
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         sb.append("<gpx version=\"1.1\" creator=\"EnduLink KMP\">\n")
         sb.append("  <metadata>\n")
-        sb.append("    <name>").append(trackName).append("</name>\n")
+        sb.append("    <name>").append(safeName).append("</name>\n")
         sb.append("  </metadata>\n")
         sb.append("  <trk>\n")
-        sb.append("    <name>").append(trackName).append("</name>\n")
+        sb.append("    <name>").append(safeName).append("</name>\n")
         sb.append("    <trkseg>\n")
 
         for (p in pts) {
@@ -150,4 +200,3 @@ class TrackRecorder {
         return sb.toString()
     }
 }
-

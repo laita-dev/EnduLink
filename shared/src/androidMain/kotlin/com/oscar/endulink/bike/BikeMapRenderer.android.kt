@@ -48,6 +48,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
     private var previewBitmap: Bitmap? = null
     private var previewCanvas: Canvas? = null
 
+    // Caché LRU en memoria de bitmaps de teselas decodificadas para evitar decodificar PNG/JPG en cada frame a 15 FPS
+    private val decodedTileCache = android.util.LruCache<TileCoord, Bitmap>(128)
+
     // Paints preconfigurados para alto rendimiento (cero allocations por frame)
     private val bgPaint = Paint().apply { color = android.graphics.Color.rgb(20, 23, 28) }
     private val blackEdgePaint = Paint().apply { color = android.graphics.Color.BLACK }
@@ -150,6 +153,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         return cachedBatteryStatus
     }
 
+    @Synchronized
     actual fun renderRgba(
         width: Int,
         height: Int,
@@ -184,6 +188,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         return buffer
     }
 
+    @Synchronized
     actual fun renderPreview(
         width: Int,
         height: Int,
@@ -297,21 +302,34 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                 val posY = ((ty - centerFracY) * tileSizePx).toFloat()
 
                 val tileCoord = TileCoord(layer, zoom, tx, ty)
-                val bytes = tileStore.getTileBytes(tileCoord, allowAsyncFetch = true)
                 var drewTile = false
-                if (bytes != null && bytes.size > 100) {
-                    val tileBmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    if (tileBmp != null) {
-                        val dst = RectF(posX, posY, posX + tileSizePx, posY + tileSizePx)
-                        canvas.drawBitmap(tileBmp, null, dst, null)
-                        drewTile = true
+                var tileBmp = decodedTileCache.get(tileCoord)
+                if (tileBmp == null) {
+                    val bytes = tileStore.getTileBytes(tileCoord, allowAsyncFetch = true)
+                    if (bytes != null && bytes.size > 100) {
+                        tileBmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (tileBmp != null) {
+                            decodedTileCache.put(tileCoord, tileBmp)
+                        }
                     }
+                }
+                if (tileBmp != null) {
+                    val dst = RectF(posX, posY, posX + tileSizePx, posY + tileSizePx)
+                    canvas.drawBitmap(tileBmp, null, dst, null)
+                    drewTile = true
                 }
 
                 if (!drewTile) {
                     val oz = tileStore.getOverzoomedParent(tileCoord)
                     if (oz != null && oz.parentTileBytes.size > 100) {
-                        val parentBmp = BitmapFactory.decodeByteArray(oz.parentTileBytes, 0, oz.parentTileBytes.size)
+                        val parentCoord = TileCoord(layer, oz.parentZ, oz.parentX, oz.parentY)
+                        var parentBmp = decodedTileCache.get(parentCoord)
+                        if (parentBmp == null) {
+                            parentBmp = BitmapFactory.decodeByteArray(oz.parentTileBytes, 0, oz.parentTileBytes.size)
+                            if (parentBmp != null) {
+                                decodedTileCache.put(parentCoord, parentBmp)
+                            }
+                        }
                         if (parentBmp != null) {
                             val subW = parentBmp.width / oz.scale
                             val subH = parentBmp.height / oz.scale
@@ -330,7 +348,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         }
 
         // 4. Polilíneas de rutas
-        if (activeRoute != null && activeRoute.points.size >= 2) {
+        if (activeRoute != null && activeRoute.isVisible && activeRoute.points.size >= 2) {
             val path = Path()
             val first = geoToLocal(activeRoute.points[0].coordinate)
             path.moveTo(first.first, first.second)

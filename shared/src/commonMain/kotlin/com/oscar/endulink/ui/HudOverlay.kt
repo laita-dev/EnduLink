@@ -75,6 +75,7 @@ fun HudOverlay(
     onOpenQuickMarker: () -> Unit,
     onSaveDroppedPinAsWaypoint: () -> Unit = {},
     onOpenWaypoints: () -> Unit = {},
+    onOpenElevation: () -> Unit = {},
     isPickingOnMap: Boolean = false,
     isSearchingForStop: Boolean = false,
     pickingCoordAddress: String? = null,
@@ -246,9 +247,11 @@ fun HudOverlay(
                         )
 
                         if (activeRoad != null) {
+                            val ratio = (remKm / activeRoad.distanceKm.coerceAtLeast(0.1)).coerceIn(0.0, 1.0)
+                            val remMinutes = if (remKm <= 0.05) 0 else maxOf(1, (activeRoad.expectedMinutes * ratio).roundToInt())
                             TelemetryItem(
                                 label = "TIEMPO",
-                                value = "~${activeRoad.expectedMinutes}",
+                                value = "~$remMinutes",
                                 unit = "min",
                                 color = EnduPalette.Accent
                             )
@@ -261,7 +264,7 @@ fun HudOverlay(
                         }
                     }
 
-                    val step = activeRoad?.firstInstruction
+                    val step = activeRoad?.currentInstruction(rider.coordinate)
                     if (!step.isNullOrBlank()) {
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
@@ -868,6 +871,25 @@ fun HudOverlay(
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Botón para ver el perfil de altitud del track GPX
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(EnduPalette.SurfaceHigh)
+                                    .clickable { onOpenElevation() }
+                                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = "📈 Perfil",
+                                    color = EnduPalette.TextPrimary,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
                             // Botón para añadir parada intermedia hacia el track
                             Box(
                                 contentAlignment = Alignment.Center,

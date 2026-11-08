@@ -23,6 +23,9 @@ actual class PlatformH264Encoder actual constructor(
     private val chunkQueue = LinkedBlockingQueue<ByteArray>(MAX_BACKLOG)
     private var encoderJob: Job? = null
     private var spsPps: ByteArray? = null
+    private var bytesEncodedWindow = 0L
+    private var framesEncodedWindow = 0
+    private var windowStartMs = 0L
 
     companion object {
         private const val MIME_TYPE = "video/avc"
@@ -104,6 +107,10 @@ actual class PlatformH264Encoder actual constructor(
         var frameIndex = 0L
         val yuvBuffer = ByteArray(width * height * 3 / 2)
         val bufferInfo = MediaCodec.BufferInfo()
+        val frameIntervalMs = (1000L / fps.coerceAtLeast(5)).coerceAtLeast(16L)
+        windowStartMs = System.currentTimeMillis()
+        bytesEncodedWindow = 0L
+        framesEncodedWindow = 0
 
         while (isRunning && currentCoroutineContext().isActive) {
             val startTime = System.currentTimeMillis()
@@ -117,8 +124,19 @@ actual class PlatformH264Encoder actual constructor(
 
             drainOutput(bufferInfo)
 
+            val now = System.currentTimeMillis()
+            val windowElapsed = now - windowStartMs
+            if (windowElapsed >= 1000L) {
+                val actualFps = (framesEncodedWindow * 1000.0) / windowElapsed.toDouble()
+                val actualKbps = ((bytesEncodedWindow * 8L) / windowElapsed).toInt()
+                onStats?.invoke(EncoderStats(fps = actualFps, bitrateKbps = actualKbps))
+                windowStartMs = now
+                bytesEncodedWindow = 0L
+                framesEncodedWindow = 0
+            }
+
             val elapsed = System.currentTimeMillis() - startTime
-            val sleepTime = FRAME_INTERVAL_MS - elapsed
+            val sleepTime = frameIntervalMs - elapsed
             if (sleepTime > 0) {
                 delay(sleepTime)
             }
@@ -167,6 +185,8 @@ actual class PlatformH264Encoder actual constructor(
                         forceKeyFrame()
                     }
                     chunkQueue.offer(finalPayload)
+                    bytesEncodedWindow += finalPayload.size
+                    framesEncodedWindow++
                 }
                 encoder.releaseOutputBuffer(outIndex, false)
             } else {

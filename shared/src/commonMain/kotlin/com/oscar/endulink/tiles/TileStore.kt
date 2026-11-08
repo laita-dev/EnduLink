@@ -88,6 +88,7 @@ class TileStore(
 
     @Volatile
     private var isCancelled = false
+    private var downloadJob: Job? = null
 
     var onTileLoaded: (() -> Unit)? = null
 
@@ -384,6 +385,8 @@ class TileStore(
 
     fun cancelDownload() {
         isCancelled = true
+        downloadJob?.cancel()
+        downloadJob = null
     }
 
     private fun downloadTiles(
@@ -397,12 +400,13 @@ class TileStore(
             return
         }
 
+        downloadJob?.cancel()
         isCancelled = false
         val total = tiles.size
         val concurrency = tiles.firstOrNull()?.layer?.recommendedConcurrency ?: 3
         val semaphore = Semaphore(concurrency)
 
-        scope.launch(Dispatchers.Default) {
+        downloadJob = scope.launch(Dispatchers.Default) {
             var completed = 0
             var failed = 0
             onProgress(OfflineDownloadProgress(isDownloading = true, label = label, completed = 0, total = total, failed = 0))
@@ -461,7 +465,7 @@ class TileStore(
                 }
             }
             jobs.joinAll()
-            if (!isCancelled && completed > 0 && packageKey != null) {
+            if (!isCancelled && completed > 0 && failed <= total / 5 && packageKey != null) {
                 markPackageDownloaded(packageKey)
             }
             onProgress(OfflineDownloadProgress(isDownloading = false, label = label, completed = completed, total = total, failed = failed))

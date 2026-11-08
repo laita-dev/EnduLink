@@ -20,7 +20,10 @@ actual class PlatformH264Encoder actual constructor(
         return true
     }
 
-    actual override fun next(waitMs: Int): ByteArray? = null
+    actual override fun next(waitMs: Int): ByteArray? {
+        platformSleep(waitMs.toLong().coerceAtLeast(15L))
+        return null
+    }
 
     actual override fun fresh() {}
 
