@@ -13,7 +13,7 @@ actual object PlatformAppUpdater {
 
     actual fun openExternalUrl(url: String) {
         val nsUrl = NSURL.URLWithString(url) ?: return
-        UIApplication.sharedApplication.openURL(nsUrl, options = emptyMap<Any?, Any>(), completionHandler = null)
+        UIApplication.sharedApplication.openURL(nsUrl)
     }
 
     actual suspend fun downloadAndInstallApk(url: String, onProgress: (Float) -> Unit): Boolean {

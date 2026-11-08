@@ -233,7 +233,7 @@ class EnduController {
                     if (navRoute != null) {
                         _trackProgress.value = RouteNavigator.calculateProgress(
                             route = navRoute,
-                            currentLocation = pos,
+                            coord = pos,
                             lastSegmentIndex = _trackProgress.value?.nearestIndex
                         )
                     } else {
