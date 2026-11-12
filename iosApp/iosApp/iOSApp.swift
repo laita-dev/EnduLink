@@ -1,5 +1,6 @@
 import SwiftUI
 import SharedApp
+import Darwin
 import VideoToolbox
 import CoreMedia
 import CoreVideo
@@ -459,6 +460,41 @@ final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
     }
 }
 
+final class IosWifiBridgeImpl: NSObject, IosWifiBridge {
+    func currentWifiIp() -> String? {
+        var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
+        guard Darwin.getifaddrs(&ifaddrPtr) == 0, let first = ifaddrPtr else {
+            return nil
+        }
+        defer { Darwin.freeifaddrs(ifaddrPtr) }
+
+        var fallbackIp: String? = nil
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        while let ifa = cursor?.pointee {
+            defer { cursor = ifa.ifa_next }
+
+            guard let addr = ifa.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let flags = Int32(ifa.ifa_flags)
+            guard (flags & IFF_UP) != 0, (flags & IFF_LOOPBACK) == 0 else { continue }
+
+            let name = String(cString: ifa.ifa_name)
+            var sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+            var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+            guard Darwin.inet_ntop(AF_INET, &sin.sin_addr, &buf, socklen_t(INET_ADDRSTRLEN)) != nil else { continue }
+            let ip = String(cString: buf)
+            guard !ip.hasPrefix("169.254.") else { continue }
+
+            if name == "en0" {
+                return ip
+            }
+            if fallbackIp == nil && (name.hasPrefix("en") || name == "bridge100") {
+                fallbackIp = ip
+            }
+        }
+        return fallbackIp
+    }
+}
+
 struct ComposeView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
         MainViewControllerKt.MainViewController()
@@ -471,6 +507,7 @@ struct ComposeView: UIViewControllerRepresentable {
 struct iOSApp: App {
     init() {
         IosH264BridgeHolder.shared.bridge = VideoToolboxBridge()
+        IosWifiBridgeHolder.shared.bridge = IosWifiBridgeImpl()
     }
 
     var body: some Scene {

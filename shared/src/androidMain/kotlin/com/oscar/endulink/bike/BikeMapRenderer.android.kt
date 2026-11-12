@@ -178,7 +178,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         remainingKm: Double?,
         nextInstruction: String?,
         waypoints: List<GPXWaypoint>,
-        intermediateStops: List<GeoCoord>
+        intermediateStops: List<GeoCoord>,
+        remainingMinutes: Int?,
+        routeTypeLabel: String?
     ): ByteArray? {
         val bmp = getOrCreateBitmap(width, height)
         val canvas = cachedCanvas ?: Canvas(bmp).also { cachedCanvas = it }
@@ -197,7 +199,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             remainingKm = remainingKm,
             nextInstruction = nextInstruction,
             waypoints = waypoints,
-            intermediateStops = intermediateStops
+            intermediateStops = intermediateStops,
+            remainingMinutes = remainingMinutes,
+            routeTypeLabel = routeTypeLabel
         )
 
         bmp.copyPixelsToBuffer(ByteBuffer.wrap(buffer))
@@ -217,7 +221,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         remainingKm: Double?,
         nextInstruction: String?,
         waypoints: List<GPXWaypoint>,
-        intermediateStops: List<GeoCoord>
+        intermediateStops: List<GeoCoord>,
+        remainingMinutes: Int?,
+        routeTypeLabel: String?
     ): ImageBitmap? {
         val cur = previewBitmap
         val bmp = if (cur != null && cur.width == width && cur.height == height) cur else {
@@ -240,7 +246,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             remainingKm = remainingKm,
             nextInstruction = nextInstruction,
             waypoints = waypoints,
-            intermediateStops = intermediateStops
+            intermediateStops = intermediateStops,
+            remainingMinutes = remainingMinutes,
+            routeTypeLabel = routeTypeLabel
         )
         return bmp.asImageBitmap()
     }
@@ -258,7 +266,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         remainingKm: Double?,
         nextInstruction: String?,
         waypoints: List<GPXWaypoint>,
-        intermediateStops: List<GeoCoord>
+        intermediateStops: List<GeoCoord>,
+        remainingMinutes: Int?,
+        routeTypeLabel: String?
     ) {
         val w = width
         val h = height
@@ -472,8 +482,16 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         canvas.drawPath(corePath, riderArrowCorePaint)
         canvas.restore()
 
+        // Escalar HUD proporcionalmente a 592px de referencia para que tanto la preview (296x408)
+        // como la pantalla TFT real (592x816) mantengan proporciones exactas sin solapamientos
+        val hudScale = (w / 592f).coerceIn(0.45f, 1.5f)
+        val vw = w / hudScale
+        val vh = h / hudScale
+        canvas.save()
+        canvas.scale(hudScale, hudScale)
+
         // 6. HUD de Moto: Velocímetro (Esquina inferior izquierda)
-        val speedBox = RectF(14f, h - 82f, 150f, h - 14f)
+        val speedBox = RectF(14f, vh - 82f, 150f, vh - 14f)
         canvas.drawRoundRect(speedBox, 12f, 12f, hudCardPaint)
         canvas.drawRoundRect(speedBox, 12f, 12f, hudBorderPaint)
 
@@ -481,14 +499,25 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         canvas.drawText(spdStr, speedBox.left + 16f, speedBox.bottom - 18f, speedTextPaint)
         canvas.drawText("km/h", speedBox.left + 18f + speedTextPaint.measureText(spdStr) + 6f, speedBox.bottom - 18f, speedUnitPaint)
 
-        // 7. HUD de Moto: Distancia restante o Altitud (Esquina inferior derecha)
-        val infoBox = RectF(w - 160f, h - 72f, w - 14f, h - 14f)
+        // 7. HUD de Moto: Distancia/Tiempo restante (Enlace o Ruta) o Altitud (Esquina inferior derecha)
+        val hasRoadTiming = remainingKm != null && remainingKm > 0.0 && remainingMinutes != null
+        val hasGpxRemaining = !hasRoadTiming && remainingKm != null && (remainingKm > 0.0 || routeTypeLabel == "TRACK")
+        val infoBoxWidth = if (hasRoadTiming) 224f else 146f
+        val infoBoxTop = if (hasRoadTiming) vh - 82f else vh - 72f
+        val infoBox = RectF(vw - infoBoxWidth - 14f, infoBoxTop, vw - 14f, vh - 14f)
         canvas.drawRoundRect(infoBox, 12f, 12f, hudCardPaint)
         canvas.drawRoundRect(infoBox, 12f, 12f, hudBorderPaint)
 
-        if (remainingKm != null && remainingKm > 0.0) {
+        if (hasRoadTiming && remainingKm != null && remainingMinutes != null) {
+            val kind = routeTypeLabel ?: "RUTA"
+            val etaStr = formatTftEtaHm(remainingMinutes)
+            val kmStr = "${(remainingKm * 10.0).roundToInt() / 10.0} km"
+            val durStr = formatTftDuration(remainingMinutes)
+            canvas.drawText("$kind · Llegada $etaStr", infoBox.left + 12f, infoBox.top + 22f, speedUnitPaint)
+            canvas.drawText("$kmStr · $durStr", infoBox.left + 12f, infoBox.bottom - 16f, textPrimaryPaint)
+        } else if (hasGpxRemaining && remainingKm != null) {
             val remStr = "${(remainingKm * 10.0).roundToInt() / 10.0} km"
-            canvas.drawText("RESTAN", infoBox.left + 12f, infoBox.top + 20f, textMutedPaint)
+            canvas.drawText("GPX · RESTAN", infoBox.left + 12f, infoBox.top + 20f, speedUnitPaint)
             canvas.drawText(remStr, infoBox.left + 12f, infoBox.bottom - 14f, textPrimaryPaint)
         } else {
             val altStr = "${rider.altitudeM.toInt()} m"
@@ -496,15 +525,29 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             canvas.drawText(altStr, infoBox.left + 12f, infoBox.bottom - 14f, textPrimaryPaint)
         }
 
-        // 8. HUD de Moto: Batería del móvil en tiempo real (Esquina superior derecha)
+        // 8. HUD de Moto: Batería y Hora del móvil en tiempo real (Esquina superior derecha)
         val battStatus = getFreshBatteryStatus()
         val pct = if (battStatus.percentage >= 0) battStatus.percentage.coerceIn(0, 100) else 100
         val isCharging = battStatus.isCharging
 
         val battBoxWidth = if (isCharging) 108f else 96f
-        val battBox = RectF(w - battBoxWidth - 14f, 12f, w - 14f, 50f)
+        val battBox = RectF(vw - battBoxWidth - 14f, 12f, vw - 14f, 50f)
         canvas.drawRoundRect(battBox, 10f, 10f, hudCardPaint)
         canvas.drawRoundRect(battBox, 10f, 10f, hudBorderPaint)
+
+        // Hora actual justo a la izquierda de la batería
+        val clockBoxWidth = 66f
+        val clockBox = RectF(battBox.left - 8f - clockBoxWidth, 12f, battBox.left - 8f, 50f)
+        canvas.drawRoundRect(clockBox, 10f, 10f, hudCardPaint)
+        canvas.drawRoundRect(clockBox, 10f, 10f, hudBorderPaint)
+        val clockStr = currentTftClockHm()
+        val clockTextW = batteryTextPaint.measureText(clockStr)
+        canvas.drawText(
+            clockStr,
+            clockBox.left + ((clockBoxWidth - clockTextW) * 0.5f).coerceAtLeast(6f),
+            clockBox.bottom - 13f,
+            batteryTextPaint
+        )
 
         // Icono de contorno de batería: 22px ancho x 13px alto
         val iconLeft = battBox.left + 10f
@@ -560,9 +603,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         }
         canvas.drawText(pctStr, textX, battBox.bottom - 13f, batteryTextPaint)
 
-        // 9. HUD de Moto: Próximo giro / Instrucción (Barra superior a la izquierda de la batería)
+        // 9. HUD de Moto: Próximo giro / Instrucción (Barra superior a la izquierda de la hora y batería)
         if (isNavigating && !nextInstruction.isNullOrBlank()) {
-            val navRight = battBox.left - 10f
+            val navRight = clockBox.left - 10f
             val navBox = RectF(14f, 12f, navRight, 50f)
             canvas.drawRoundRect(navBox, 10f, 10f, hudCardPaint)
             canvas.drawRoundRect(navBox, 10f, 10f, hudBorderPaint)
@@ -579,6 +622,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             }
             canvas.drawText(displayInstruction, navBox.left + 14f, navBox.bottom - 13f, textPrimaryPaint)
         }
+
+        canvas.restore()
 
         // 10. BlackEdges (Márgenes negros de 4px arriba y abajo requeridos por el escalador Carbit EasyConn)
         canvas.drawRect(0f, 0f, w, 4f, blackEdgePaint)

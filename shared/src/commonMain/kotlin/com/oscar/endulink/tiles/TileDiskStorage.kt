@@ -5,6 +5,7 @@ expect object TileDiskStorage {
     fun writeBytes(path: String, bytes: ByteArray)
     fun fileExists(path: String): Boolean
     fun fileSize(path: String): Long
+    fun directorySizeBytes(path: String): Long
     fun deleteDirectory(path: String)
 }
 

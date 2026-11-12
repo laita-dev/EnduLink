@@ -34,6 +34,16 @@ actual object TileDiskStorage {
         return if (file.exists()) file.length() else 0L
     }
 
+    actual fun directorySizeBytes(path: String): Long {
+        return try {
+            val root = File(path)
+            if (!root.exists()) return 0L
+            root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
     actual fun deleteDirectory(path: String) {
         try {
             val dir = File(path)

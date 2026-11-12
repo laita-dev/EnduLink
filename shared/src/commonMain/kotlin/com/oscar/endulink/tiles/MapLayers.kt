@@ -12,13 +12,22 @@ enum class MapLayer(
     val isRetina512: Boolean = false
 ) {
     CARRETERAS(
-        raw = "apple_roads_hd",
+        raw = "carto_voyager_hd",
         title = "Carreteras (Vial HD · Estilo MotIOS)",
         shortBadge = "VIAL HD",
         maxNativeZoom = 20,
         supportsOfflineDownload = false,
         recommendedConcurrency = 6,
         isRetina512 = true
+    ),
+    ESRI_STREET(
+        raw = "esri_street",
+        title = "Esri World Street · Carreteras (Offline)",
+        shortBadge = "ESRI VIAL",
+        maxNativeZoom = 18,
+        supportsOfflineDownload = true,
+        recommendedConcurrency = 6,
+        isRetina512 = false
     ),
     OSMAND(
         raw = "osmand_hd",
@@ -72,7 +81,11 @@ enum class MapLayer(
             CARRETERAS -> {
                 // Cartografía vial limpia estilo Apple Maps / MotIOS en resolución Retina @2x (512x512)
                 val sub = listOf("a", "b", "c", "d")[abs(x + y) % 4]
-                "https://$sub.basemaps.cartocdn.com/rastertiles/voyager/$clampedZ/$x/$y@2x.png"
+                "https://$sub.basemaps.cartocdn.com/rastertiles/voyager/$clampedZ/$x/$y@2x.png?key=$CARTO_API_KEY"
+            }
+            ESRI_STREET -> {
+                // Esri World Street Map (misma capa vial usada en MotIOS para la TFT, compatible con offline)
+                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/$clampedZ/$y/$x"
             }
             OSMAND -> {
                 // Servidor oficial OsmAnd en Alta Definición (512x512 HD)
@@ -97,9 +110,12 @@ enum class MapLayer(
     }
 
     companion object {
+        private const val CARTO_API_KEY = "cb1_57xe_1_59e8b74994b87bf911a96917"
+
         fun fromRaw(raw: String): MapLayer {
             return when (raw.lowercase()) {
-                "road_online", "osm_std", "google_roads", "apple_roads_hd" -> CARRETERAS
+                "road_online", "osm_std", "google_roads", "apple_roads_hd", "carto_voyager_hd" -> CARRETERAS
+                "esri_street", "world_street", "esri_world_street" -> ESRI_STREET
                 "osmand", "osmand_hd", "world_topo" -> OSMAND
                 "sat_hybrid", "google_hybrid", "sat_hybrid_hd" -> SATELITE_HIBRIDO
                 "sat_pure", "google_satellite", "sat_pure_esri" -> SATELITE_PURO
@@ -109,6 +125,13 @@ enum class MapLayer(
 
         val offlineCapableLayers: List<MapLayer>
             get() = entries.filter { it.supportsOfflineDownload }
+
+        fun parseOfflinePackageKey(packageKey: String): Pair<OfflineRegionPreset, MapLayer>? {
+            val layer = entries.firstOrNull { packageKey.endsWith("_${it.raw}") } ?: return null
+            val presetId = packageKey.removeSuffix("_${layer.raw}")
+            val preset = OfflineRegionPreset.catalog.firstOrNull { it.id == presetId } ?: return null
+            return preset to layer
+        }
     }
 }
 

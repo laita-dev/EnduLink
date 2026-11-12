@@ -157,7 +157,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         remainingKm: Double?,
         nextInstruction: String?,
         waypoints: List<GPXWaypoint>,
-        intermediateStops: List<GeoCoord>
+        intermediateStops: List<GeoCoord>,
+        remainingMinutes: Int? = null,
+        routeTypeLabel: String? = null
     ): ImageBitmap = lock.withLock {
         val cur = previewBitmap
         val bmp = if (cur != null && cur.width == width && cur.height == height) {
@@ -182,7 +184,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             remainingKm = remainingKm,
             nextInstruction = nextInstruction,
             waypoints = waypoints,
-            intermediateStops = intermediateStops
+            intermediateStops = intermediateStops,
+            remainingMinutes = remainingMinutes,
+            routeTypeLabel = routeTypeLabel
         )
         return bmp
     }
@@ -199,7 +203,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         remainingKm: Double?,
         nextInstruction: String?,
         waypoints: List<GPXWaypoint>,
-        intermediateStops: List<GeoCoord>
+        intermediateStops: List<GeoCoord>,
+        remainingMinutes: Int? = null,
+        routeTypeLabel: String? = null
     ): ByteArray = lock.withLock {
         val cur = cachedBitmap
         val bmp = if (cur != null && cur.width == width && cur.height == height) {
@@ -229,7 +235,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             remainingKm = remainingKm,
             nextInstruction = nextInstruction,
             waypoints = waypoints,
-            intermediateStops = intermediateStops
+            intermediateStops = intermediateStops,
+            remainingMinutes = remainingMinutes,
+            routeTypeLabel = routeTypeLabel
         )
 
         bmp.readPixels(
@@ -264,7 +272,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         remainingKm: Double?,
         nextInstruction: String?,
         waypoints: List<GPXWaypoint>,
-        intermediateStops: List<GeoCoord>
+        intermediateStops: List<GeoCoord>,
+        remainingMinutes: Int?,
+        routeTypeLabel: String?
     ) {
         val w = width
         val h = height
@@ -514,39 +524,54 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             strokeW = 1.8f * scale
         )
 
-        // 7. HUD Distancia Restante o Altitud (Esquina inferior derecha)
-        val infoLeft = w - 160f * scale
-        val infoTop = h - 72f * scale
+        // 7. HUD Distancia/Tiempo Restante (Enlace o Ruta) o Altitud (Esquina inferior derecha)
+        val hasRoadTiming = remainingKm != null && remainingKm > 0.0 && remainingMinutes != null
+        val hasGpxRemaining = !hasRoadTiming && remainingKm != null && (remainingKm > 0.0 || routeTypeLabel == "TRACK")
+        val infoWidth = (if (hasRoadTiming) 224f else 146f) * scale
+        val infoHeight = (if (hasRoadTiming) 68f else 58f) * scale
+        val infoLeft = w - infoWidth - 14f * scale
+        val infoTop = h - infoHeight - 14f * scale
         val infoRight = w - 14f * scale
         val infoBottom = h - 14f * scale
         canvas.drawRoundRect(infoLeft, infoTop, infoRight, infoBottom, rCard, rCard, hudCardPaint)
         canvas.drawRoundRect(infoLeft, infoTop, infoRight, infoBottom, rCard, rCard, hudBorderPaint)
 
-        val (infoLabel, infoValue) = if (remainingKm != null && remainingKm > 0.0) {
-            "RESTAN" to "${(remainingKm * 10.0).roundToInt() / 10.0} KM"
-        } else {
-            "ALTITUD" to "${rider.altitudeM.toInt()} M"
+        val (infoLabel, infoValue) = when {
+            hasRoadTiming && remainingKm != null && remainingMinutes != null -> {
+                val kind = routeTypeLabel ?: "RUTA"
+                val etaStr = formatTftEtaHm(remainingMinutes)
+                val kmStr = "${(remainingKm * 10.0).roundToInt() / 10.0} KM"
+                val durStr = formatTftDuration(remainingMinutes)
+                "$kind - LLEGADA $etaStr" to "$kmStr - $durStr"
+            }
+            hasGpxRemaining && remainingKm != null -> {
+                "GPX - RESTAN" to "${(remainingKm * 10.0).roundToInt() / 10.0} KM"
+            }
+            else -> {
+                "ALTITUD" to "${rider.altitudeM.toInt()} M"
+            }
         }
+        val infoValueSize = (if (hasRoadTiming) 13.5f else 15.5f) * scale
         TftVectorText.drawText(
             canvas = canvas,
             text = infoLabel,
             x = infoLeft + 12f * scale,
-            y = infoTop + 21f * scale,
+            y = infoTop + (if (hasRoadTiming) 23f else 21f) * scale,
             size = 10.5f * scale,
-            color = Color(139, 148, 158),
+            color = if (hasRoadTiming || hasGpxRemaining) Color(255, 107, 0) else Color(139, 148, 158),
             strokeW = 1.5f * scale
         )
         TftVectorText.drawText(
             canvas = canvas,
             text = infoValue,
             x = infoLeft + 12f * scale,
-            y = infoBottom - 14f * scale,
-            size = 15.5f * scale,
+            y = infoBottom - (if (hasRoadTiming) 16f else 14f) * scale,
+            size = infoValueSize,
             color = Color.White,
-            strokeW = 2.1f * scale
+            strokeW = (if (hasRoadTiming) 1.9f else 2.1f) * scale
         )
 
-        // 8. HUD Batería del móvil en tiempo real (Esquina superior derecha)
+        // 8. HUD Batería y Hora del móvil en tiempo real (Esquina superior derecha)
         val battStatus = getFreshBatteryStatus()
         val pct = if (battStatus.percentage >= 0) battStatus.percentage.coerceIn(0, 100) else 100
         val isCharging = battStatus.isCharging
@@ -559,6 +584,25 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         val rBatt = 10f * scale
         canvas.drawRoundRect(battLeft, battTop, battRight, battBottom, rBatt, rBatt, hudCardPaint)
         canvas.drawRoundRect(battLeft, battTop, battRight, battBottom, rBatt, rBatt, hudBorderPaint)
+
+        // Hora actual justo a la izquierda de la batería
+        val clockBoxWidth = 66f * scale
+        val clockRight = battLeft - 8f * scale
+        val clockLeft = clockRight - clockBoxWidth
+        canvas.drawRoundRect(clockLeft, battTop, clockRight, battBottom, rBatt, rBatt, hudCardPaint)
+        canvas.drawRoundRect(clockLeft, battTop, clockRight, battBottom, rBatt, rBatt, hudBorderPaint)
+        val clockStr = currentTftClockHm()
+        val clockTextSize = 13.5f * scale
+        val clockTextW = TftVectorText.measureText(clockStr, clockTextSize)
+        TftVectorText.drawText(
+            canvas = canvas,
+            text = clockStr,
+            x = clockLeft + ((clockBoxWidth - clockTextW) * 0.5f).coerceAtLeast(6f * scale),
+            y = battBottom - 13f * scale,
+            size = clockTextSize,
+            color = Color.White,
+            strokeW = 1.9f * scale
+        )
 
         val iconLeft = battLeft + 10f * scale
         val iconTop = battTop + 12f * scale
@@ -627,7 +671,7 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
 
         // 9. HUD Próximo Giro / Instrucción (Barra superior izquierda)
         if (isNavigating && !nextInstruction.isNullOrBlank()) {
-            val navRight = battLeft - 10f * scale
+            val navRight = clockLeft - 10f * scale
             val navLeft = 14f * scale
             canvas.drawRoundRect(navLeft, battTop, navRight, battBottom, rBatt, rBatt, hudCardPaint)
             canvas.drawRoundRect(navLeft, battTop, navRight, battBottom, rBatt, rBatt, hudBorderPaint)

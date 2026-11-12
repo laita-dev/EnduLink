@@ -74,6 +74,10 @@ private class TileLruCache<K, V>(private val maxSize: Int) {
         }
     }
 
+    fun remove(key: K) {
+        map.remove(key)
+    }
+
     fun clear() {
         map.clear()
     }
@@ -136,6 +140,46 @@ class TileStore(
         val updated = _downloadedPackages.value - packageKey
         _downloadedPackages.value = updated
         saveDownloadedPackages(updated)
+
+        val parsed = MapLayer.parseOfflinePackageKey(packageKey) ?: return
+        val (preset, layer) = parsed
+        scope.launch(Dispatchers.Default) {
+            val coveredByRemaining = updated
+                .mapNotNull { MapLayer.parseOfflinePackageKey(it) }
+                .filter { it.second == layer }
+                .flatMapTo(HashSet()) { (otherPreset, _) ->
+                    val otherBbox = MapBoundingBox(otherPreset.minLat, otherPreset.maxLat, otherPreset.minLon, otherPreset.maxLon)
+                    TileMath.enumerateBoundingBoxTiles(otherBbox, layer, otherPreset.minZoom, otherPreset.maxZoom)
+                }
+
+            val bbox = MapBoundingBox(preset.minLat, preset.maxLat, preset.minLon, preset.maxLon)
+            val tiles = TileMath.enumerateBoundingBoxTiles(bbox, layer, preset.minZoom, preset.maxZoom)
+            for (coord in tiles) {
+                if (coord !in coveredByRemaining) {
+                    memoryCacheLock.withLock { memoryCache.remove(coord) }
+                    bitmapCacheLock.withLock { bitmapCache.remove(coord) }
+                    TileDiskStorage.deleteDirectory(diskPath(coord))
+                }
+            }
+        }
+    }
+
+    fun getCacheSizeBytes(layer: MapLayer? = null): Long {
+        val path = if (layer != null) {
+            "${PlatformPaths.getTileCacheDir()}/${layer.raw}"
+        } else {
+            PlatformPaths.getTileCacheDir()
+        }
+        return TileDiskStorage.directorySizeBytes(path)
+    }
+
+    fun clearLayerCache(layer: MapLayer) {
+        val updated = _downloadedPackages.value.filterNot { it.endsWith("_${layer.raw}") }.toSet()
+        _downloadedPackages.value = updated
+        saveDownloadedPackages(updated)
+        memoryCacheLock.withLock { memoryCache.clear() }
+        bitmapCacheLock.withLock { bitmapCache.clear() }
+        TileDiskStorage.deleteDirectory("${PlatformPaths.getTileCacheDir()}/${layer.raw}")
     }
 
     private fun saveDownloadedPackages(set: Set<String>) {

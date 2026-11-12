@@ -4,7 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -64,9 +66,15 @@ fun LayersFloatingCard(
         }
 
         // Lista / Cuadrícula de capas
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier
+                .heightIn(max = 460.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
             val layers = listOf(
                 Triple(MapLayer.CARRETERAS, "Carreteras (Vial HD)", "Cartografía vial limpia estilo Apple Maps / MotIOS"),
+                Triple(MapLayer.ESRI_STREET, "Esri World Street", "Mapa vial Esri (idéntico al usado por MotIOS en TFT, Offline)"),
                 Triple(MapLayer.OSMAND, "OsmAnd Outdoor (HD)", "Mapa oficial OsmAnd de pistas, senderos y curvas (Offline)"),
                 Triple(MapLayer.TRAIL_OSM, "Trail OSM (CyclOSM)", "Pistas de tierra, senderos, fuentes y curvas (Offline)"),
                 Triple(MapLayer.IGN_TOPO, "IGN Topográfico", "MTN25 España oficial con curvas de nivel (Offline)"),

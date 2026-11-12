@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,6 +31,7 @@ import com.oscar.endulink.bike.BikeQr
 import com.oscar.endulink.bike.BikeState
 import com.oscar.endulink.bike.WifiSnapshot
 import com.oscar.endulink.platform.EncoderStats
+import com.oscar.endulink.tiles.MapLayer
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -41,6 +43,7 @@ fun BikeConnectionSheet(
     stats: EncoderStats,
     logs: List<String>,
     config: BikeMapConfig,
+    phoneLayer: MapLayer,
     livePreviewBitmap: ImageBitmap?,
     allowLocalLanTesting: Boolean,
     wifiSnapshot: WifiSnapshot?,
@@ -49,6 +52,7 @@ fun BikeConnectionSheet(
     onSetTileMagnification: (Double) -> Unit,
     onSetAutoZoomBySpeed: (Boolean) -> Unit,
     onSetBitrate: (Int) -> Unit,
+    onSetBikeMapLayer: (MapLayer?) -> Unit,
     onSetAllowLocalLanTesting: (Boolean) -> Unit,
     onSaveQr: (String) -> Boolean,
     onStartStream: () -> Unit,
@@ -62,7 +66,6 @@ fun BikeConnectionSheet(
     var qrTextInput by remember { mutableStateOf("") }
     var qrError by remember { mutableStateOf<String?>(null) }
     var showLogsDialog by remember { mutableStateOf(false) }
-    var showUpdateCheckDialog by remember { mutableStateOf(false) }
     var bikeIpInput by remember { mutableStateOf(wifiSnapshot?.gatewayCandidateIP ?: "192.168.43.1") }
     val clipboardManager = LocalClipboardManager.current
     val scrollState = rememberScrollState()
@@ -314,8 +317,11 @@ fun BikeConnectionSheet(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         modifier = Modifier.padding(8.dp)
                                     ) {
-                                        Text(text = "🏍️", fontSize = 24.sp)
-                                        Spacer(modifier = Modifier.height(4.dp))
+                                        MotorcycleSilhouetteIcon(
+                                            color = EnduPalette.TextMuted,
+                                            size = 26.dp
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
                                         Text(
                                             text = "Vista previa TFT",
                                             color = EnduPalette.TextMuted,
@@ -503,7 +509,85 @@ fun BikeConnectionSheet(
                             }
                         }
 
-                        Divider(color = EnduPalette.Outline.copy(alpha = 0.4f))
+                        HorizontalDivider(color = EnduPalette.Outline.copy(alpha = 0.4f))
+
+                        // Mapa independiente en la pantalla TFT (por defecto = igual que el móvil)
+                        val selectedBikeLayer = config.mapLayerRaw?.let { MapLayer.fromRaw(it) }
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Mapa en la moto",
+                                    color = EnduPalette.TextPrimary,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = selectedBikeLayer?.shortBadge ?: "Igual que el móvil (${phoneLayer.shortBadge})",
+                                    color = EnduPalette.Accent,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                val sameAsPhoneSelected = (selectedBikeLayer == null)
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (sameAsPhoneSelected) EnduPalette.Accent.copy(alpha = 0.25f) else EnduPalette.SurfaceHigh)
+                                        .border(
+                                            1.dp,
+                                            if (sameAsPhoneSelected) EnduPalette.Accent else Color.Transparent,
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable { onSetBikeMapLayer(null) }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = "Móvil (${phoneLayer.shortBadge})",
+                                        color = if (sameAsPhoneSelected) EnduPalette.Accent else EnduPalette.TextSecondary,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (sameAsPhoneSelected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                }
+
+                                MapLayer.entries.forEach { layerOption ->
+                                    val isSel = (selectedBikeLayer == layerOption)
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSel) EnduPalette.Accent.copy(alpha = 0.25f) else EnduPalette.SurfaceHigh)
+                                            .border(
+                                                1.dp,
+                                                if (isSel) EnduPalette.Accent else Color.Transparent,
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .clickable { onSetBikeMapLayer(layerOption) }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = layerOption.shortBadge,
+                                            color = if (isSel) EnduPalette.Accent else EnduPalette.TextSecondary,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(color = EnduPalette.Outline.copy(alpha = 0.4f))
 
                         // Toggle Auto-Zoom dinámico por velocidad
                         Row(
@@ -708,53 +792,6 @@ fun BikeConnectionSheet(
                         }
                     }
                 }
-
-                // ------------------------------------------
-                // TARJETA 5: Versión y Actualizaciones
-                // ------------------------------------------
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = EnduPalette.Surface),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            val isAndroid = com.oscar.endulink.platform.getPlatformName().startsWith("Android", ignoreCase = true)
-                            val appLabel = if (isAndroid) "EnduLink" else "motillOS"
-                            Text(
-                                text = "$appLabel v${com.oscar.endulink.platform.PlatformAppUpdater.getAppVersionName()}",
-                                color = EnduPalette.TextPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Comprobar si hay una nueva versión disponible",
-                                color = EnduPalette.TextMuted,
-                                fontSize = 11.sp
-                            )
-                        }
-
-                        Button(
-                            onClick = { showUpdateCheckDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.SurfaceHigh),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = "🔄 Actualizaciones",
-                                color = EnduPalette.Accent,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
             }
         }
     }
@@ -906,9 +943,5 @@ fun BikeConnectionSheet(
             },
             containerColor = EnduPalette.Surface
         )
-    }
-
-    if (showUpdateCheckDialog) {
-        AppUpdateDialog(onDismiss = { showUpdateCheckDialog = false })
     }
 }

@@ -1004,12 +1004,47 @@ class EnduController {
         knockBike("192.168.43.1")
     }
 
-    private fun renderTftFrame(width: Int, height: Int): ByteArray? {
+    private data class TftRouteHudSnapshot(
+        val roadRouteCoordinates: List<GeoCoord>?,
+        val remainingKm: Double?,
+        val remainingMinutes: Int?,
+        val routeTypeLabel: String?,
+        val nextInstruction: String?,
+        val waypoints: List<GPXWaypoint>,
+        val intermediateStops: List<GeoCoord>
+    )
+
+    private fun buildTftRouteHudSnapshot(): TftRouteHudSnapshot {
         val activeRoad = destinationRoadRoute ?: _approachRoadRoute.value
         val remKm = _trackProgress.value?.remainingKm ?: activeRoad?.distanceKm ?: selectedRoute?.totalDistanceKm
-        val nextStep = activeRoad?.currentInstruction(riderTelemetry.value.coordinate)
-        val stops = _intermediateWaypoints.value.map { it.coordinate }
-        val wpts = _quickMarkers.value
+        val remMinutes = activeRoad?.let { road ->
+            val km = remKm ?: road.distanceKm
+            val ratio = (km / road.distanceKm.coerceAtLeast(0.1)).coerceIn(0.0, 1.0)
+            if (km <= 0.05) 0 else maxOf(1, (road.expectedMinutes * ratio).roundToInt())
+        }
+        val routeTypeLabel = when {
+            destinationRoadRoute != null -> "RUTA"
+            _approachRoadRoute.value != null -> "ENLACE"
+            selectedRoute != null -> "TRACK"
+            else -> null
+        }
+        return TftRouteHudSnapshot(
+            roadRouteCoordinates = activeRoad?.coordinates,
+            remainingKm = remKm,
+            remainingMinutes = remMinutes,
+            routeTypeLabel = routeTypeLabel,
+            nextInstruction = activeRoad?.currentInstruction(riderTelemetry.value.coordinate),
+            waypoints = _quickMarkers.value,
+            intermediateStops = _intermediateWaypoints.value.map { it.coordinate }
+        )
+    }
+
+    private val effectiveBikeLayer: MapLayer
+        get() = _bikeMapConfig.value.mapLayerRaw?.let { MapLayer.fromRaw(it) } ?: _selectedLayer.value
+
+    private fun renderTftFrame(width: Int, height: Int): ByteArray? {
+        val snap = buildTftRouteHudSnapshot()
+        val bikeLayer = effectiveBikeLayer
 
         // Actualizar preview en directo periódicamente (~1.5 veces por segundo)
         if (++previewDecimator % 10 == 0) {
@@ -1019,14 +1054,16 @@ class EnduController {
                     height = 408,
                     config = _bikeMapConfig.value,
                     rider = riderTelemetry.value,
-                    layer = _selectedLayer.value,
+                    layer = bikeLayer,
                     activeRoute = selectedRoute,
-                    roadRouteCoordinates = activeRoad?.coordinates,
+                    roadRouteCoordinates = snap.roadRouteCoordinates,
                     isNavigating = _isNavigating.value,
-                    remainingKm = remKm,
-                    nextInstruction = nextStep,
-                    waypoints = wpts,
-                    intermediateStops = stops
+                    remainingKm = snap.remainingKm,
+                    nextInstruction = snap.nextInstruction,
+                    waypoints = snap.waypoints,
+                    intermediateStops = snap.intermediateStops,
+                    remainingMinutes = snap.remainingMinutes,
+                    routeTypeLabel = snap.routeTypeLabel
                 )
                 if (preview != null) {
                     _livePreviewBitmap.value = preview
@@ -1039,14 +1076,16 @@ class EnduController {
             height = height,
             config = _bikeMapConfig.value,
             rider = riderTelemetry.value,
-            layer = _selectedLayer.value,
+            layer = bikeLayer,
             activeRoute = selectedRoute,
-            roadRouteCoordinates = activeRoad?.coordinates,
+            roadRouteCoordinates = snap.roadRouteCoordinates,
             isNavigating = _isNavigating.value,
-            remainingKm = remKm,
-            nextInstruction = nextStep,
-            waypoints = wpts,
-            intermediateStops = stops
+            remainingKm = snap.remainingKm,
+            nextInstruction = snap.nextInstruction,
+            waypoints = snap.waypoints,
+            intermediateStops = snap.intermediateStops,
+            remainingMinutes = snap.remainingMinutes,
+            routeTypeLabel = snap.routeTypeLabel
         )
     }
 
@@ -1079,31 +1118,35 @@ class EnduController {
         SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
     }
 
+    fun setBikeMapLayer(layer: MapLayer?) {
+        _bikeMapConfig.value = _bikeMapConfig.value.copy(mapLayerRaw = layer?.raw)
+        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
+        refreshStaticPreview()
+    }
+
     fun setAllowLocalLanTesting(allow: Boolean) {
         _allowLocalLanTesting.value = allow
     }
 
     fun refreshStaticPreview() {
         scope.launch(Dispatchers.Default) {
-            val activeRoad = destinationRoadRoute ?: _approachRoadRoute.value
-            val remKm = _trackProgress.value?.remainingKm ?: activeRoad?.distanceKm ?: selectedRoute?.totalDistanceKm
-            val nextStep = activeRoad?.currentInstruction(riderTelemetry.value.coordinate)
-            val stops = _intermediateWaypoints.value.map { it.coordinate }
-            val wpts = _quickMarkers.value
+            val snap = buildTftRouteHudSnapshot()
 
             val preview = bikeMapRenderer.renderPreview(
                 width = 296,
                 height = 408,
                 config = _bikeMapConfig.value,
                 rider = riderTelemetry.value,
-                layer = _selectedLayer.value,
+                layer = effectiveBikeLayer,
                 activeRoute = selectedRoute,
-                roadRouteCoordinates = activeRoad?.coordinates,
+                roadRouteCoordinates = snap.roadRouteCoordinates,
                 isNavigating = _isNavigating.value,
-                remainingKm = remKm,
-                nextInstruction = nextStep,
-                waypoints = wpts,
-                intermediateStops = stops
+                remainingKm = snap.remainingKm,
+                nextInstruction = snap.nextInstruction,
+                waypoints = snap.waypoints,
+                intermediateStops = snap.intermediateStops,
+                remainingMinutes = snap.remainingMinutes,
+                routeTypeLabel = snap.routeTypeLabel
             )
             if (preview != null) {
                 _livePreviewBitmap.value = preview

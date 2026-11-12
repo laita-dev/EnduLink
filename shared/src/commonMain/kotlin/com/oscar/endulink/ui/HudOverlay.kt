@@ -912,8 +912,13 @@ fun HudOverlay(
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1
                             )
+                            val gpxRemText = if (approachRoute == null && trackProgress != null) {
+                                " · Restan ${(trackProgress.remainingKm * 10.0).roundToInt() / 10.0} km"
+                            } else {
+                                ""
+                            }
                             Text(
-                                text = "${(selectedRoute.totalDistanceKm * 10.0).roundToInt() / 10.0} km · +${selectedRoute.elevationGainM.roundToInt()} m",
+                                text = "${(selectedRoute.totalDistanceKm * 10.0).roundToInt() / 10.0} km · +${selectedRoute.elevationGainM.roundToInt()} m$gpxRemText",
                                 color = EnduPalette.TextMuted,
                                 fontSize = 10.5.sp
                             )

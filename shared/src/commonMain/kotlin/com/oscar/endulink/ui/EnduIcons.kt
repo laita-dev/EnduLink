@@ -767,4 +767,134 @@ fun CloseCrossIcon(
     }
 }
 
+@Composable
+fun RefreshArrowsIcon(
+    color: Color = Color.White,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.8f.dp.toPx()
+        val rect = androidx.compose.ui.geometry.Rect(w * 0.16f, h * 0.16f, w * 0.84f, h * 0.84f)
+        drawArc(
+            color = color,
+            startAngle = -55f,
+            sweepAngle = 260f,
+            useCenter = false,
+            topLeft = rect.topLeft,
+            size = rect.size,
+            style = Stroke(width = strokeW, cap = StrokeCap.Round)
+        )
+        // Punta de flecha superior derecha
+        val tipX = w * 0.82f
+        val tipY = h * 0.28f
+        val arrow = Path().apply {
+            moveTo(tipX - w * 0.18f, tipY - h * 0.02f)
+            lineTo(tipX, tipY)
+            lineTo(tipX + w * 0.02f, tipY - h * 0.18f)
+        }
+        drawPath(
+            path = arrow,
+            color = color,
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
+
+@Composable
+fun CheckCircleIcon(
+    color: Color = EnduPalette.Success,
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.9f.dp.toPx()
+        drawCircle(
+            color = color,
+            radius = w * 0.40f,
+            style = Stroke(width = strokeW)
+        )
+        val check = Path().apply {
+            moveTo(w * 0.30f, h * 0.52f)
+            lineTo(w * 0.44f, h * 0.66f)
+            lineTo(w * 0.72f, h * 0.36f)
+        }
+        drawPath(
+            path = check,
+            color = color,
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
+
+@Composable
+fun InfoCircleIcon(
+    color: Color = EnduPalette.Accent,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.7f.dp.toPx()
+        drawCircle(
+            color = color,
+            radius = w * 0.40f,
+            style = Stroke(width = strokeW)
+        )
+        drawCircle(
+            color = color,
+            radius = strokeW * 0.65f,
+            center = Offset(w * 0.50f, h * 0.32f)
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.50f, h * 0.46f),
+            end = Offset(w * 0.50f, h * 0.70f),
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun WarningTriangleIcon(
+    color: Color = EnduPalette.Warning,
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.8f.dp.toPx()
+        val tri = Path().apply {
+            moveTo(w * 0.50f, h * 0.14f)
+            lineTo(w * 0.88f, h * 0.82f)
+            lineTo(w * 0.12f, h * 0.82f)
+            close()
+        }
+        drawPath(
+            path = tri,
+            color = color,
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.50f, h * 0.38f),
+            end = Offset(w * 0.50f, h * 0.58f),
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+        drawCircle(
+            color = color,
+            radius = strokeW * 0.60f,
+            center = Offset(w * 0.50f, h * 0.70f)
+        )
+    }
+}
+
 

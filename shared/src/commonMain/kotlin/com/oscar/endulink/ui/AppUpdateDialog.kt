@@ -77,30 +77,35 @@ fun AppUpdateDialog(
             colors = CardDefaults.cardColors(containerColor = EnduPalette.Surface),
             modifier = modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(12.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(18.dp)
             ) {
-                // Cabecera
+                // Cabecera con iconos vectoriales alineados (un único botón de cierre)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(32.dp)
+                                .size(34.dp)
                                 .clip(CircleShape)
-                                .background(EnduPalette.Accent.copy(alpha = 0.2f))
+                                .background(EnduPalette.Accent.copy(alpha = 0.18f))
                         ) {
-                            Text(text = "🏍️", fontSize = 16.sp)
+                            MotorcycleSilhouetteIcon(
+                                color = EnduPalette.Accent,
+                                size = 18.dp
+                            )
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
                                 text = if (isAndroid) "EnduLink" else "motillOS",
@@ -116,24 +121,14 @@ fun AppUpdateDialog(
                         }
                     }
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "🔄",
-                            fontSize = 15.sp,
-                            modifier = Modifier
-                                .clickable { checkUpdates() }
-                                .padding(6.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "✕",
-                            color = EnduPalette.TextMuted,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clickable { onDismiss() }
-                                .padding(4.dp)
-                        )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .clickable { onDismiss() }
+                    ) {
+                        CloseCrossIcon(color = EnduPalette.TextMuted, size = 14.dp)
                     }
                 }
 
@@ -145,12 +140,12 @@ fun AppUpdateDialog(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 24.dp),
+                                .padding(vertical = 22.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             CircularProgressIndicator(
                                 color = EnduPalette.Accent,
-                                modifier = Modifier.size(36.dp),
+                                modifier = Modifier.size(34.dp),
                                 strokeWidth = 3.dp
                             )
                             Spacer(modifier = Modifier.height(14.dp))
@@ -164,46 +159,57 @@ fun AppUpdateDialog(
 
                     UpdateUiState.UP_TO_DATE -> {
                         Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 14.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Box(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(EnduPalette.Success.copy(alpha = 0.2f))
+                                    .size(46.dp)
+                                    .clip(CircleShape)
+                                    .background(EnduPalette.Success.copy(alpha = 0.18f))
                             ) {
-                                Text(text = "✓", color = EnduPalette.Success, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                                CheckCircleIcon(color = EnduPalette.Success, size = 24.dp)
                             }
-                            Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "¡Estás al día!",
+                                text = "Estás al día",
                                 color = EnduPalette.TextPrimary,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "Tienes instalada la versión más reciente (v$currentVersion).",
                                 color = EnduPalette.TextMuted,
-                                fontSize = 12.sp
+                                fontSize = 11.5.sp
                             )
-                            Spacer(modifier = Modifier.height(16.dp))
+
+                            val latestNotes = releaseInfo?.releaseNotes
+                            if (!latestNotes.isNullOrBlank()) {
+                                ReleaseNotesCard(
+                                    title = "Cambios en v${releaseInfo?.versionName ?: currentVersion}:",
+                                    notes = latestNotes
+                                )
+                            }
+
                             Button(
                                 onClick = { checkUpdates() },
                                 colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.SurfaceHigh),
                                 shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.height(40.dp)
+                                modifier = Modifier.fillMaxWidth().height(40.dp)
                             ) {
-                                Text(
-                                    text = "🔄 Buscar actualizaciones",
-                                    color = EnduPalette.TextPrimary,
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    RefreshArrowsIcon(color = EnduPalette.Accent, size = 15.dp)
+                                    Text(
+                                        text = "Buscar actualizaciones",
+                                        color = EnduPalette.TextPrimary,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                             }
                         }
                     }
@@ -215,7 +221,7 @@ fun AppUpdateDialog(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                // Banner de versión nueva
+                                // Banner de versión nueva con icono alineado
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -223,10 +229,18 @@ fun AppUpdateDialog(
                                         .background(EnduPalette.Accent.copy(alpha = 0.18f))
                                         .border(1.dp, EnduPalette.Accent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
                                         .padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text(text = "🚀", fontSize = 20.sp)
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(30.dp)
+                                            .clip(CircleShape)
+                                            .background(EnduPalette.Accent.copy(alpha = 0.22f))
+                                    ) {
+                                        DownloadTrayIcon(color = EnduPalette.Accent, size = 16.dp)
+                                    }
                                     Column {
                                         Text(
                                             text = "Nueva versión: v${rel.versionName}",
@@ -238,7 +252,7 @@ fun AppUpdateDialog(
                                             text = if (isAndroid) {
                                                 rel.apkSizeMb?.let { "Tamaño APK: $it MB" } ?: "Lista para descargar"
                                             } else {
-                                                "Actualización disponible"
+                                                "Actualización disponible para iOS"
                                             },
                                             color = EnduPalette.TextSecondary,
                                             fontSize = 11.sp
@@ -247,32 +261,12 @@ fun AppUpdateDialog(
                                 }
 
                                 // Notas de versión (Changelog)
-                                Text(
-                                    text = "Novedades de la actualización:",
-                                    color = EnduPalette.TextMuted,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold
+                                ReleaseNotesCard(
+                                    title = "Cambios en v${rel.versionName}:",
+                                    notes = rel.releaseNotes.ifBlank { "Mejoras de rendimiento y corrección de errores." }
                                 )
 
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 140.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(EnduPalette.SurfaceHigh)
-                                        .padding(10.dp)
-                                        .verticalScroll(rememberScrollState())
-                                ) {
-                                    Text(
-                                        text = rel.releaseNotes.ifBlank { "Mejoras de rendimiento y corrección de errores." },
-                                        color = EnduPalette.TextSecondary,
-                                        fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        lineHeight = 15.sp
-                                    )
-                                }
-
-                                // Botón de acción principal
+                                // Acción principal: descarga directa en Android; en iOS solo aviso informativo sin descarga
                                 if (isAndroid && rel.apkDownloadUrl != null) {
                                     Button(
                                         onClick = {
@@ -293,24 +287,36 @@ fun AppUpdateDialog(
                                         shape = RoundedCornerShape(10.dp),
                                         modifier = Modifier.fillMaxWidth().height(42.dp)
                                     ) {
-                                        Text(
-                                            text = "⬇️ Descargar e Instalar APK",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            DownloadTrayIcon(color = Color.White, size = 16.dp)
+                                            Text(
+                                                text = "Descargar e Instalar APK",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp
+                                            )
+                                        }
                                     }
                                 } else {
-                                    // En iOS solo se informa de que existe una nueva versión (sin descarga directa ni enlaces al repositorio)
-                                    Box(
+                                    Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(EnduPalette.SurfaceHigh)
-                                            .padding(10.dp)
+                                            .padding(10.dp),
+                                        verticalAlignment = Alignment.Top,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
+                                        InfoCircleIcon(
+                                            color = EnduPalette.Accent,
+                                            size = 16.dp,
+                                            modifier = Modifier.padding(top = 1.dp)
+                                        )
                                         Text(
-                                            text = "ℹ️ Hay una nueva versión disponible (v${rel.versionName}). Solicita o instala el nuevo paquete desde tu herramienta habitual.",
+                                            text = "Hay una nueva versión disponible (v${rel.versionName}). Actualízala desde SideStore / AltStore o tu herramienta habitual.",
                                             color = EnduPalette.TextSecondary,
                                             fontSize = 11.5.sp,
                                             lineHeight = 16.sp
@@ -367,36 +373,41 @@ fun AppUpdateDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 12.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(text = "⚠️", fontSize = 28.sp)
-                            Spacer(modifier = Modifier.height(6.dp))
+                            WarningTriangleIcon(color = EnduPalette.Warning, size = 28.dp)
                             Text(
                                 text = "No se pudo comprobar",
                                 color = EnduPalette.Danger,
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = errorMessage ?: "Comprueba tu conexión a Internet.",
                                 color = EnduPalette.TextMuted,
                                 fontSize = 11.5.sp
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
                             Button(
                                 onClick = { checkUpdates() },
                                 colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.SurfaceHigh),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
-                                Text("Reintentar", color = EnduPalette.TextPrimary, fontSize = 12.sp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    RefreshArrowsIcon(color = EnduPalette.Accent, size = 14.dp)
+                                    Text("Reintentar", color = EnduPalette.TextPrimary, fontSize = 12.sp)
+                                }
                             }
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-                Divider(color = EnduPalette.Outline.copy(alpha = 0.4f))
+                HorizontalDivider(color = EnduPalette.Outline.copy(alpha = 0.4f))
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Pie de diálogo
@@ -426,3 +437,37 @@ fun AppUpdateDialog(
     }
 }
 
+@Composable
+private fun ReleaseNotesCard(
+    title: String,
+    notes: String
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = title,
+            color = EnduPalette.TextMuted,
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 135.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(EnduPalette.SurfaceHigh)
+                .padding(10.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text(
+                text = notes,
+                color = EnduPalette.TextSecondary,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                lineHeight = 15.sp
+            )
+        }
+    }
+}

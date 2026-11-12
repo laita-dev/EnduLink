@@ -43,6 +43,22 @@ actual object TileDiskStorage {
         return sizeNum.longLongValue
     }
 
+    actual fun directorySizeBytes(path: String): Long {
+        val fm = NSFileManager.defaultManager
+        if (!fm.fileExistsAtPath(path)) return 0L
+        val enumerator = fm.enumeratorAtPath(path) ?: return fileSize(path)
+        var total = 0L
+        while (true) {
+            val rel = enumerator.nextObject() as? String ?: break
+            val full = "$path/$rel"
+            val attrs = fm.attributesOfItemAtPath(full, null) ?: continue
+            if (attrs[NSFileType] == NSFileTypeRegular) {
+                total += (attrs[NSFileSize] as? NSNumber)?.longLongValue ?: 0L
+            }
+        }
+        return total
+    }
+
     actual fun deleteDirectory(path: String) {
         NSFileManager.defaultManager.removeItemAtPath(path, error = null)
     }

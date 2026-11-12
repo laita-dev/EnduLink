@@ -7,9 +7,19 @@ import com.oscar.endulink.tiles.TileStore
 import com.oscar.endulink.trail.GPXRoute
 import com.oscar.endulink.trail.GPXWaypoint
 import com.oscar.endulink.trail.GeoCoord
+import kotlin.concurrent.Volatile
 import kotlinx.cinterop.*
 import platform.darwin.*
 import platform.posix.*
+
+interface IosWifiBridge {
+    fun currentWifiIp(): String?
+}
+
+object IosWifiBridgeHolder {
+    @Volatile
+    var bridge: IosWifiBridge? = null
+}
 
 private fun htonsPort(value: UShort): UShort {
     val v = value.toInt()
@@ -65,7 +75,8 @@ private fun probeLocalIpv4(interfaceName: String?, remoteHost: String): String? 
 }
 
 actual fun getWifiSnapshot(): WifiSnapshot? {
-    val ip = probeLocalIpv4("en0", "192.168.43.1")
+    val ip = IosWifiBridgeHolder.bridge?.currentWifiIp()
+        ?: probeLocalIpv4("en0", "192.168.43.1")
         ?: probeLocalIpv4("en0", "8.8.8.8")
         ?: probeLocalIpv4("bridge100", "172.20.10.2")
         ?: probeLocalIpv4(null, "192.168.43.1")
@@ -95,7 +106,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         remainingKm: Double?,
         nextInstruction: String?,
         waypoints: List<GPXWaypoint>,
-        intermediateStops: List<GeoCoord>
+        intermediateStops: List<GeoCoord>,
+        remainingMinutes: Int?,
+        routeTypeLabel: String?
     ): ByteArray? {
         return scene.renderRgba(
             width = width,
@@ -109,7 +122,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             remainingKm = remainingKm,
             nextInstruction = nextInstruction,
             waypoints = waypoints,
-            intermediateStops = intermediateStops
+            intermediateStops = intermediateStops,
+            remainingMinutes = remainingMinutes,
+            routeTypeLabel = routeTypeLabel
         )
     }
 
@@ -125,7 +140,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         remainingKm: Double?,
         nextInstruction: String?,
         waypoints: List<GPXWaypoint>,
-        intermediateStops: List<GeoCoord>
+        intermediateStops: List<GeoCoord>,
+        remainingMinutes: Int?,
+        routeTypeLabel: String?
     ): ImageBitmap? {
         return scene.renderPreview(
             width = width,
@@ -139,7 +156,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             remainingKm = remainingKm,
             nextInstruction = nextInstruction,
             waypoints = waypoints,
-            intermediateStops = intermediateStops
+            intermediateStops = intermediateStops,
+            remainingMinutes = remainingMinutes,
+            routeTypeLabel = routeTypeLabel
         )
     }
 }
