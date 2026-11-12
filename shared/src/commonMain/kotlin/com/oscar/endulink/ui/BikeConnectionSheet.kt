@@ -725,14 +725,16 @@ fun BikeConnectionSheet(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
+                            val isAndroid = com.oscar.endulink.platform.getPlatformName().startsWith("Android", ignoreCase = true)
+                            val appLabel = if (isAndroid) "EnduLink" else "motillOS"
                             Text(
-                                text = "EnduLink v${com.oscar.endulink.platform.PlatformAppUpdater.getAppVersionName()}",
+                                text = "$appLabel v${com.oscar.endulink.platform.PlatformAppUpdater.getAppVersionName()}",
                                 color = EnduPalette.TextPrimary,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Comprobar nueva versión en GitHub",
+                                text = "Comprobar si hay una nueva versión disponible",
                                 color = EnduPalette.TextMuted,
                                 fontSize = 11.sp
                             )

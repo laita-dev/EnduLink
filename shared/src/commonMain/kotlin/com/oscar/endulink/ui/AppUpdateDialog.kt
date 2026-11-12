@@ -103,7 +103,7 @@ fun AppUpdateDialog(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "EnduLink",
+                                text = if (isAndroid) "EnduLink" else "motillOS",
                                 color = EnduPalette.TextPrimary,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
@@ -155,7 +155,7 @@ fun AppUpdateDialog(
                             )
                             Spacer(modifier = Modifier.height(14.dp))
                             Text(
-                                text = "Comprobando actualizaciones en GitHub...",
+                                text = "Comprobando si hay nuevas versiones...",
                                 color = EnduPalette.TextSecondary,
                                 fontSize = 12.5.sp
                             )
@@ -238,7 +238,7 @@ fun AppUpdateDialog(
                                             text = if (isAndroid) {
                                                 rel.apkSizeMb?.let { "Tamaño APK: $it MB" } ?: "Lista para descargar"
                                             } else {
-                                                rel.ipaSizeMb?.let { "Tamaño IPA: $it MB" } ?: "Lista para descargar"
+                                                "Actualización disponible"
                                             },
                                             color = EnduPalette.TextSecondary,
                                             fontSize = 11.sp
@@ -301,29 +301,28 @@ fun AppUpdateDialog(
                                         )
                                     }
                                 } else {
-                                    // iOS o sin APK directo
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    // En iOS solo se informa de que existe una nueva versión (sin descarga directa ni enlaces al repositorio)
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(EnduPalette.SurfaceHigh)
+                                            .padding(10.dp)
                                     ) {
-                                        if (rel.ipaDownloadUrl != null) {
-                                            Button(
-                                                onClick = { PlatformAppUpdater.openExternalUrl(rel.ipaDownloadUrl) },
-                                                colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.Accent),
-                                                shape = RoundedCornerShape(10.dp),
-                                                modifier = Modifier.weight(1f).height(42.dp)
-                                            ) {
-                                                Text("⬇️ Descargar IPA", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                            }
-                                        }
-                                        Button(
-                                            onClick = { PlatformAppUpdater.openExternalUrl(rel.htmlUrl) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.SurfaceHigh),
-                                            shape = RoundedCornerShape(10.dp),
-                                            modifier = Modifier.weight(1f).height(42.dp)
-                                        ) {
-                                            Text("🌐 Ver en GitHub", color = EnduPalette.TextPrimary, fontSize = 12.sp)
-                                        }
+                                        Text(
+                                            text = "ℹ️ Hay una nueva versión disponible (v${rel.versionName}). Solicita o instala el nuevo paquete desde tu herramienta habitual.",
+                                            color = EnduPalette.TextSecondary,
+                                            fontSize = 11.5.sp,
+                                            lineHeight = 16.sp
+                                        )
+                                    }
+                                    Button(
+                                        onClick = { onDismiss() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.Accent),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth().height(40.dp)
+                                    ) {
+                                        Text("Entendido", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
                                     }
                                 }
                             }
@@ -407,12 +406,9 @@ fun AppUpdateDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "github.com/laita-dev/EnduLink",
-                        color = EnduPalette.Accent,
-                        fontSize = 10.5.sp,
-                        modifier = Modifier.clickable {
-                            PlatformAppUpdater.openExternalUrl("https://github.com/laita-dev/EnduLink")
-                        }
+                        text = if (isAndroid) "EnduLink · Android" else "motillOS · iOS",
+                        color = EnduPalette.TextMuted,
+                        fontSize = 10.5.sp
                     )
 
                     Text(

@@ -9,6 +9,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.oscar.endulink.platform.PlatformBackHandler
 import com.oscar.endulink.platform.closeApp
+import com.oscar.endulink.platform.rememberPlatformSafeAreaPadding
 import com.oscar.endulink.platform.showPlatformToast
 import com.oscar.endulink.trail.*
 import kotlinx.datetime.Clock
@@ -150,7 +151,7 @@ fun App() {
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
 
-                // 1. MAPA INTERACTIVO A PANTALLA COMPLETA
+                // 1. MAPA INTERACTIVO A PANTALLA COMPLETA (borde a borde)
                 InteractiveMap(
                     controller = controller,
                     layer = layer,
@@ -170,7 +171,13 @@ fun App() {
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // 2. HUD SUPERIOR, CONTROLES DERECHA Y BARRA INFERIOR MOTIOS
+                // 2. CAPA DE INTERFAZ CON SAFE AREA DINÁMICA (respeta Dynamic Island, Notch, barra de estado, Home Indicator y bordes curvos en cualquier modelo)
+                val safeAreaPadding = rememberPlatformSafeAreaPadding()
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(safeAreaPadding)
+                ) {
                 HudOverlay(
                     rider = rider,
                     trackProgress = trackProgress,
@@ -622,6 +629,7 @@ fun App() {
                     AppUpdateDialog(
                         onDismiss = { showUpdateDialog = false }
                     )
+                }
                 }
             }
         }

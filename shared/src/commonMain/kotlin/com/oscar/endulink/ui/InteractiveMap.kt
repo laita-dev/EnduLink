@@ -87,20 +87,23 @@ fun InteractiveMap(
                         val curMarkers = routeWpts + controller.quickMarkers.value
                         val rad = -curHeading * PI / 180.0
                         val zInt = curZoom.toInt()
-                        val tileSizePx = 256.0 * (2.0.pow(curZoom - zInt))
+                        val baseTilePx = maxOf(256.0, 176.dp.toPx().toDouble())
+                        val tileSizePx = baseTilePx * (2.0.pow(curZoom - zInt))
                         val (centerFracX, centerFracY) = TileMath.latLonToFractionalTile(curCenter.latitude, curCenter.longitude, zInt)
+                        val pinOffsetPx = 14.dp.toPx().toDouble()
+                        val hitRadiusPx = 28.dp.toPx().toDouble()
 
-                        // Comprobar si se ha pulsado sobre algún waypoint (área táctil cómoda de 42 px)
+                        // Comprobar si se ha pulsado sobre algún waypoint (área táctil adaptada a densidad de pantalla)
                         val tappedWpt = curMarkers.lastOrNull { wpt ->
                             val (ptFracX, ptFracY) = TileMath.latLonToFractionalTile(wpt.latitude, wpt.longitude, zInt)
                             val unrotX = (ptFracX - centerFracX) * tileSizePx
                             val unrotY = (ptFracY - centerFracY) * tileSizePx
                             val screenX = screenCenterX + (unrotX * cos(rad) - unrotY * sin(rad))
                             val screenY = screenCenterY + (unrotX * sin(rad) + unrotY * cos(rad))
-                            val pinHeadY = screenY - 20.0
+                            val pinHeadY = screenY - pinOffsetPx
                             val dx = tapOffset.x - screenX
                             val dy = tapOffset.y - pinHeadY
-                            sqrt(dx * dx + dy * dy) <= 42.0
+                            sqrt(dx * dx + dy * dy) <= hitRadiusPx
                         }
 
                         if (tappedWpt != null) {
@@ -114,6 +117,7 @@ fun InteractiveMap(
                         // Pulsación larga: calcular coordenadas geográficas reales compensando centro, zoom y rumbo
                         val w = size.width.toFloat()
                         val h = size.height.toFloat()
+                        val baseTilePx = maxOf(256.0, 176.dp.toPx().toDouble())
                         val coord = screenOffsetToGeoCoord(
                             screenX = offset.x,
                             screenY = offset.y,
@@ -121,7 +125,8 @@ fun InteractiveMap(
                             height = h,
                             center = controller.mapCenter.value,
                             zoom = controller.mapZoom.value,
-                            heading = controller.mapHeading.value
+                            heading = controller.mapHeading.value,
+                            baseTilePx = baseTilePx
                         )
                         controller.onMapLongPress(coord)
                     },
@@ -156,7 +161,8 @@ fun InteractiveMap(
                             val zInt = curZ.toInt()
 
                             val (fracX, fracY) = TileMath.latLonToFractionalTile(curCenter.latitude, curCenter.longitude, zInt)
-                            val tileSizePx = 256.0 * (2.0.pow(curZ - zInt))
+                            val baseTilePx = maxOf(256.0, 176.dp.toPx().toDouble())
+                            val tileSizePx = baseTilePx * (2.0.pow(curZ - zInt))
 
                             // Compensar la rotación del mapa para que el arrastre siga el dedo exactamente en cualquier ángulo
                             val rad = curHead * PI / 180.0
@@ -183,7 +189,8 @@ fun InteractiveMap(
         drawRect(color = EnduPalette.Background)
 
         val zInt = zoom.toInt()
-        val tileSizePx = (256.0 * (2.0.pow(zoom - zInt))).toFloat()
+        val baseTilePx = maxOf(256.0, 176.dp.toPx().toDouble())
+        val tileSizePx = (baseTilePx * (2.0.pow(zoom - zInt))).toFloat()
         val (centerFracX, centerFracY) = TileMath.latLonToFractionalTile(center.latitude, center.longitude, zInt)
 
         fun geoToScreen(coord: GeoCoord): Offset {
@@ -291,35 +298,35 @@ fun InteractiveMap(
             // 10. Paradas intermedias de ruta por carretera (estilo Google Maps multi-waypoint)
             intermediateWaypoints.forEachIndexed { idx, wpt ->
                 val pt = geoToScreen(wpt.coordinate)
-                drawCircle(color = Color.Black, radius = 13f, center = pt)
-                drawCircle(color = Color(0xFF00D4FF), radius = 11f, center = pt)
-                drawCircle(color = Color.White, radius = 7.5f, center = pt)
-                drawCircle(color = Color(0xFF0D1117), radius = 4f, center = pt)
+                drawCircle(color = Color.Black, radius = 9.dp.toPx(), center = pt)
+                drawCircle(color = Color(0xFF00D4FF), radius = 7.5.dp.toPx(), center = pt)
+                drawCircle(color = Color.White, radius = 5.dp.toPx(), center = pt)
+                drawCircle(color = Color(0xFF0D1117), radius = 2.8.dp.toPx(), center = pt)
             }
 
             // 11. Pin del Destino Final
             if (searchPin != null) {
                 val destPos = geoToScreen(searchPin!!.coordinate)
-                drawCircle(color = Color.Black, radius = 12f, center = destPos)
-                drawCircle(color = EnduPalette.Accent, radius = 9.5f, center = destPos)
-                drawCircle(color = Color.White, radius = 4f, center = destPos)
+                drawCircle(color = Color.Black, radius = 8.5.dp.toPx(), center = destPos)
+                drawCircle(color = EnduPalette.Accent, radius = 6.8.dp.toPx(), center = destPos)
+                drawCircle(color = Color.White, radius = 2.8.dp.toPx(), center = destPos)
             }
 
             // 12. Chincheta de punto seleccionado en el mapa mediante pulsación larga
             if (droppedPin != null) {
                 val pinPos = geoToScreen(droppedPin!!.coordinate)
                 // Halo de pulsación translúcido
-                drawCircle(color = EnduPalette.Accent.copy(alpha = 0.35f), radius = 24f, center = pinPos)
-                drawCircle(color = Color.Black, radius = 12f, center = pinPos)
-                drawCircle(color = Color(0xFFFF5252), radius = 9.5f, center = pinPos)
-                drawCircle(color = Color.White, radius = 4f, center = pinPos)
+                drawCircle(color = EnduPalette.Accent.copy(alpha = 0.35f), radius = 17.dp.toPx(), center = pinPos)
+                drawCircle(color = Color.Black, radius = 8.5.dp.toPx(), center = pinPos)
+                drawCircle(color = Color(0xFFFF5252), radius = 6.8.dp.toPx(), center = pinPos)
+                drawCircle(color = Color.White, radius = 2.8.dp.toPx(), center = pinPos)
             }
 
             // 13. Cursor de inspección del perfil de altitud
             scrubbedPoint?.let { scrub ->
                 val scrubPos = geoToScreen(scrub.coordinate)
-                drawCircle(color = Color.White, radius = 9f, center = scrubPos)
-                drawCircle(color = EnduPalette.Accent, radius = 6f, center = scrubPos)
+                drawCircle(color = Color.White, radius = 6.5.dp.toPx(), center = scrubPos)
+                drawCircle(color = EnduPalette.Accent, radius = 4.5.dp.toPx(), center = scrubPos)
             }
 
             // 14. Marcadores y Waypoints con chinchetas visuales y etiquetas (incluyendo los embebidos en el GPX activo)
@@ -345,18 +352,18 @@ fun InteractiveMap(
         if (isPickingOnMap) {
             val pinTip = screenCenter
             // Halo de mira central
-            drawCircle(color = EnduPalette.Accent.copy(alpha = 0.25f), radius = 22f, center = pinTip)
-            drawCircle(color = Color.Black, radius = 5f, center = pinTip)
-            drawCircle(color = Color.White, radius = 2.5f, center = pinTip)
+            drawCircle(color = EnduPalette.Accent.copy(alpha = 0.25f), radius = 16.dp.toPx(), center = pinTip)
+            drawCircle(color = Color.Black, radius = 3.5.dp.toPx(), center = pinTip)
+            drawCircle(color = Color.White, radius = 1.8.dp.toPx(), center = pinTip)
 
             // Chincheta flotante que apunta directamente al centro exacto
-            val pinHeadY = pinTip.y - 28f
-            drawLine(color = Color.Black, start = Offset(pinTip.x, pinHeadY + 8f), end = pinTip, strokeWidth = 5f)
-            drawLine(color = EnduPalette.Accent, start = Offset(pinTip.x, pinHeadY + 8f), end = pinTip, strokeWidth = 3f)
+            val pinHeadY = pinTip.y - 20.dp.toPx()
+            drawLine(color = Color.Black, start = Offset(pinTip.x, pinHeadY + 6.dp.toPx()), end = pinTip, strokeWidth = 3.5.dp.toPx())
+            drawLine(color = EnduPalette.Accent, start = Offset(pinTip.x, pinHeadY + 6.dp.toPx()), end = pinTip, strokeWidth = 2.2.dp.toPx())
 
-            drawCircle(color = Color.Black, radius = 12f, center = Offset(pinTip.x, pinHeadY))
-            drawCircle(color = EnduPalette.Accent, radius = 9.5f, center = Offset(pinTip.x, pinHeadY))
-            drawCircle(color = Color.White, radius = 4f, center = Offset(pinTip.x, pinHeadY))
+            drawCircle(color = Color.Black, radius = 8.5.dp.toPx(), center = Offset(pinTip.x, pinHeadY))
+            drawCircle(color = EnduPalette.Accent, radius = 6.8.dp.toPx(), center = Offset(pinTip.x, pinHeadY))
+            drawCircle(color = Color.White, radius = 2.8.dp.toPx(), center = Offset(pinTip.x, pinHeadY))
         }
     }
 }
@@ -451,29 +458,29 @@ private fun DrawScope.drawRoutePolyline(
         drawPath(
             path = path,
             color = baseColor.copy(alpha = 0.55f),
-            style = Stroke(width = 5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            style = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
     } else {
         // Línea principal con contorno negro de alto contraste
         drawPath(
             path = path,
             color = Color(0xFF0E, 0x11, 0x17),
-            style = Stroke(width = 10f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            style = Stroke(width = 7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
         drawPath(
             path = path,
             color = baseColor,
-            style = Stroke(width = 6f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            style = Stroke(width = 4.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
 
         // Inicio (Verde) y Fin (Rojo)
         val startPos = geoToScreen(coords.first())
-        drawCircle(color = Color.Black, radius = 9f, center = startPos)
-        drawCircle(color = EnduPalette.Success, radius = 7f, center = startPos)
+        drawCircle(color = Color.Black, radius = 6.5.dp.toPx(), center = startPos)
+        drawCircle(color = EnduPalette.Success, radius = 5.dp.toPx(), center = startPos)
 
         val endPos = geoToScreen(coords.last())
-        drawCircle(color = Color.Black, radius = 9f, center = endPos)
-        drawCircle(color = EnduPalette.Danger, radius = 7f, center = endPos)
+        drawCircle(color = Color.Black, radius = 6.5.dp.toPx(), center = endPos)
+        drawCircle(color = EnduPalette.Danger, radius = 5.dp.toPx(), center = endPos)
     }
 }
 
@@ -496,33 +503,35 @@ private fun DrawScope.drawWaypointMarker(
     // Contrarrotar respecto al heading para que la chincheta y el texto queden siempre verticales
     rotate(degrees = heading.toFloat(), pivot = pos) {
         // 1. Sombra en el suelo
+        val sw = 10.dp.toPx()
+        val sh = 4.5.dp.toPx()
         drawOval(
             color = Color.Black.copy(alpha = 0.35f),
-            topLeft = Offset(pos.x - 7f, pos.y - 3f),
-            size = Size(14f, 6f)
+            topLeft = Offset(pos.x - sw / 2f, pos.y - sh / 2f),
+            size = Size(sw, sh)
         )
 
         // 2. Vástago/aguja de la chincheta
-        val pinHeadY = pos.y - 20f
+        val pinHeadY = pos.y - 14.dp.toPx()
         drawLine(
             color = Color.Black,
-            start = Offset(pos.x, pinHeadY + 4f),
+            start = Offset(pos.x, pinHeadY + 3.dp.toPx()),
             end = pos,
-            strokeWidth = 4.5f
+            strokeWidth = 3.2.dp.toPx()
         )
         drawLine(
             color = Color.White,
-            start = Offset(pos.x, pinHeadY + 4f),
+            start = Offset(pos.x, pinHeadY + 3.dp.toPx()),
             end = pos,
-            strokeWidth = 2.5f
+            strokeWidth = 1.8.dp.toPx()
         )
 
         // 3. Cabeza de la chincheta
         val pinCenter = Offset(pos.x, pinHeadY)
-        drawCircle(color = Color.Black, radius = 13.5f, center = pinCenter)
-        drawCircle(color = markerColor, radius = 11.5f, center = pinCenter)
-        drawCircle(color = Color.White, radius = 6f, center = pinCenter)
-        drawCircle(color = Color(0xFF0F172A), radius = 3.5f, center = pinCenter)
+        drawCircle(color = Color.Black, radius = 9.5.dp.toPx(), center = pinCenter)
+        drawCircle(color = markerColor, radius = 8.dp.toPx(), center = pinCenter)
+        drawCircle(color = Color.White, radius = 4.2.dp.toPx(), center = pinCenter)
+        drawCircle(color = Color(0xFF0F172A), radius = 2.4.dp.toPx(), center = pinCenter)
 
         // 4. Cartela flotante con el nombre del Waypoint
         val textLayout = textMeasurer.measure(
@@ -533,25 +542,25 @@ private fun DrawScope.drawWaypointMarker(
                 fontWeight = FontWeight.Bold
             )
         )
-        val padH = 6f
-        val padV = 3f
+        val padH = 5.dp.toPx()
+        val padV = 2.5.dp.toPx()
         val badgeW = textLayout.size.width + padH * 2
         val badgeH = textLayout.size.height + padV * 2
         val badgeLeft = pos.x - badgeW / 2f
-        val badgeTop = pinHeadY - 14f - badgeH
+        val badgeTop = pinHeadY - 10.dp.toPx() - badgeH
 
         drawRoundRect(
             color = Color(0xEE0B111A),
             topLeft = Offset(badgeLeft, badgeTop),
             size = Size(badgeW, badgeH),
-            cornerRadius = CornerRadius(5f, 5f)
+            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
         )
         drawRoundRect(
             color = markerColor,
             topLeft = Offset(badgeLeft, badgeTop),
             size = Size(badgeW, badgeH),
-            cornerRadius = CornerRadius(5f, 5f),
-            style = Stroke(width = 1.2f)
+            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
+            style = Stroke(width = 1.dp.toPx())
         )
         drawText(
             textLayoutResult = textLayout,
@@ -572,15 +581,19 @@ private fun DrawScope.drawRiderMarker(pos: Offset, rider: RiderTelemetry) {
     // La escena completa ya está rotada por -heading, por lo que el rumbo en coordenadas
     // locales de escena es directamente rider.headingDegrees (donde Y negativo es el Norte)
     val riderAngle = rider.headingDegrees.toFloat()
+    val tipLen = 13.dp.toPx()
+    val wingW = 9.dp.toPx()
+    val wingBack = 9.dp.toPx()
+    val tailIn = 4.5.dp.toPx()
     rotate(degrees = riderAngle, pivot = pos) {
         val arrowPath = Path().apply {
-            moveTo(pos.x, pos.y - 18f)
-            lineTo(pos.x + 12f, pos.y + 12f)
-            lineTo(pos.x, pos.y + 6f)
-            lineTo(pos.x - 12f, pos.y + 12f)
+            moveTo(pos.x, pos.y - tipLen)
+            lineTo(pos.x + wingW, pos.y + wingBack)
+            lineTo(pos.x, pos.y + tailIn)
+            lineTo(pos.x - wingW, pos.y + wingBack)
             close()
         }
-        drawPath(path = arrowPath, color = Color.Black, style = Stroke(width = 4f, join = StrokeJoin.Round))
+        drawPath(path = arrowPath, color = Color.Black, style = Stroke(width = 2.8.dp.toPx(), join = StrokeJoin.Round))
         drawPath(path = arrowPath, color = Color(0xFF, 0xD7, 0x00))
     }
 }
@@ -596,7 +609,8 @@ private fun screenOffsetToGeoCoord(
     height: Float,
     center: GeoCoord,
     zoom: Double,
-    heading: Double
+    heading: Double,
+    baseTilePx: Double = 256.0
 ): GeoCoord {
     val screenCenterX = width / 2.0
     val screenCenterY = height / 2.0
@@ -604,7 +618,7 @@ private fun screenOffsetToGeoCoord(
     val dy = screenY - screenCenterY
 
     val zInt = zoom.toInt()
-    val tileSizePx = 256.0 * (2.0.pow(zoom - zInt))
+    val tileSizePx = baseTilePx * (2.0.pow(zoom - zInt))
     val (centerFracX, centerFracY) = TileMath.latLonToFractionalTile(center.latitude, center.longitude, zInt)
 
     // Desrotar el toque respecto al heading: Canvas se pintó rotado con -heading

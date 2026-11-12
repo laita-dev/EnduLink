@@ -13,7 +13,7 @@
       "developerName": "Oscar Laita",
       "version": "0.1.11",
       "versionDate": "2026-11-12",
-      "versionDescription": "Versión 0.1.11: Corrección crítica de arranque en iOS / Sideloadly y nombre motillOS en CFBundleName y CFBundleDisplayName.",
+      "versionDescription": "Versión 0.1.11: Corrección de arranque en iOS/Sideloadly, nombre motillOS, adaptación universal de Safe Area (Dynamic Island, Notch, barra de estado y Home Indicator), escalado Retina (@2x/@3x) en mapa y aviso informativo de versión en iOS.",
       "downloadURL": "https://github.com/laita-dev/EnduLink/releases/latest/download/EnduLink-unsigned.ipa",
       "localizedDescription": "App de navegación trail / enduro motillOS con visualización de tracks GPX, perfiles de elevación, grabación en vivo y espejo H.264 para cuadros TFT de motocicletas.",
       "iconURL": "https://raw.githubusercontent.com/laita-dev/EnduLink/main/iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
