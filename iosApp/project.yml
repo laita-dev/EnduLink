@@ -11,8 +11,8 @@ settings:
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.1.10"
-    CURRENT_PROJECT_VERSION: "10"
+    MARKETING_VERSION: "0.1.11"
+    CURRENT_PROJECT_VERSION: "11"
 
 targets:
   EnduLink:
@@ -35,6 +35,9 @@ targets:
         CODE_SIGNING_REQUIRED: NO
         FRAMEWORK_SEARCH_PATHS:
           - "$(SRCROOT)/../shared/build/XCFrameworks/release"
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-ObjC"
     dependencies:
       - framework: ../shared/build/XCFrameworks/release/SharedApp.xcframework
         embed: false

@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import platform.CoreLocation.*
+import platform.Foundation.NSError
 import platform.darwin.NSObject
 import kotlin.math.roundToInt
 
@@ -33,7 +34,6 @@ actual class LocationProvider actual constructor() : NSObject(), CLLocationManag
 
     actual fun startTracking() {
         manager.requestWhenInUseAuthorization()
-        manager.allowsBackgroundLocationUpdates = true
         manager.startUpdatingLocation()
         if (CLLocationManager.headingAvailable()) {
             manager.startUpdatingHeading()
@@ -79,6 +79,10 @@ actual class LocationProvider actual constructor() : NSObject(), CLLocationManag
                 )
             }
         }
+    }
+
+    override fun locationManager(manager: CLLocationManager, didFailWithError: NSError) {
+        // Ignorar errores transitorios de señal GPS o autorización pendiente
     }
 }
 

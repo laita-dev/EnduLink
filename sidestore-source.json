@@ -8,14 +8,14 @@
   "website": "https://github.com/laita-dev/EnduLink",
   "apps": [
     {
-      "name": "motIllOS",
+      "name": "motillOS",
       "bundleIdentifier": "com.oscar.endulink",
       "developerName": "Oscar Laita",
-      "version": "0.1.10",
-      "versionDate": "2026-11-08",
-      "versionDescription": "Versión 0.1.10: Persistencia en disco de tracks GPX y ajustes TFT/mapa, exportación/compartición de archivos .GPX, selector nativo de documentos GPX en iOS, descarga de mapa offline del corredor del track, telemetría REC en vivo y visualización de waypoints y paradas en la pantalla TFT de la moto.",
+      "version": "0.1.11",
+      "versionDate": "2026-11-12",
+      "versionDescription": "Versión 0.1.11: Corrección crítica de arranque en iOS / Sideloadly y nombre motillOS en CFBundleName y CFBundleDisplayName.",
       "downloadURL": "https://github.com/laita-dev/EnduLink/releases/latest/download/EnduLink-unsigned.ipa",
-      "localizedDescription": "App de navegación trail / enduro motIllOS con visualización de tracks GPX, perfiles de elevación, grabación en vivo y espejo H.264 para cuadros TFT de motocicletas.",
+      "localizedDescription": "App de navegación trail / enduro motillOS con visualización de tracks GPX, perfiles de elevación, grabación en vivo y espejo H.264 para cuadros TFT de motocicletas.",
       "iconURL": "https://raw.githubusercontent.com/laita-dev/EnduLink/main/iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
       "tintColor": "00D4FF",
       "size": 42000000

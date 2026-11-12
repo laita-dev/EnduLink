@@ -9,7 +9,10 @@ import platform.AVFAudio.setActive
 @OptIn(ExperimentalForeignApi::class)
 actual object BackgroundServiceController {
 
+    private var isKeepAliveActive = false
+
     actual fun startKeepAlive() {
+        if (isKeepAliveActive) return
         try {
             val session = AVAudioSession.sharedInstance()
             session.setCategory(
@@ -18,13 +21,16 @@ actual object BackgroundServiceController {
                 error = null
             )
             session.setActive(true, error = null)
+            isKeepAliveActive = true
         } catch (_: Exception) {}
     }
 
     actual fun stopKeepAlive() {
+        if (!isKeepAliveActive) return
         try {
             val session = AVAudioSession.sharedInstance()
             session.setActive(false, error = null)
+            isKeepAliveActive = false
         } catch (_: Exception) {}
     }
 }

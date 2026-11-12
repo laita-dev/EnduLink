@@ -18,13 +18,20 @@ private class IosGpxDocumentPickerDelegate(
 ) : NSObject(), UIDocumentPickerDelegateProtocol {
     override fun documentPicker(controller: UIDocumentPickerViewController, didPickDocumentsAtURLs: List<*>) {
         val url = didPickDocumentsAtURLs.firstOrNull() as? NSURL ?: return
-        val path = url.path ?: return
-        val bytes = TileDiskStorage.readBytes(path) ?: return
-        val text = bytes.decodeToString()
-        if (text.isNotBlank()) {
-            val rawName = url.lastPathComponent ?: "Ruta Importada"
-            val cleanName = rawName.replace(".gpx", "", ignoreCase = true)
-            onPicked(cleanName, text)
+        val accessed = url.startAccessingSecurityScopedResource()
+        try {
+            val path = url.path ?: return
+            val bytes = TileDiskStorage.readBytes(path) ?: return
+            val text = bytes.decodeToString()
+            if (text.isNotBlank()) {
+                val rawName = url.lastPathComponent ?: "Ruta Importada"
+                val cleanName = rawName.replace(".gpx", "", ignoreCase = true)
+                onPicked(cleanName, text)
+            }
+        } finally {
+            if (accessed) {
+                url.stopAccessingSecurityScopedResource()
+            }
         }
     }
 }
