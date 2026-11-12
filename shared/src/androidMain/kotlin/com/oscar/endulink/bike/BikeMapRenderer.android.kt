@@ -55,6 +55,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
     // Paints preconfigurados para alto rendimiento (cero allocations por frame)
     private val bgPaint = Paint().apply { color = android.graphics.Color.rgb(20, 23, 28) }
     private val blackEdgePaint = Paint().apply { color = android.graphics.Color.BLACK }
+    private val tileFilterPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
     private val gridPaint = Paint().apply {
         color = android.graphics.Color.rgb(30, 34, 45)
         style = Paint.Style.STROKE
@@ -336,7 +337,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                 }
                 if (tileBmp != null) {
                     val dst = RectF(posX, posY, posX + tileSizePx, posY + tileSizePx)
-                    canvas.drawBitmap(tileBmp, null, dst, null)
+                    canvas.drawBitmap(tileBmp, null, dst, tileFilterPaint)
                     drewTile = true
                 }
 
@@ -356,7 +357,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                             val subH = parentBmp.height / oz.scale
                             val src = Rect(oz.subX * subW, oz.subY * subH, (oz.subX + 1) * subW, (oz.subY + 1) * subH)
                             val dst = RectF(posX, posY, posX + tileSizePx, posY + tileSizePx)
-                            canvas.drawBitmap(parentBmp, src, dst, null)
+                            canvas.drawBitmap(parentBmp, src, dst, tileFilterPaint)
                             drewTile = true
                         }
                     }

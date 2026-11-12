@@ -8,31 +8,26 @@ enum class MapLayer(
     val shortBadge: String,
     val maxNativeZoom: Int,
     val supportsOfflineDownload: Boolean,
-    val recommendedConcurrency: Int
+    val recommendedConcurrency: Int,
+    val isRetina512: Boolean = false
 ) {
     CARRETERAS(
-        raw = "google_roads",
-        title = "Carreteras (Google Maps / Vial)",
-        shortBadge = "CARRETERAS",
+        raw = "apple_roads_hd",
+        title = "Carreteras (Vial HD · Estilo MotIOS)",
+        shortBadge = "VIAL HD",
         maxNativeZoom = 20,
         supportsOfflineDownload = false,
-        recommendedConcurrency = 4
+        recommendedConcurrency = 6,
+        isRetina512 = true
     ),
-    SATELITE_HIBRIDO(
-        raw = "google_hybrid",
-        title = "Satélite + Calles (Google Híbrido)",
-        shortBadge = "SATÉLITE",
-        maxNativeZoom = 20,
-        supportsOfflineDownload = false,
-        recommendedConcurrency = 4
-    ),
-    SATELITE_PURO(
-        raw = "google_satellite",
-        title = "Satélite Puro (Sin etiquetas)",
-        shortBadge = "SAT PURO",
-        maxNativeZoom = 20,
-        supportsOfflineDownload = false,
-        recommendedConcurrency = 4
+    OSMAND(
+        raw = "osmand_hd",
+        title = "OsmAnd Outdoor · Pistas y Senderos (Offline)",
+        shortBadge = "OSMAND",
+        maxNativeZoom = 19,
+        supportsOfflineDownload = true,
+        recommendedConcurrency = 4,
+        isRetina512 = true
     ),
     TRAIL_OSM(
         raw = "trail_cyclosm",
@@ -40,7 +35,8 @@ enum class MapLayer(
         shortBadge = "TRAIL OSM",
         maxNativeZoom = 18,
         supportsOfflineDownload = true,
-        recommendedConcurrency = 2
+        recommendedConcurrency = 2,
+        isRetina512 = false
     ),
     IGN_TOPO(
         raw = "ign_topo",
@@ -48,31 +44,39 @@ enum class MapLayer(
         shortBadge = "IGN TOPO",
         maxNativeZoom = 17,
         supportsOfflineDownload = true,
-        recommendedConcurrency = 6
+        recommendedConcurrency = 6,
+        isRetina512 = false
     ),
-    WORLD_TOPO(
-        raw = "world_topo",
-        title = "Topo Global · Relieve (Offline)",
-        shortBadge = "TOPO GLOBAL",
+    SATELITE_HIBRIDO(
+        raw = "sat_hybrid_hd",
+        title = "Satélite + Calles HD (Offline)",
+        shortBadge = "SAT+VIAL",
+        maxNativeZoom = 19,
+        supportsOfflineDownload = true,
+        recommendedConcurrency = 4,
+        isRetina512 = true
+    ),
+    SATELITE_PURO(
+        raw = "sat_pure_esri",
+        title = "Satélite Puro · Ortofoto (Offline)",
+        shortBadge = "SATÉLITE",
         maxNativeZoom = 18,
         supportsOfflineDownload = true,
-        recommendedConcurrency = 4
+        recommendedConcurrency = 6,
+        isRetina512 = false
     );
 
     fun tileURL(z: Int, x: Int, y: Int): String? {
         val clampedZ = minOf(maxOf(z, 1), maxNativeZoom)
         return when (this) {
             CARRETERAS -> {
-                // Google Maps estándar de carreteras
-                "https://mt1.google.com/vt/lyrs=m&x=$x&y=$y&z=$clampedZ"
+                // Cartografía vial limpia estilo Apple Maps / MotIOS en resolución Retina @2x (512x512)
+                val sub = listOf("a", "b", "c", "d")[abs(x + y) % 4]
+                "https://$sub.basemaps.cartocdn.com/rastertiles/voyager/$clampedZ/$x/$y@2x.png"
             }
-            SATELITE_HIBRIDO -> {
-                // Google Maps Satélite con calles y carreteras
-                "https://mt1.google.com/vt/lyrs=y&x=$x&y=$y&z=$clampedZ"
-            }
-            SATELITE_PURO -> {
-                // Google Maps Satélite puro
-                "https://mt1.google.com/vt/lyrs=s&x=$x&y=$y&z=$clampedZ"
+            OSMAND -> {
+                // Servidor oficial OsmAnd en Alta Definición (512x512 HD)
+                "https://tile.osmand.net/hd/$clampedZ/$x/$y.png"
             }
             TRAIL_OSM -> {
                 val sub = listOf("a", "b", "c")[abs(x + y) % 3]
@@ -81,18 +85,26 @@ enum class MapLayer(
             IGN_TOPO -> {
                 "https://www.ign.es/wmts/mapa-raster?request=GetTile&service=WMTS&Version=1.0.0&Layer=MTN&Style=default&Format=image/jpeg&TileMatrixSet=GoogleMapsCompatible&TileMatrix=$clampedZ&TileCol=$x&TileRow=$y"
             }
-            WORLD_TOPO -> {
-                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/$clampedZ/$y/$x"
+            SATELITE_HIBRIDO -> {
+                // Satélite híbrido con carreteras y localidades en resolución Retina @2x (512x512)
+                "https://mt1.google.com/vt/lyrs=y&hl=es&x=$x&y=$y&z=$clampedZ&scale=2"
+            }
+            SATELITE_PURO -> {
+                // Esri World Imagery (idéntico a MotIOS) con soporte de descarga offline rápida
+                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$clampedZ/$y/$x"
             }
         }
     }
 
     companion object {
         fun fromRaw(raw: String): MapLayer {
-            if (raw == "road_online" || raw == "osm_std") return CARRETERAS
-            if (raw == "sat_hybrid") return SATELITE_HIBRIDO
-            if (raw == "sat_pure") return SATELITE_PURO
-            return entries.find { it.raw.equals(raw, ignoreCase = true) } ?: CARRETERAS
+            return when (raw.lowercase()) {
+                "road_online", "osm_std", "google_roads", "apple_roads_hd" -> CARRETERAS
+                "osmand", "osmand_hd", "world_topo" -> OSMAND
+                "sat_hybrid", "google_hybrid", "sat_hybrid_hd" -> SATELITE_HIBRIDO
+                "sat_pure", "google_satellite", "sat_pure_esri" -> SATELITE_PURO
+                else -> entries.find { it.raw.equals(raw, ignoreCase = true) } ?: CARRETERAS
+            }
         }
 
         val offlineCapableLayers: List<MapLayer>

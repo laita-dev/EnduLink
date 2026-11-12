@@ -18,7 +18,7 @@ import kotlinx.datetime.Clock
  */
 interface IosH264HardwareBridge {
     fun startSession(width: Int, height: Int, fps: Int, bitrateBps: Int): Boolean
-    fun encodeNv12Ptr(nv12Ptr: Long, width: Int, height: Int, ptsMs: Long, forceKeyFrame: Boolean): String?
+    fun encodeRgbaPtr(rgbaPtr: Long, width: Int, height: Int, ptsMs: Long, forceKeyFrame: Boolean): String?
     fun stopSession()
 }
 
@@ -40,6 +40,9 @@ actual class PlatformH264Encoder actual constructor(
 
     @Volatile
     private var forceNextKeyFrame = true
+
+    @Volatile
+    private var waitingForWholeFrame = true
 
     private val queueLock = SynchronizedLock()
     private val chunkQueue = ArrayDeque<ByteArray>()
@@ -71,9 +74,10 @@ actual class PlatformH264Encoder actual constructor(
 
         isRunning = true
         forceNextKeyFrame = true
+        waitingForWholeFrame = true
         queueLock.withLock { chunkQueue.clear() }
 
-        encoderJob = CoroutineScope(Dispatchers.Default).launch {
+        encoderJob = CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
             runEncodingLoop(hwBridge, width, height, fps)
         }
         log("VideoToolbox H.264 iniciado en iOS: ${width}x${height} a $fps FPS, ${bitrate / 1000} kbps")
@@ -81,7 +85,10 @@ actual class PlatformH264Encoder actual constructor(
     }
 
     actual override fun fresh() {
-        queueLock.withLock { chunkQueue.clear() }
+        queueLock.withLock {
+            chunkQueue.clear()
+            waitingForWholeFrame = true
+        }
         forceNextKeyFrame = true
     }
 
@@ -93,7 +100,7 @@ actual class PlatformH264Encoder actual constructor(
             }
             if (item != null) return item
             if (Clock.System.now().toEpochMilliseconds() >= deadline) break
-            platformSleep(8)
+            platformSleep(6)
         }
         return null
     }
@@ -114,43 +121,54 @@ actual class PlatformH264Encoder actual constructor(
         height: Int,
         fps: Int
     ) {
-        val nv12Buffer = ByteArray(width * height * 3 / 2)
         val frameIntervalMs = (1000L / fps.coerceAtLeast(5)).coerceAtLeast(16L)
         var frameIndex = 0L
         var windowStartMs = Clock.System.now().toEpochMilliseconds()
         var bytesEncodedWindow = 0L
         var framesEncodedWindow = 0
+        var loggedFirstFrame = false
 
         while (isRunning && currentCoroutineContext().isActive) {
             val startTime = Clock.System.now().toEpochMilliseconds()
-            val rgba = renderFrameRgba(width, height)
+            try {
+                val rgba = renderFrameRgba(width, height)
 
-            if (rgba != null && rgba.size >= width * height * 4) {
-                rgbaToYuv420SemiPlanar(rgba, nv12Buffer, width, height)
-                val ptsMs = frameIndex * 1000L / fps
-                val wantKey = forceNextKeyFrame || (frameIndex % (fps * 2L) == 0L)
-                forceNextKeyFrame = false
+                if (rgba != null && rgba.size >= width * height * 4) {
+                    val ptsMs = frameIndex * 1000L / fps
+                    val wantKey = forceNextKeyFrame || waitingForWholeFrame || (frameIndex % (fps * 2L) == 0L)
+                    forceNextKeyFrame = false
 
-                val encodedB64 = nv12Buffer.usePinned { pinned ->
-                    val ptrAddr = pinned.addressOf(0).toLong()
-                    hwBridge.encodeNv12Ptr(ptrAddr, width, height, ptsMs, wantKey)
-                }
-
-                if (!encodedB64.isNullOrEmpty()) {
-                    val chunk = decodeBase64Fast(encodedB64)
-                    if (chunk.isNotEmpty()) {
-                        queueLock.withLock {
-                            if (chunkQueue.size >= MAX_BACKLOG) {
-                                chunkQueue.removeFirst()
-                                forceNextKeyFrame = true
-                            }
-                            chunkQueue.addLast(chunk)
-                        }
-                        bytesEncodedWindow += chunk.size
-                        framesEncodedWindow++
+                    val encodedB64 = rgba.usePinned { pinned ->
+                        val ptrAddr = pinned.addressOf(0).toLong()
+                        hwBridge.encodeRgbaPtr(ptrAddr, width, height, ptsMs, wantKey)
                     }
+
+                    if (!encodedB64.isNullOrEmpty()) {
+                        val chunk = decodeBase64Fast(encodedB64)
+                        if (chunk.isNotEmpty()) {
+                            queueLock.withLock {
+                                if (chunkQueue.size >= MAX_BACKLOG) {
+                                    chunkQueue.clear()
+                                    waitingForWholeFrame = true
+                                    forceNextKeyFrame = true
+                                }
+                                waitingForWholeFrame = false
+                                chunkQueue.addLast(chunk)
+                            }
+                            if (!loggedFirstFrame) {
+                                loggedFirstFrame = true
+                                log("VideoToolbox: primera trama H.264 codificada (${chunk.size} bytes)")
+                            }
+                            bytesEncodedWindow += chunk.size
+                            framesEncodedWindow++
+                        }
+                    }
+                    frameIndex++
                 }
-                frameIndex++
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                log("Error en frame H.264 iOS: ${e.message}")
             }
 
             val now = Clock.System.now().toEpochMilliseconds()

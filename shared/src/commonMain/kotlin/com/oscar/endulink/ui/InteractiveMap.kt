@@ -70,6 +70,7 @@ fun InteractiveMap(
     val textMeasurer = rememberTextMeasurer()
     val currentOnSelectWaypoint by rememberUpdatedState(onSelectWaypoint)
     val currentIsPickingOnMap by rememberUpdatedState(isPickingOnMap)
+    val currentLayer by rememberUpdatedState(layer)
 
     Canvas(
         modifier = modifier
@@ -87,7 +88,8 @@ fun InteractiveMap(
                         val curMarkers = routeWpts + controller.quickMarkers.value
                         val rad = -curHeading * PI / 180.0
                         val zInt = curZoom.toInt()
-                        val baseTilePx = maxOf(256.0, 176.dp.toPx().toDouble())
+                        val baseTileDp = if (currentLayer.isRetina512) 148.dp else 132.dp
+                        val baseTilePx = maxOf(256.0, baseTileDp.toPx().toDouble())
                         val tileSizePx = baseTilePx * (2.0.pow(curZoom - zInt))
                         val (centerFracX, centerFracY) = TileMath.latLonToFractionalTile(curCenter.latitude, curCenter.longitude, zInt)
                         val pinOffsetPx = 14.dp.toPx().toDouble()
@@ -117,7 +119,8 @@ fun InteractiveMap(
                         // Pulsación larga: calcular coordenadas geográficas reales compensando centro, zoom y rumbo
                         val w = size.width.toFloat()
                         val h = size.height.toFloat()
-                        val baseTilePx = maxOf(256.0, 176.dp.toPx().toDouble())
+                        val baseTileDp = if (currentLayer.isRetina512) 148.dp else 132.dp
+                        val baseTilePx = maxOf(256.0, baseTileDp.toPx().toDouble())
                         val coord = screenOffsetToGeoCoord(
                             screenX = offset.x,
                             screenY = offset.y,
@@ -161,7 +164,8 @@ fun InteractiveMap(
                             val zInt = curZ.toInt()
 
                             val (fracX, fracY) = TileMath.latLonToFractionalTile(curCenter.latitude, curCenter.longitude, zInt)
-                            val baseTilePx = maxOf(256.0, 176.dp.toPx().toDouble())
+                            val baseTileDp = if (currentLayer.isRetina512) 148.dp else 132.dp
+                            val baseTilePx = maxOf(256.0, baseTileDp.toPx().toDouble())
                             val tileSizePx = baseTilePx * (2.0.pow(curZ - zInt))
 
                             // Compensar la rotación del mapa para que el arrastre siga el dedo exactamente en cualquier ángulo
@@ -189,7 +193,8 @@ fun InteractiveMap(
         drawRect(color = EnduPalette.Background)
 
         val zInt = zoom.toInt()
-        val baseTilePx = maxOf(256.0, 176.dp.toPx().toDouble())
+        val baseTileDp = if (layer.isRetina512) 148.dp else 132.dp
+        val baseTilePx = maxOf(256.0, baseTileDp.toPx().toDouble())
         val tileSizePx = (baseTilePx * (2.0.pow(zoom - zInt))).toFloat()
         val (centerFracX, centerFracY) = TileMath.latLonToFractionalTile(center.latitude, center.longitude, zInt)
 
@@ -406,7 +411,8 @@ private fun DrawScope.drawTileGrid(
                 drawImage(
                     image = bmp,
                     dstOffset = IntOffset(posX.roundToInt(), posY.roundToInt()),
-                    dstSize = IntSize(ceil(tileSizePx).toInt(), ceil(tileSizePx).toInt())
+                    dstSize = IntSize(ceil(tileSizePx).toInt(), ceil(tileSizePx).toInt()),
+                    filterQuality = FilterQuality.High
                 )
             } else {
                 // Algoritmo Parent Overzoom: escala la tesela padre desde RAM/Disco para evitar cuadros negros al hacer zoom
@@ -420,7 +426,8 @@ private fun DrawScope.drawTileGrid(
                         srcOffset = IntOffset(oz.subX * subW, oz.subY * subH),
                         srcSize = IntSize(subW, subH),
                         dstOffset = IntOffset(posX.roundToInt(), posY.roundToInt()),
-                        dstSize = IntSize(ceil(tileSizePx).toInt(), ceil(tileSizePx).toInt())
+                        dstSize = IntSize(ceil(tileSizePx).toInt(), ceil(tileSizePx).toInt()),
+                        filterQuality = FilterQuality.High
                     )
                     drewParent = true
                 }

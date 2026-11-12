@@ -54,7 +54,7 @@ class BikeLink(
     private val dataPort: Int = 10920,
     private val allow: (fromIP: String, toIP: String?) -> Boolean = { _, _ -> true }
 ) {
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     @Volatile
     private var isClosed = false
@@ -172,7 +172,7 @@ class BikeLink(
         val server = BikeSocketFactory.createServer(port, backlog = 50)
         doorsLock.withLock { doors.add(server) }
 
-        scope.launch(Dispatchers.Default) {
+        scope.launch(Dispatchers.IO) {
             while (!isClosed) {
                 val client = try {
                     server.acceptClient()
@@ -207,7 +207,7 @@ class BikeLink(
                 if (shouldBreak) break
                 if (shouldContinue) continue
 
-                launch(Dispatchers.Default) {
+                launch(Dispatchers.IO) {
                     try {
                         serve(client)
                     } finally {

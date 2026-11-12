@@ -3,50 +3,255 @@ import SharedApp
 import VideoToolbox
 import CoreMedia
 import CoreVideo
+import AVFoundation
+import UIKit
 
+/// Mantiene despiertos el proceso, la interfaz Wi-Fi (`en0`), los sockets TCP y el bucle H.264 de 15 FPS
+/// cuando el usuario bloquea la pantalla del iPhone (1:1 con `MotIOS/App/BackgroundKeepAlive.swift`).
+final class BackgroundKeepAlive {
+    static let shared = BackgroundKeepAlive()
+
+    private var player: AVAudioPlayer?
+    private var bgTask: UIBackgroundTaskIdentifier = .invalid
+    private var watchdogTimer: DispatchSourceTimer?
+    private(set) var isActive: Bool = false
+
+    private init() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioInterruption(_:)),
+            name: AVAudioSession.interruptionNotification,
+            object: nil
+        )
+    }
+
+    func start() {
+        DispatchQueue.main.async {
+            guard !self.isActive else {
+                self.ensurePlaying()
+                return
+            }
+            self.isActive = true
+            self.activateAudioSessionAndPlay()
+            self.startWatchdog()
+        }
+    }
+
+    func stop() {
+        DispatchQueue.main.async {
+            guard self.isActive else { return }
+            self.isActive = false
+            self.watchdogTimer?.cancel()
+            self.watchdogTimer = nil
+            self.player?.stop()
+            self.player = nil
+            self.endTransitionTask()
+            try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        }
+    }
+
+    private func activateAudioSessionAndPlay() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+
+            if player == nil {
+                let wav = Self.makeSilentWAVData(durationSeconds: 2)
+                let created = try AVAudioPlayer(data: wav)
+                created.numberOfLoops = -1
+                created.volume = 0.01
+                created.prepareToPlay()
+                player = created
+            }
+            player?.play()
+        } catch {}
+    }
+
+    private func ensurePlaying() {
+        guard isActive else { return }
+        if player?.isPlaying != true {
+            activateAudioSessionAndPlay()
+        }
+    }
+
+    private func startWatchdog() {
+        watchdogTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 4.0, repeating: 4.0)
+        timer.setEventHandler { [weak self] in
+            self?.ensurePlaying()
+        }
+        watchdogTimer = timer
+        timer.resume()
+    }
+
+    @objc private func handleDidEnterBackground() {
+        guard isActive else { return }
+        beginTransitionTask()
+        ensurePlaying()
+    }
+
+    @objc private func handleWillEnterForeground() {
+        endTransitionTask()
+        if isActive {
+            ensurePlaying()
+        }
+    }
+
+    @objc private func handleAudioInterruption(_ notification: Notification) {
+        guard isActive else { return }
+        guard let info = notification.userInfo,
+              let typeVal = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeVal) else {
+            return
+        }
+        if type == .ended {
+            activateAudioSessionAndPlay()
+        }
+    }
+
+    private func beginTransitionTask() {
+        endTransitionTask()
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "motillOS-LockStreamBridge") { [weak self] in
+            self?.endTransitionTask()
+        }
+    }
+
+    private func endTransitionTask() {
+        if bgTask != .invalid {
+            UIApplication.shared.endBackgroundTask(bgTask)
+            bgTask = .invalid
+        }
+    }
+
+    private static func makeSilentWAVData(durationSeconds: Int) -> Data {
+        let sampleRate: UInt32 = 8000
+        let numChannels: UInt16 = 1
+        let bitsPerSample: UInt16 = 16
+        let bytesPerSample = Int(bitsPerSample / 8)
+        let dataSize = Int(sampleRate) * durationSeconds * Int(numChannels) * bytesPerSample
+
+        var out = Data(capacity: 44 + dataSize)
+        out.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
+        out.append(contentsOf: withUnsafeBytes(of: UInt32(36 + dataSize).littleEndian, Array.init))
+        out.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
+        out.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
+        out.append(contentsOf: withUnsafeBytes(of: UInt32(16).littleEndian, Array.init))
+        out.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian, Array.init))
+        out.append(contentsOf: withUnsafeBytes(of: numChannels.littleEndian, Array.init))
+        out.append(contentsOf: withUnsafeBytes(of: sampleRate.littleEndian, Array.init))
+        out.append(contentsOf: withUnsafeBytes(of: (sampleRate * UInt32(numChannels) * UInt32(bytesPerSample)).littleEndian, Array.init))
+        out.append(contentsOf: withUnsafeBytes(of: (numChannels * UInt16(bytesPerSample)).littleEndian, Array.init))
+        out.append(contentsOf: withUnsafeBytes(of: bitsPerSample.littleEndian, Array.init))
+        out.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
+        out.append(contentsOf: withUnsafeBytes(of: UInt32(dataSize).littleEndian, Array.init))
+        out.append(Data(count: dataSize))
+        return out
+    }
+}
+
+/// Puente hardware VideoToolbox H.264 1:1 con `MotIOS/Video/H264Encoder.swift`.
 final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
+    private static let startCode: [UInt8] = [0x00, 0x00, 0x00, 0x01]
+
     private var session: VTCompressionSession?
+    private var pixelBufferPool: CVPixelBufferPool?
     private let lock = NSLock()
 
+    private var cachedWidth: Int32 = 592
+    private var cachedHeight: Int32 = 816
+    private var cachedFps: Int32 = 15
+    private var cachedBitrate: Int32 = 2_500_000
+    private var lastEncodedAnnexB: Data?
+
     func startSession(width: Int32, height: Int32, fps: Int32, bitrateBps: Int32) -> Bool {
+        BackgroundKeepAlive.shared.start()
         lock.lock()
         defer { lock.unlock() }
+        cachedWidth = width
+        cachedHeight = height
+        cachedFps = max(fps, 5)
+        cachedBitrate = max(bitrateBps, 500_000)
+        return createSessionLocked()
+    }
+
+    private func createSessionLocked() -> Bool {
         stopSessionInternal()
+
+        let w = Int(cachedWidth)
+        let h = Int(cachedHeight)
+        let pixelAttrs: [CFString: Any] = [
+            kCVPixelBufferPixelFormatTypeKey: Int(kCVPixelFormatType_32BGRA),
+            kCVPixelBufferWidthKey: w,
+            kCVPixelBufferHeightKey: h,
+            kCVPixelBufferCGImageCompatibilityKey: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary
+        ]
 
         var newSession: VTCompressionSession?
         let status = VTCompressionSessionCreate(
             allocator: kCFAllocatorDefault,
-            width: width,
-            height: height,
+            width: cachedWidth,
+            height: cachedHeight,
             codecType: kCMVideoCodecType_H264,
             encoderSpecification: nil,
-            imageBufferAttributes: nil,
+            imageBufferAttributes: pixelAttrs as CFDictionary,
             compressedDataAllocator: nil,
-            outputCallback: nil,
-            refcon: nil,
+            outputCallback: Self.compressionOutputCallback,
+            refcon: Unmanaged.passUnretained(self).toOpaque(),
             compressionSessionOut: &newSession
         )
-        guard status == noErr, let sess = newSession else {
+        guard status == noErr, let vtSession = newSession else {
             return false
         }
 
-        VTSessionSetProperty(sess, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-        VTSessionSetProperty(sess, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Baseline_AutoLevel)
-        VTSessionSetProperty(sess, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
-        VTSessionSetProperty(sess, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitrateBps))
-        VTSessionSetProperty(sess, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: fps))
-        VTSessionSetProperty(sess, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: NSNumber(value: max(fps * 2, 15)))
-        VTCompressionSessionPrepareToEncodeFrames(sess)
+        let blocks = ((w + 15) / 16) * ((h + 15) / 16)
+        let profile = blocks <= 3600 ? kVTProfileLevel_H264_Baseline_3_1 : kVTProfileLevel_H264_Baseline_AutoLevel
 
-        self.session = sess
+        VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
+        VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_ProfileLevel, value: profile)
+        VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
+        VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_AverageBitRate, value: Int(cachedBitrate) as CFNumber)
+        VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: Int(cachedFps) as CFNumber)
+        VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: Int(cachedFps * 2) as CFNumber)
+        VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 2.0 as CFNumber)
+
+        let prepStatus = VTCompressionSessionPrepareToEncodeFrames(vtSession)
+        if prepStatus != noErr {
+            VTCompressionSessionInvalidate(vtSession)
+            return false
+        }
+
+        self.session = vtSession
+        self.pixelBufferPool = VTCompressionSessionGetPixelBufferPool(vtSession)
         return true
     }
 
-    func encodeNv12Ptr(nv12Ptr: Int64, width: Int32, height: Int32, ptsMs: Int64, forceKeyFrame: Bool) -> String? {
+    func encodeRgbaPtr(rgbaPtr: Int64, width: Int32, height: Int32, ptsMs: Int64, forceKeyFrame: Bool) -> String? {
         lock.lock()
         defer { lock.unlock() }
-        guard let sess = session else { return nil }
-        guard let srcBase = UnsafeRawPointer(bitPattern: Int(nv12Ptr))?.assumingMemoryBound(to: UInt8.self) else {
+
+        if session == nil || width != cachedWidth || height != cachedHeight {
+            cachedWidth = width
+            cachedHeight = height
+            _ = createSessionLocked()
+        }
+        guard let vtSession = session else { return nil }
+        guard let srcBase = UnsafeRawPointer(bitPattern: Int(rgbaPtr))?.assumingMemoryBound(to: UInt8.self) else {
             return nil
         }
 
@@ -54,32 +259,25 @@ final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
         let h = Int(height)
         guard w > 0, h > 0 else { return nil }
 
-        var pixelBufferOut: CVPixelBuffer?
-        let pbStatus = CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            w,
-            h,
-            kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-            nil,
-            &pixelBufferOut
-        )
-        guard pbStatus == kCVReturnSuccess, let pixelBuffer = pixelBufferOut else {
+        guard let pixelBuffer = allocatePixelBuffer(width: w, height: h) else {
             return nil
         }
 
         CVPixelBufferLockBaseAddress(pixelBuffer, [])
-        if let yDst = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0)?.assumingMemoryBound(to: UInt8.self) {
-            let yStride = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
+        if let dstRaw = CVPixelBufferGetBaseAddress(pixelBuffer) {
+            let dstBase = dstRaw.assumingMemoryBound(to: UInt8.self)
+            let dstStride = CVPixelBufferGetBytesPerRow(pixelBuffer)
+            let srcStride = w * 4
             for row in 0..<h {
-                memcpy(yDst.advanced(by: row * yStride), srcBase.advanced(by: row * w), w)
-            }
-        }
-        if let uvDst = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1)?.assumingMemoryBound(to: UInt8.self) {
-            let uvStride = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1)
-            let uvSrc = srcBase.advanced(by: w * h)
-            let uvH = h / 2
-            for row in 0..<uvH {
-                memcpy(uvDst.advanced(by: row * uvStride), uvSrc.advanced(by: row * w), w)
+                let srcRow = srcBase.advanced(by: row * srcStride)
+                let dstRow = dstBase.advanced(by: row * dstStride)
+                for col in 0..<w {
+                    let px = col * 4
+                    dstRow[px]     = srcRow[px + 2] // B
+                    dstRow[px + 1] = srcRow[px + 1] // G
+                    dstRow[px + 2] = srcRow[px]     // R
+                    dstRow[px + 3] = 255            // A
+                }
             }
         }
         CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
@@ -91,24 +289,52 @@ final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
         }
 
         let pts = CMTimeMake(value: ptsMs, timescale: 1000)
-        var annexBResult: Data? = nil
+        let duration = CMTimeMake(value: 1, timescale: cachedFps)
+        lastEncodedAnnexB = nil
 
+        var flagsOut = VTEncodeInfoFlags()
         let encodeStatus = VTCompressionSessionEncodeFrame(
-            sess,
+            vtSession,
             imageBuffer: pixelBuffer,
             presentationTimeStamp: pts,
-            duration: CMTime.invalid,
+            duration: duration,
             frameProperties: frameProps,
-            infoFlagsOut: nil
-        ) { cbStatus, _, sampleBuffer in
-            guard cbStatus == noErr, let sbuf = sampleBuffer, CMSampleBufferDataIsReady(sbuf) else { return }
-            annexBResult = Self.convertToAnnexB(sampleBuffer: sbuf)
+            sourceFrameRefcon: nil,
+            infoFlagsOut: &flagsOut
+        )
+
+        if encodeStatus != noErr {
+            // Auto-recuperación si iOS invalida la sesión al bloquear/desbloquear pantalla
+            _ = createSessionLocked()
+            return nil
         }
 
-        if encodeStatus == noErr {
-            VTCompressionSessionCompleteFrames(sess, untilPresentationTimeStamp: pts)
+        VTCompressionSessionCompleteFrames(vtSession, untilPresentationTimeStamp: pts)
+        return lastEncodedAnnexB?.base64EncodedString()
+    }
+
+    private func allocatePixelBuffer(width: Int, height: Int) -> CVPixelBuffer? {
+        var pb: CVPixelBuffer?
+        if let pool = pixelBufferPool {
+            let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &pb)
+            if status == kCVReturnSuccess, let pb = pb {
+                return pb
+            }
         }
-        return annexBResult?.base64EncodedString()
+        let attrs: [CFString: Any] = [
+            kCVPixelBufferCGImageCompatibilityKey: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary
+        ]
+        CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            width,
+            height,
+            kCVPixelFormatType_32BGRA,
+            attrs as CFDictionary,
+            &pb
+        )
+        return pb
     }
 
     func stopSession() {
@@ -118,80 +344,104 @@ final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
     }
 
     private func stopSessionInternal() {
-        if let sess = session {
-            VTCompressionSessionInvalidate(sess)
+        if let vtSession = session {
+            VTCompressionSessionCompleteFrames(vtSession, untilPresentationTimeStamp: .invalid)
+            VTCompressionSessionInvalidate(vtSession)
             session = nil
         }
+        pixelBufferPool = nil
+        lastEncodedAnnexB = nil
     }
 
-    private static func convertToAnnexB(sampleBuffer: CMSampleBuffer) -> Data? {
-        let startCode: [UInt8] = [0x00, 0x00, 0x00, 0x01]
-        var out = Data()
+    private static let compressionOutputCallback: VTCompressionOutputCallback = { refcon, _, status, infoFlags, sampleBuffer in
+        guard status == noErr,
+              let refcon = refcon,
+              let sampleBuffer = sampleBuffer,
+              CMSampleBufferDataIsReady(sampleBuffer) else {
+            return
+        }
+        if infoFlags.contains(.frameDropped) { return }
+        let bridge = Unmanaged<VideoToolboxBridge>.fromOpaque(refcon).takeUnretainedValue()
+        bridge.lastEncodedAnnexB = Self.convertSampleBufferToAnnexB(sampleBuffer)
+    }
 
-        var isKeyFrame = true
-        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[CFString: Any]],
-           let first = attachments.first,
-           let notSync = first[kCMSampleAttachmentKey_NotSync] as? Bool,
-           notSync {
-            isKeyFrame = false
+    private static func isKeyframe(_ sampleBuffer: CMSampleBuffer) -> Bool {
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[CFString: Any]],
+              let first = attachments.first else {
+            return true
+        }
+        if let notSync = first[kCMSampleAttachmentKey_NotSync] as? Bool {
+            return !notSync
+        }
+        return true
+    }
+
+    private static func convertSampleBufferToAnnexB(_ sampleBuffer: CMSampleBuffer) -> Data? {
+        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
+            return nil
         }
 
-        if isKeyFrame, let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
-            var spsPtr: UnsafePointer<UInt8>?
-            var spsSize: Int = 0
-            var ppsPtr: UnsafePointer<UInt8>?
-            var ppsSize: Int = 0
+        var nalHeaderLen: Int32 = 4
+        var spsPtr: UnsafePointer<UInt8>?
+        var spsSize: Int = 0
+        var ppsPtr: UnsafePointer<UInt8>?
+        var ppsSize: Int = 0
 
-            if CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                formatDesc,
-                parameterSetIndex: 0,
-                parameterSetPointerOut: &spsPtr,
-                parameterSetSizeOut: &spsSize,
-                parameterSetCountOut: nil,
-                nalUnitHeaderLengthOut: nil
-            ) == noErr, let sps = spsPtr, spsSize > 0 {
-                out.append(contentsOf: startCode)
-                out.append(sps, count: spsSize)
-            }
-
-            if CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                formatDesc,
-                parameterSetIndex: 1,
-                parameterSetPointerOut: &ppsPtr,
-                parameterSetSizeOut: &ppsSize,
-                parameterSetCountOut: nil,
-                nalUnitHeaderLengthOut: nil
-            ) == noErr, let pps = ppsPtr, ppsSize > 0 {
-                out.append(contentsOf: startCode)
-                out.append(pps, count: ppsSize)
-            }
-        }
-
-        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return nil }
-        var totalLength: Int = 0
-        var dataPointer: UnsafeMutablePointer<Int8>?
-        let status = CMBlockBufferGetDataPointer(
-            dataBuffer,
-            atOffset: 0,
-            lengthAtOffsetOut: nil,
-            totalLengthOut: &totalLength,
-            dataPointerOut: &dataPointer
+        let spsOk = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            formatDesc,
+            parameterSetIndex: 0,
+            parameterSetPointerOut: &spsPtr,
+            parameterSetSizeOut: &spsSize,
+            parameterSetCountOut: nil,
+            nalUnitHeaderLengthOut: &nalHeaderLen
         )
-        guard status == kCMBlockBufferNoErr, let basePtr = dataPointer, totalLength > 4 else { return nil }
+        let ppsOk = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            formatDesc,
+            parameterSetIndex: 1,
+            parameterSetPointerOut: &ppsPtr,
+            parameterSetSizeOut: &ppsSize,
+            parameterSetCountOut: nil,
+            nalUnitHeaderLengthOut: nil
+        )
 
-        let rawPtr = UnsafeRawPointer(basePtr).assumingMemoryBound(to: UInt8.self)
-        var offset = 0
-        while offset + 4 <= totalLength {
-            let b0 = Int(rawPtr[offset])
-            let b1 = Int(rawPtr[offset + 1])
-            let b2 = Int(rawPtr[offset + 2])
-            let b3 = Int(rawPtr[offset + 3])
-            let nalLength = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
-            offset += 4
-            guard nalLength > 0, offset + nalLength <= totalLength else { break }
+        let totalLength = CMBlockBufferGetDataLength(blockBuffer)
+        guard totalLength > 0 else { return nil }
+
+        var rawAVCC = Data(count: totalLength)
+        let copyStatus = rawAVCC.withUnsafeMutableBytes { rawBuf -> OSStatus in
+            guard let dst = rawBuf.baseAddress else { return -1 }
+            return CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: totalLength, destination: dst)
+        }
+        guard copyStatus == kCMBlockBufferNoErr else { return nil }
+
+        let keyframe = isKeyframe(sampleBuffer)
+        var out = Data(capacity: totalLength + spsSize + ppsSize + 32)
+
+        if keyframe, spsOk == noErr, ppsOk == noErr, let sps = spsPtr, let pps = ppsPtr {
             out.append(contentsOf: startCode)
-            out.append(rawPtr.advanced(by: offset), count: nalLength)
-            offset += nalLength
+            out.append(sps, count: spsSize)
+            out.append(contentsOf: startCode)
+            out.append(pps, count: ppsSize)
+        }
+
+        let lenSize = max(1, min(4, Int(nalHeaderLen)))
+        var offset = 0
+        while offset + lenSize <= totalLength {
+            var naluLength = 0
+            for i in 0..<lenSize {
+                naluLength = (naluLength << 8) | Int(rawAVCC[offset + i])
+            }
+            offset += lenSize
+            guard naluLength > 0, offset + naluLength <= totalLength else { break }
+
+            let nalType = rawAVCC[offset] & 0x1F
+            // Evitar AUD(9) delante de SPS y evitar duplicar SPS(7)/PPS(8) en keyframes
+            if nalType != 9 && !(keyframe && (nalType == 7 || nalType == 8)) {
+                out.append(contentsOf: startCode)
+                out.append(rawAVCC.subdata(in: offset..<(offset + naluLength)))
+            }
+            offset += naluLength
         }
 
         return out.isEmpty ? nil : out

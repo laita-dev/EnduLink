@@ -69,7 +69,7 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
     }
     private val tilePaint = Paint().apply {
         isAntiAlias = true
-        filterQuality = FilterQuality.Medium
+        filterQuality = FilterQuality.High
     }
     private val gridPaint = Paint().apply {
         color = Color(30, 34, 45)

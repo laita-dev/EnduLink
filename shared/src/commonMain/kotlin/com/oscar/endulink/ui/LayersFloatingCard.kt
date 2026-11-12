@@ -43,36 +43,35 @@ fun LayersFloatingCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "🗺️", fontSize = 15.sp)
+                LayersIcon(color = EnduPalette.Accent, size = 18.dp)
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Capas del Mapa",
+                    text = "Capas del Mapa (HD)",
                     color = EnduPalette.TextPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
 
-            Text(
-                text = "✕",
-                color = EnduPalette.TextMuted,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
+            Box(
                 modifier = Modifier
-                    .clickable { onClose() }
-                    .padding(4.dp)
-            )
+                    .size(26.dp)
+                    .clickable { onClose() },
+                contentAlignment = Alignment.Center
+            ) {
+                CloseCrossIcon(color = EnduPalette.TextMuted, size = 13.dp)
+            }
         }
 
         // Lista / Cuadrícula de capas
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val layers = listOf(
-                Triple(MapLayer.CARRETERAS, "🚗 Carreteras", "Vial estilo Google Maps / Waze"),
-                Triple(MapLayer.SATELITE_HIBRIDO, "🛰️ Satélite Híbrido", "Foto aérea con carreteras y nombres"),
-                Triple(MapLayer.SATELITE_PURO, "🌍 Satélite Puro", "Foto aérea sin rótulos"),
-                Triple(MapLayer.TRAIL_OSM, "🚵 Trail OSM", "Pistas de tierra, senderos y curvas"),
-                Triple(MapLayer.IGN_TOPO, "⛰️ IGN Topográfico", "MTN25 España oficial con curvas de nivel"),
-                Triple(MapLayer.WORLD_TOPO, "🗺️ Topo Mundial", "Cartografía topográfica global Esri")
+                Triple(MapLayer.CARRETERAS, "Carreteras (Vial HD)", "Cartografía vial limpia estilo Apple Maps / MotIOS"),
+                Triple(MapLayer.OSMAND, "OsmAnd Outdoor (HD)", "Mapa oficial OsmAnd de pistas, senderos y curvas (Offline)"),
+                Triple(MapLayer.TRAIL_OSM, "Trail OSM (CyclOSM)", "Pistas de tierra, senderos, fuentes y curvas (Offline)"),
+                Triple(MapLayer.IGN_TOPO, "IGN Topográfico", "MTN25 España oficial con curvas de nivel (Offline)"),
+                Triple(MapLayer.SATELITE_HIBRIDO, "Satélite Híbrido (HD)", "Foto aérea con carreteras y localidades (Offline)"),
+                Triple(MapLayer.SATELITE_PURO, "Satélite Puro (Esri)", "Ortofoto aérea limpia sin rótulos (Offline)")
             )
 
             for ((lay, label, desc) in layers) {

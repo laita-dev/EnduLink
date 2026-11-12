@@ -739,3 +739,32 @@ fun CompassNorthIcon(
     }
 }
 
+@Composable
+fun CloseCrossIcon(
+    color: Color = EnduPalette.TextMuted,
+    modifier: Modifier = Modifier,
+    size: Dp = 14.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.8f.dp.toPx()
+
+        drawLine(
+            color = color,
+            start = Offset(w * 0.20f, h * 0.20f),
+            end = Offset(w * 0.80f, h * 0.80f),
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.80f, h * 0.20f),
+            end = Offset(w * 0.20f, h * 0.80f),
+            strokeWidth = strokeW,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+

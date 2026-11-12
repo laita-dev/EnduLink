@@ -1128,7 +1128,11 @@ class EnduController {
     }
 
     fun downloadRouteCorridor(route: GPXRoute) {
-        val targetLayer = if (_selectedLayer.value == MapLayer.IGN_TOPO) MapLayer.IGN_TOPO else MapLayer.TRAIL_OSM
+        val targetLayer = if (_selectedLayer.value.supportsOfflineDownload) {
+            _selectedLayer.value
+        } else {
+            MapLayer.OSMAND
+        }
         _statusBannerMessage.value = "Descargando mapa offline del track «${route.name}» (${targetLayer.shortBadge})..."
         tileStore.downloadCorridor(
             route = route,
@@ -1146,11 +1150,15 @@ class EnduController {
         _bikeLogs.value = emptyList()
     }
 
+    private val bikeLogLock = SynchronizedLock()
+
     private fun logBike(line: String) {
-        val current = _bikeLogs.value.toMutableList()
-        current.add(line)
-        if (current.size > 200) current.removeAt(0)
-        _bikeLogs.value = current
+        bikeLogLock.withLock {
+            val current = _bikeLogs.value.toMutableList()
+            current.add(line)
+            if (current.size > 200) current.removeAt(0)
+            _bikeLogs.value = current
+        }
     }
 
     companion object {

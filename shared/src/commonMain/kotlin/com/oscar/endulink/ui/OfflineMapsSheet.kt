@@ -44,7 +44,7 @@ fun OfflineMapsSheet(
 ) {
     var offlineTargetLayer by remember {
         mutableStateOf(
-            if (selectedLayer == MapLayer.IGN_TOPO) MapLayer.IGN_TOPO else MapLayer.TRAIL_OSM
+            if (selectedLayer.supportsOfflineDownload) selectedLayer else MapLayer.OSMAND
         )
     }
 
@@ -93,17 +93,19 @@ fun OfflineMapsSheet(
                     }
                 }
 
-                Text(
-                    text = "✕",
-                    color = EnduPalette.TextMuted,
-                    fontSize = 18.sp,
-                    modifier = Modifier.clickable { onClose() }.padding(4.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clickable { onClose() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    CloseCrossIcon(color = EnduPalette.TextMuted, size = 14.dp)
+                }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // 2. Selector de Capa Offline (Trail OSM vs IGN Topográfico España)
+            // 2. Selector de Capa Offline (OsmAnd HD, Trail OSM, IGN Topo y Satélite)
             Text(
                 text = "Cartografía de descarga:",
                 color = EnduPalette.TextSecondary,
@@ -112,81 +114,112 @@ fun OfflineMapsSheet(
             )
             Spacer(modifier = Modifier.height(6.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Opción 1: Trail OSM
-                val isTrail = (offlineTargetLayer == MapLayer.TRAIL_OSM)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (isTrail) EnduPalette.Accent.copy(alpha = 0.22f) else EnduPalette.SurfaceHigh)
-                        .border(
-                            width = if (isTrail) 1.5.dp else 0.5.dp,
-                            color = if (isTrail) EnduPalette.Accent else EnduPalette.Outline,
-                            shape = RoundedCornerShape(10.dp)
-                        )
-                        .clickable {
-                            offlineTargetLayer = MapLayer.TRAIL_OSM
-                            onSelectLayer(MapLayer.TRAIL_OSM)
-                        }
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
+            val row1Layers = listOf(
+                Triple(MapLayer.OSMAND, "OsmAnd HD", "Pistas y curvas HD"),
+                Triple(MapLayer.TRAIL_OSM, "Trail OSM", "Caminos y relieve"),
+                Triple(MapLayer.IGN_TOPO, "IGN Topo", "MTN25 España")
+            )
+            val row2Layers = listOf(
+                Triple(MapLayer.SATELITE_PURO, "Satélite Puro", "Ortofoto aérea Esri"),
+                Triple(MapLayer.SATELITE_HIBRIDO, "Satélite + Calles", "Aéreo híbrido HD")
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = if (isTrail) "◉" else "○", color = if (isTrail) EnduPalette.Accent else EnduPalette.TextMuted, fontSize = 12.sp)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "🚵 Trail OSM",
-                                color = if (isTrail) EnduPalette.Accent else EnduPalette.TextPrimary,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                    for ((lay, title, sub) in row1Layers) {
+                        val isSel = (offlineTargetLayer == lay)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSel) EnduPalette.Accent.copy(alpha = 0.22f) else EnduPalette.SurfaceHigh)
+                                .border(
+                                    width = if (isSel) 1.5.dp else 0.5.dp,
+                                    color = if (isSel) EnduPalette.Accent else EnduPalette.Outline,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable {
+                                    offlineTargetLayer = lay
+                                    onSelectLayer(lay)
+                                }
+                                .padding(horizontal = 8.dp, vertical = 7.dp)
+                        ) {
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = if (isSel) "◉" else "○",
+                                        color = if (isSel) EnduPalette.Accent else EnduPalette.TextMuted,
+                                        fontSize = 11.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = title,
+                                        color = if (isSel) EnduPalette.Accent else EnduPalette.TextPrimary,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                }
+                                Text(
+                                    text = sub,
+                                    color = EnduPalette.TextMuted,
+                                    fontSize = 9.5.sp,
+                                    maxLines = 1
+                                )
+                            }
                         }
-                        Text(
-                            text = "Pistas, tierra y relieve",
-                            color = EnduPalette.TextMuted,
-                            fontSize = 10.sp
-                        )
                     }
                 }
 
-                // Opción 2: IGN Topográfico España (MTN25)
-                val isIgn = (offlineTargetLayer == MapLayer.IGN_TOPO)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (isIgn) EnduPalette.Accent.copy(alpha = 0.22f) else EnduPalette.SurfaceHigh)
-                        .border(
-                            width = if (isIgn) 1.5.dp else 0.5.dp,
-                            color = if (isIgn) EnduPalette.Accent else EnduPalette.Outline,
-                            shape = RoundedCornerShape(10.dp)
-                        )
-                        .clickable {
-                            offlineTargetLayer = MapLayer.IGN_TOPO
-                            onSelectLayer(MapLayer.IGN_TOPO)
-                        }
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = if (isIgn) "◉" else "○", color = if (isIgn) EnduPalette.Accent else EnduPalette.TextMuted, fontSize = 12.sp)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "⛰️ IGN Topo",
-                                color = if (isIgn) EnduPalette.Accent else EnduPalette.TextPrimary,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                    for ((lay, title, sub) in row2Layers) {
+                        val isSel = (offlineTargetLayer == lay)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSel) EnduPalette.Accent.copy(alpha = 0.22f) else EnduPalette.SurfaceHigh)
+                                .border(
+                                    width = if (isSel) 1.5.dp else 0.5.dp,
+                                    color = if (isSel) EnduPalette.Accent else EnduPalette.Outline,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable {
+                                    offlineTargetLayer = lay
+                                    onSelectLayer(lay)
+                                }
+                                .padding(horizontal = 10.dp, vertical = 7.dp)
+                        ) {
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = if (isSel) "◉" else "○",
+                                        color = if (isSel) EnduPalette.Accent else EnduPalette.TextMuted,
+                                        fontSize = 11.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = title,
+                                        color = if (isSel) EnduPalette.Accent else EnduPalette.TextPrimary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                }
+                                Text(
+                                    text = sub,
+                                    color = EnduPalette.TextMuted,
+                                    fontSize = 9.5.sp,
+                                    maxLines = 1
+                                )
+                            }
                         }
-                        Text(
-                            text = "MTN25 España oficial",
-                            color = EnduPalette.TextMuted,
-                            fontSize = 10.sp
-                        )
                     }
                 }
             }
@@ -391,22 +424,33 @@ fun OfflineMapsSheet(
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                 ) {
-                                    Text(
-                                        text = if (isDownloaded) "🔄 Actualizar" else "⬇️ Descargar",
-                                        color = if (isDownloaded) EnduPalette.TextPrimary else Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        DownloadTrayIcon(
+                                            color = if (isDownloaded) EnduPalette.TextPrimary else Color.White,
+                                            size = 12.dp
+                                        )
+                                        Text(
+                                            text = if (isDownloaded) "Actualizar" else "Descargar",
+                                            color = if (isDownloaded) EnduPalette.TextPrimary else Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
 
                                 if (isDownloaded) {
-                                    Text(
-                                        text = "🗑️",
-                                        fontSize = 13.sp,
+                                    Box(
                                         modifier = Modifier
-                                            .clickable { onRemovePackage(packageKey) }
-                                            .padding(4.dp)
-                                    )
+                                            .size(28.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .clickable { onRemovePackage(packageKey) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        TrashDeleteIcon(color = EnduPalette.Danger.copy(alpha = 0.85f), size = 14.dp)
+                                    }
                                 }
                             }
                         }
@@ -421,7 +465,13 @@ fun OfflineMapsSheet(
                 onClick = onClearCache,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             ) {
-                Text(text = "🗑️ Vaciar todo el almacenamiento offline", color = EnduPalette.TextMuted, fontSize = 12.sp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    TrashDeleteIcon(color = EnduPalette.TextMuted, size = 13.dp)
+                    Text(text = "Vaciar todo el almacenamiento offline", color = EnduPalette.TextMuted, fontSize = 12.sp)
+                }
             }
         }
     }
