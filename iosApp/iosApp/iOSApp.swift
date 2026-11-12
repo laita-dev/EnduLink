@@ -163,6 +163,25 @@ final class BackgroundKeepAlive {
     }
 }
 
+/// Callback C para `VTCompressionSessionCreate` fuera de la clase para evitar referencias a `Self`.
+private func videoToolboxOutputCallback(
+    outputCallbackRefCon: UnsafeMutableRawPointer?,
+    sourceFrameRefCon: UnsafeMutableRawPointer?,
+    status: OSStatus,
+    infoFlags: VTEncodeInfoFlags,
+    sampleBuffer: CMSampleBuffer?
+) {
+    guard status == noErr,
+          let refcon = outputCallbackRefCon,
+          let sampleBuffer = sampleBuffer,
+          CMSampleBufferDataIsReady(sampleBuffer) else {
+        return
+    }
+    if infoFlags.contains(.frameDropped) { return }
+    let bridge = Unmanaged<VideoToolboxBridge>.fromOpaque(refcon).takeUnretainedValue()
+    bridge.storeEncodedSample(sampleBuffer)
+}
+
 /// Puente hardware VideoToolbox H.264 1:1 con `MotIOS/Video/H264Encoder.swift`.
 final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
     private static let startCode: [UInt8] = [0x00, 0x00, 0x00, 0x01]
@@ -211,7 +230,7 @@ final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
             encoderSpecification: nil,
             imageBufferAttributes: pixelAttrs as CFDictionary,
             compressedDataAllocator: nil,
-            outputCallback: Self.compressionOutputCallback,
+            outputCallback: videoToolboxOutputCallback,
             refcon: Unmanaged.passUnretained(self).toOpaque(),
             compressionSessionOut: &newSession
         )
@@ -353,16 +372,8 @@ final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
         lastEncodedAnnexB = nil
     }
 
-    private static let compressionOutputCallback: VTCompressionOutputCallback = { refcon, _, status, infoFlags, sampleBuffer in
-        guard status == noErr,
-              let refcon = refcon,
-              let sampleBuffer = sampleBuffer,
-              CMSampleBufferDataIsReady(sampleBuffer) else {
-            return
-        }
-        if infoFlags.contains(.frameDropped) { return }
-        let bridge = Unmanaged<VideoToolboxBridge>.fromOpaque(refcon).takeUnretainedValue()
-        bridge.lastEncodedAnnexB = Self.convertSampleBufferToAnnexB(sampleBuffer)
+    fileprivate func storeEncodedSample(_ sampleBuffer: CMSampleBuffer) {
+        lastEncodedAnnexB = VideoToolboxBridge.convertSampleBufferToAnnexB(sampleBuffer)
     }
 
     private static func isKeyframe(_ sampleBuffer: CMSampleBuffer) -> Bool {
