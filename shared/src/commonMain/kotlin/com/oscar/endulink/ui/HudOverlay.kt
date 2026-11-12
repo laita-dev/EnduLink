@@ -383,11 +383,10 @@ fun HudOverlay(
                     )
                     .clickable { onToggleOrientation() }
             ) {
-                Text(
-                    text = if (followMode == MapFollowMode.FOLLOW_HEADING) "▲" else "N",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Black,
-                    color = if (followMode == MapFollowMode.FOLLOW_HEADING) EnduPalette.Accent else Color(0xFFFF5252)
+                CompassNorthIcon(
+                    isHeadingMode = (followMode == MapFollowMode.FOLLOW_HEADING),
+                    color = if (followMode == MapFollowMode.FOLLOW_HEADING) EnduPalette.Accent else Color(0xFFFF5252),
+                    size = 15.dp
                 )
             }
 
@@ -928,28 +927,32 @@ fun HudOverlay(
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(EnduPalette.SurfaceHigh)
                                     .clickable { onShareSelectedRoute() }
-                                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                                    .padding(horizontal = 7.dp, vertical = 4.dp)
                             ) {
-                                Text(
-                                    text = "📤",
+                                ShareUploadIcon(
                                     color = EnduPalette.TextPrimary,
-                                    fontSize = 11.sp
+                                    modifier = Modifier.size(13.dp)
                                 )
                             }
 
                             Spacer(modifier = Modifier.width(5.dp))
 
                             // Botón para ver el perfil de altitud del track GPX
-                            Box(
-                                contentAlignment = Alignment.Center,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(EnduPalette.SurfaceHigh)
                                     .clickable { onOpenElevation() }
                                     .padding(horizontal = 7.dp, vertical = 3.dp)
                             ) {
+                                ElevationChartIcon(
+                                    color = EnduPalette.TextPrimary,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "📈 Perfil",
+                                    text = "Perfil",
                                     color = EnduPalette.TextPrimary,
                                     fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Bold

@@ -476,8 +476,11 @@ fun App() {
                 }
 
                 if (showBikeSheet) {
-                    LaunchedEffect(Unit) {
-                        controller.refreshStaticPreview()
+                    LaunchedEffect(showBikeSheet, layer, bikeMapConfig, activeRoute) {
+                        while (true) {
+                            controller.refreshStaticPreview()
+                            kotlinx.coroutines.delay(1000)
+                        }
                     }
                     BikeConnectionSheet(
                         state = bikeState,

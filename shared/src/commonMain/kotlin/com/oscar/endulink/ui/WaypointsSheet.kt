@@ -133,7 +133,7 @@ fun WaypointsSheet(
                     .padding(horizontal = 10.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = "🔍", fontSize = 12.sp)
+                SearchLensIcon(color = EnduPalette.TextSecondary, size = 14.dp)
                 Spacer(modifier = Modifier.width(6.dp))
                 TextField(
                     value = searchQuery,
@@ -327,8 +327,8 @@ fun WaypointsSheet(
                                         }
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(text = "🗺️", fontSize = 11.sp)
-                                        Spacer(modifier = Modifier.width(4.dp))
+                                        EyeVisibilityIcon(visible = true, color = EnduPalette.TextPrimary, size = 14.dp)
+                                        Spacer(modifier = Modifier.width(5.dp))
                                         Text(text = "Ver", color = EnduPalette.TextPrimary, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
@@ -347,8 +347,8 @@ fun WaypointsSheet(
                                         }
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(text = "🚗", fontSize = 11.sp)
-                                        Spacer(modifier = Modifier.width(4.dp))
+                                        NavArrowIcon(color = Color.White, size = 12.dp)
+                                        Spacer(modifier = Modifier.width(5.dp))
                                         Text(text = "Ir", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
@@ -362,7 +362,7 @@ fun WaypointsSheet(
                                         .background(EnduPalette.SurfaceHigh)
                                         .clickable { onEditWaypoint(wpt) }
                                 ) {
-                                    Text(text = "✏️", fontSize = 12.sp)
+                                    EditPencilIcon(color = EnduPalette.TextPrimary, size = 14.dp)
                                 }
 
                                 // 4. Borrar
@@ -374,7 +374,7 @@ fun WaypointsSheet(
                                         .background(EnduPalette.Danger.copy(alpha = 0.15f))
                                         .clickable { onDeleteWaypoint(wpt) }
                                 ) {
-                                    Text(text = "🗑️", fontSize = 12.sp)
+                                    TrashDeleteIcon(color = EnduPalette.Danger, size = 14.dp)
                                 }
                             }
                         }

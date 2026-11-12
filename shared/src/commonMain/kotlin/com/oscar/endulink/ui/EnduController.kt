@@ -953,6 +953,22 @@ class EnduController {
         val link = BikeLink(card = card, picture = enc, events = events)
         bikeLink = link
         link.open()
+        refreshStaticPreview()
+
+        scope.launch {
+            val snap = getWifiSnapshot()
+            if (snap != null) {
+                _wifiSnapshot.value = snap
+            }
+            val candidateIp = snap?.gatewayCandidateIP ?: "192.168.43.1"
+            if (link.isOpen && _bikeState.value == BikeState.LISTENING) {
+                logBike("Llamando a pantalla TFT (knock) en $candidateIp:10930...")
+                link.knock(candidateIp)
+                if (candidateIp != "192.168.43.1" && link.isOpen && _bikeState.value == BikeState.LISTENING) {
+                    link.knock("192.168.43.1")
+                }
+            }
+        }
     }
 
     fun stopBikeStream() {

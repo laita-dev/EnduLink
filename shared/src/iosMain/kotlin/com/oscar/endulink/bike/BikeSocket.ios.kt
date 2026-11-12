@@ -109,6 +109,8 @@ class IosBikeSocket(
                 val one = alloc<IntVar>()
                 one.value = 1
                 setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, one.ptr, sizeOf<IntVar>().toUInt())
+                setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, one.ptr, sizeOf<IntVar>().toUInt())
+                setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, one.ptr, sizeOf<IntVar>().toUInt())
             }
         }
     }

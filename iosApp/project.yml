@@ -43,6 +43,8 @@ targets:
         embed: false
       - sdk: CoreLocation.framework
       - sdk: VideoToolbox.framework
+      - sdk: CoreMedia.framework
+      - sdk: CoreVideo.framework
       - sdk: AVFoundation.framework
       - sdk: Security.framework
       - sdk: UIKit.framework

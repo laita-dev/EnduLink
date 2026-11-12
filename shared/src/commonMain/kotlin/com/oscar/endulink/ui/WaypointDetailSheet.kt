@@ -169,7 +169,7 @@ fun WaypointDetailSheet(
                         }
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "🚗", fontSize = 14.sp)
+                        NavArrowIcon(color = Color.White, size = 13.dp)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Ir a este punto",
@@ -195,8 +195,8 @@ fun WaypointDetailSheet(
                         }
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "➕", fontSize = 11.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
+                        ZoomPlusIcon(color = Color(0xFF00D4FF), size = 12.dp)
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
                             text = "Añadir Parada",
                             color = Color(0xFF00D4FF),
@@ -225,8 +225,8 @@ fun WaypointDetailSheet(
                         .clickable { onEdit() }
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "✏️", fontSize = 12.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
+                        EditPencilIcon(color = EnduPalette.TextPrimary, size = 13.dp)
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
                             text = "Editar",
                             color = EnduPalette.TextPrimary,
@@ -250,8 +250,8 @@ fun WaypointDetailSheet(
                         }
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "🗑️", fontSize = 12.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
+                        TrashDeleteIcon(color = EnduPalette.Danger, size = 13.dp)
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
                             text = "Eliminar",
                             color = EnduPalette.Danger,

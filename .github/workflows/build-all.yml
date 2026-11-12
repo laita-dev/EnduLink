@@ -2,10 +2,7 @@ name: Compilar Multiplataforma (iOS & Android)
 
 on:
   push:
-    branches: [ main, master ]
     tags: [ 'v*' ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
