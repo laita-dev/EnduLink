@@ -524,11 +524,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             strokeW = 1.8f * scale
         )
 
-        // 7. HUD Distancia/Tiempo Restante (Enlace o Ruta) o Altitud (Esquina inferior derecha)
-        val hasRoadTiming = remainingKm != null && remainingKm > 0.0 && remainingMinutes != null
-        val hasGpxRemaining = !hasRoadTiming && remainingKm != null && (remainingKm > 0.0 || routeTypeLabel == "TRACK")
-        val infoWidth = (if (hasRoadTiming) 224f else 146f) * scale
-        val infoHeight = (if (hasRoadTiming) 68f else 58f) * scale
+        // 7. HUD Altitud (Esquina inferior derecha, siempre visible aunque haya enlace o ruta)
+        val infoWidth = 146f * scale
+        val infoHeight = 58f * scale
         val infoLeft = w - infoWidth - 14f * scale
         val infoTop = h - infoHeight - 14f * scale
         val infoRight = w - 14f * scale
@@ -536,39 +534,23 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         canvas.drawRoundRect(infoLeft, infoTop, infoRight, infoBottom, rCard, rCard, hudCardPaint)
         canvas.drawRoundRect(infoLeft, infoTop, infoRight, infoBottom, rCard, rCard, hudBorderPaint)
 
-        val (infoLabel, infoValue) = when {
-            hasRoadTiming && remainingKm != null && remainingMinutes != null -> {
-                val kind = routeTypeLabel ?: "RUTA"
-                val etaStr = formatTftEtaHm(remainingMinutes)
-                val kmStr = "${(remainingKm * 10.0).roundToInt() / 10.0} KM"
-                val durStr = formatTftDuration(remainingMinutes)
-                "$kind - LLEGADA $etaStr" to "$kmStr - $durStr"
-            }
-            hasGpxRemaining && remainingKm != null -> {
-                "GPX - RESTAN" to "${(remainingKm * 10.0).roundToInt() / 10.0} KM"
-            }
-            else -> {
-                "ALTITUD" to "${rider.altitudeM.toInt()} M"
-            }
-        }
-        val infoValueSize = (if (hasRoadTiming) 13.5f else 15.5f) * scale
         TftVectorText.drawText(
             canvas = canvas,
-            text = infoLabel,
+            text = "ALTITUD",
             x = infoLeft + 12f * scale,
-            y = infoTop + (if (hasRoadTiming) 23f else 21f) * scale,
+            y = infoTop + 21f * scale,
             size = 10.5f * scale,
-            color = if (hasRoadTiming || hasGpxRemaining) Color(255, 107, 0) else Color(139, 148, 158),
+            color = Color(139, 148, 158),
             strokeW = 1.5f * scale
         )
         TftVectorText.drawText(
             canvas = canvas,
-            text = infoValue,
+            text = "${rider.altitudeM.toInt()} M",
             x = infoLeft + 12f * scale,
-            y = infoBottom - (if (hasRoadTiming) 16f else 14f) * scale,
-            size = infoValueSize,
+            y = infoBottom - 14f * scale,
+            size = 15.5f * scale,
             color = Color.White,
-            strokeW = (if (hasRoadTiming) 1.9f else 2.1f) * scale
+            strokeW = 2.1f * scale
         )
 
         // 8. HUD Batería y Hora del móvil en tiempo real (Esquina superior derecha)
@@ -669,21 +651,44 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             strokeW = 1.9f * scale
         )
 
-        // 9. HUD Próximo Giro / Instrucción (Barra superior izquierda)
-        if (isNavigating && !nextInstruction.isNullOrBlank()) {
-            val navRight = clockLeft - 10f * scale
+        // 9. HUD Resumen de Enlace / Ruta / GPX (Esquina superior izquierda, sin instrucciones de giro)
+        val hasRoadTiming = remainingKm != null && remainingKm > 0.0 && remainingMinutes != null
+        val hasGpxRemaining = !hasRoadTiming && remainingKm != null && (remainingKm > 0.0 || routeTypeLabel == "TRACK")
+        if (hasRoadTiming || hasGpxRemaining) {
             val navLeft = 14f * scale
-            canvas.drawRoundRect(navLeft, battTop, navRight, battBottom, rBatt, rBatt, hudCardPaint)
-            canvas.drawRoundRect(navLeft, battTop, navRight, battBottom, rBatt, rBatt, hudBorderPaint)
+            val maxNavRight = clockLeft - 10f * scale
+            val desiredW = (if (hasRoadTiming) 244f else 156f) * scale
+            val navRight = minOf(maxNavRight, navLeft + desiredW)
+            val navBottom = 56f * scale
+            canvas.drawRoundRect(navLeft, battTop, navRight, navBottom, rBatt, rBatt, hudCardPaint)
+            canvas.drawRoundRect(navLeft, battTop, navRight, navBottom, rBatt, rBatt, hudBorderPaint)
 
-            val maxChars = ((navRight - navLeft - 24f * scale) / (9.5f * scale)).toInt().coerceAtLeast(8)
-            val clean = nextInstruction.uppercase().take(maxChars)
+            val (topLbl, mainVal) = if (hasRoadTiming && remainingKm != null && remainingMinutes != null) {
+                val kind = routeTypeLabel ?: "RUTA"
+                val etaStr = formatTftEtaHm(remainingMinutes)
+                val kmStr = "${(remainingKm * 10.0).roundToInt() / 10.0} KM"
+                val durStr = formatTftDuration(remainingMinutes)
+                "$kind - LLEGADA $etaStr" to "$kmStr - $durStr"
+            } else {
+                val kmStr = "${((remainingKm ?: 0.0) * 10.0).roundToInt() / 10.0} KM"
+                "GPX - RESTAN" to kmStr
+            }
+
             TftVectorText.drawText(
                 canvas = canvas,
-                text = clean,
-                x = navLeft + 12f * scale,
-                y = battBottom - 13f * scale,
-                size = 13f * scale,
+                text = topLbl,
+                x = navLeft + 10f * scale,
+                y = battTop + 17f * scale,
+                size = 9.5f * scale,
+                color = Color(255, 107, 0),
+                strokeW = 1.4f * scale
+            )
+            TftVectorText.drawText(
+                canvas = canvas,
+                text = mainVal,
+                x = navLeft + 10f * scale,
+                y = navBottom - 10f * scale,
+                size = 12.5f * scale,
                 color = Color.White,
                 strokeW = 1.8f * scale
             )

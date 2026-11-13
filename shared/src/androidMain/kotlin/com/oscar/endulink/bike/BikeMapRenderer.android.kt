@@ -499,31 +499,13 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         canvas.drawText(spdStr, speedBox.left + 16f, speedBox.bottom - 18f, speedTextPaint)
         canvas.drawText("km/h", speedBox.left + 18f + speedTextPaint.measureText(spdStr) + 6f, speedBox.bottom - 18f, speedUnitPaint)
 
-        // 7. HUD de Moto: Distancia/Tiempo restante (Enlace o Ruta) o Altitud (Esquina inferior derecha)
-        val hasRoadTiming = remainingKm != null && remainingKm > 0.0 && remainingMinutes != null
-        val hasGpxRemaining = !hasRoadTiming && remainingKm != null && (remainingKm > 0.0 || routeTypeLabel == "TRACK")
-        val infoBoxWidth = if (hasRoadTiming) 224f else 146f
-        val infoBoxTop = if (hasRoadTiming) vh - 82f else vh - 72f
-        val infoBox = RectF(vw - infoBoxWidth - 14f, infoBoxTop, vw - 14f, vh - 14f)
+        // 7. HUD de Moto: Altitud (Esquina inferior derecha, siempre visible aunque haya enlace o ruta)
+        val infoBox = RectF(vw - 146f - 14f, vh - 72f, vw - 14f, vh - 14f)
         canvas.drawRoundRect(infoBox, 12f, 12f, hudCardPaint)
         canvas.drawRoundRect(infoBox, 12f, 12f, hudBorderPaint)
-
-        if (hasRoadTiming && remainingKm != null && remainingMinutes != null) {
-            val kind = routeTypeLabel ?: "RUTA"
-            val etaStr = formatTftEtaHm(remainingMinutes)
-            val kmStr = "${(remainingKm * 10.0).roundToInt() / 10.0} km"
-            val durStr = formatTftDuration(remainingMinutes)
-            canvas.drawText("$kind · Llegada $etaStr", infoBox.left + 12f, infoBox.top + 22f, speedUnitPaint)
-            canvas.drawText("$kmStr · $durStr", infoBox.left + 12f, infoBox.bottom - 16f, textPrimaryPaint)
-        } else if (hasGpxRemaining && remainingKm != null) {
-            val remStr = "${(remainingKm * 10.0).roundToInt() / 10.0} km"
-            canvas.drawText("GPX · RESTAN", infoBox.left + 12f, infoBox.top + 20f, speedUnitPaint)
-            canvas.drawText(remStr, infoBox.left + 12f, infoBox.bottom - 14f, textPrimaryPaint)
-        } else {
-            val altStr = "${rider.altitudeM.toInt()} m"
-            canvas.drawText("ALTITUD", infoBox.left + 12f, infoBox.top + 20f, textMutedPaint)
-            canvas.drawText(altStr, infoBox.left + 12f, infoBox.bottom - 14f, textPrimaryPaint)
-        }
+        val altStr = "${rider.altitudeM.toInt()} m"
+        canvas.drawText("ALTITUD", infoBox.left + 12f, infoBox.top + 20f, textMutedPaint)
+        canvas.drawText(altStr, infoBox.left + 12f, infoBox.bottom - 14f, textPrimaryPaint)
 
         // 8. HUD de Moto: Batería y Hora del móvil en tiempo real (Esquina superior derecha)
         val battStatus = getFreshBatteryStatus()
@@ -603,24 +585,27 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         }
         canvas.drawText(pctStr, textX, battBox.bottom - 13f, batteryTextPaint)
 
-        // 9. HUD de Moto: Próximo giro / Instrucción (Barra superior a la izquierda de la hora y batería)
-        if (isNavigating && !nextInstruction.isNullOrBlank()) {
-            val navRight = clockBox.left - 10f
-            val navBox = RectF(14f, 12f, navRight, 50f)
+        // 9. HUD de Moto: Resumen de Enlace / Ruta / GPX (Esquina superior izquierda, sin instrucciones de giro)
+        val hasRoadTiming = remainingKm != null && remainingKm > 0.0 && remainingMinutes != null
+        val hasGpxRemaining = !hasRoadTiming && remainingKm != null && (remainingKm > 0.0 || routeTypeLabel == "TRACK")
+        if (hasRoadTiming || hasGpxRemaining) {
+            val navRight = minOf(clockBox.left - 10f, 14f + if (hasRoadTiming) 244f else 156f)
+            val navBox = RectF(14f, 12f, navRight, 56f)
             canvas.drawRoundRect(navBox, 10f, 10f, hudCardPaint)
             canvas.drawRoundRect(navBox, 10f, 10f, hudBorderPaint)
 
-            val maxTextWidth = navBox.width() - 28f
-            val instruction = nextInstruction
-            var displayInstruction = "↳ $instruction"
-            if (textPrimaryPaint.measureText(displayInstruction) > maxTextWidth) {
-                var trimmed: String = instruction
-                while (trimmed.isNotEmpty() && textPrimaryPaint.measureText("↳ $trimmed…") > maxTextWidth) {
-                    trimmed = trimmed.dropLast(1)
-                }
-                displayInstruction = "↳ $trimmed…"
+            if (hasRoadTiming && remainingKm != null && remainingMinutes != null) {
+                val kind = routeTypeLabel ?: "RUTA"
+                val etaStr = formatTftEtaHm(remainingMinutes)
+                val kmStr = "${(remainingKm * 10.0).roundToInt() / 10.0} km"
+                val durStr = formatTftDuration(remainingMinutes)
+                canvas.drawText("$kind · Llegada $etaStr", navBox.left + 12f, navBox.top + 18f, speedUnitPaint)
+                canvas.drawText("$kmStr · $durStr", navBox.left + 12f, navBox.bottom - 11f, textPrimaryPaint)
+            } else if (hasGpxRemaining && remainingKm != null) {
+                val remStr = "${(remainingKm * 10.0).roundToInt() / 10.0} km"
+                canvas.drawText("GPX · RESTAN", navBox.left + 12f, navBox.top + 18f, speedUnitPaint)
+                canvas.drawText(remStr, navBox.left + 12f, navBox.bottom - 11f, textPrimaryPaint)
             }
-            canvas.drawText(displayInstruction, navBox.left + 14f, navBox.bottom - 13f, textPrimaryPaint)
         }
 
         canvas.restore()
