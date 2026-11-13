@@ -58,6 +58,7 @@ Desktop.ini
 # Código de referencia MotIOS (mantenido aislado en desarrollo)
 MotIOS/
 salida.h264
+Tools/qr_moto_prueba.png
 __pycache__/
 *.pyc
 
