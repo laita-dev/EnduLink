@@ -1,6 +1,7 @@
 package com.oscar.endulink.trail
 
 import com.oscar.endulink.bike.BikeMapConfig
+import com.oscar.endulink.bike.BikeQr
 import com.oscar.endulink.tiles.MapLayer
 import com.oscar.endulink.tiles.PlatformPaths
 import com.oscar.endulink.tiles.TileDiskStorage
@@ -11,7 +12,8 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class PersistedSettings(
     val selectedLayerRaw: String = MapLayer.CARRETERAS.raw,
-    val bikeMapConfig: BikeMapConfig = BikeMapConfig()
+    val bikeMapConfig: BikeMapConfig = BikeMapConfig(),
+    val bikeQr: BikeQr? = null
 )
 
 object SettingsStore {
@@ -33,11 +35,12 @@ object SettingsStore {
         }
     }
 
-    fun saveSettings(layer: MapLayer, bikeConfig: BikeMapConfig) {
+    fun saveSettings(layer: MapLayer, bikeConfig: BikeMapConfig, bikeQr: BikeQr? = null) {
         try {
             val payload = PersistedSettings(
                 selectedLayerRaw = layer.raw,
-                bikeMapConfig = bikeConfig
+                bikeMapConfig = bikeConfig,
+                bikeQr = bikeQr
             )
             TileDiskStorage.writeBytes(getFilePath(), json.encodeToString(payload).encodeToByteArray())
         } catch (_: Exception) {}

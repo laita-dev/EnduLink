@@ -897,4 +897,67 @@ fun WarningTriangleIcon(
     }
 }
 
+@Composable
+fun QrScannerIcon(
+    color: Color = EnduPalette.Accent,
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.8f.dp.toPx()
+
+        // 4 esquinas exteriores estilo visor QR
+        val tl = Path().apply {
+            moveTo(w * 0.12f, h * 0.34f)
+            lineTo(w * 0.12f, h * 0.12f)
+            lineTo(w * 0.34f, h * 0.12f)
+        }
+        val tr = Path().apply {
+            moveTo(w * 0.66f, h * 0.12f)
+            lineTo(w * 0.88f, h * 0.12f)
+            lineTo(w * 0.88f, h * 0.34f)
+        }
+        val bl = Path().apply {
+            moveTo(w * 0.12f, h * 0.66f)
+            lineTo(w * 0.12f, h * 0.88f)
+            lineTo(w * 0.34f, h * 0.88f)
+        }
+        val br = Path().apply {
+            moveTo(w * 0.66f, h * 0.88f)
+            lineTo(w * 0.88f, h * 0.88f)
+            lineTo(w * 0.88f, h * 0.66f)
+        }
+        val st = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        drawPath(tl, color, style = st)
+        drawPath(tr, color, style = st)
+        drawPath(bl, color, style = st)
+        drawPath(br, color, style = st)
+
+        // Cuadros interiores tipo código QR
+        drawRect(
+            color = color,
+            topLeft = Offset(w * 0.27f, h * 0.27f),
+            size = Size(w * 0.17f, h * 0.17f)
+        )
+        drawRect(
+            color = color,
+            topLeft = Offset(w * 0.56f, h * 0.27f),
+            size = Size(w * 0.17f, h * 0.17f)
+        )
+        drawRect(
+            color = color,
+            topLeft = Offset(w * 0.27f, h * 0.56f),
+            size = Size(w * 0.17f, h * 0.17f)
+        )
+        drawRect(
+            color = color,
+            topLeft = Offset(w * 0.56f, h * 0.56f),
+            size = Size(w * 0.17f, h * 0.17f)
+        )
+    }
+}
+
+
 

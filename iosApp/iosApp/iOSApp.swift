@@ -5,6 +5,7 @@ import VideoToolbox
 import CoreMedia
 import CoreVideo
 import AVFoundation
+import QuartzCore
 import UIKit
 
 /// Mantiene despiertos el proceso, la interfaz Wi-Fi (`en0`), los sockets TCP y el bucle H.264 de 15 FPS
@@ -495,6 +496,466 @@ final class IosWifiBridgeImpl: NSObject, IosWifiBridge {
     }
 }
 
+final class QrScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    var onScanned: ((String) -> Void)?
+    var onManualFallback: (() -> Void)?
+    var onError: ((String) -> Void)?
+
+    private let captureSession = AVCaptureSession()
+    private let sessionQueue = DispatchQueue(label: "com.oscar.endulink.qrscanner.session")
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var videoDevice: AVCaptureDevice?
+    private var isConfigured = false
+    private var hasFinished = false
+    private var isTorchOn = false
+
+    private let dimOverlayView = UIView()
+    private let dimMaskLayer = CAShapeLayer()
+    private let reticleLayer = CAShapeLayer()
+    private let torchButton = UIButton(type: .system)
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        overrideUserInterfaceStyle = .dark
+        view.backgroundColor = .black
+
+        let layer = AVCaptureVideoPreviewLayer(session: captureSession)
+        layer.videoGravity = .resizeAspectFill
+        view.layer.insertSublayer(layer, at: 0)
+        previewLayer = layer
+
+        dimOverlayView.isUserInteractionEnabled = false
+        dimOverlayView.backgroundColor = UIColor.black.withAlphaComponent(0.58)
+        dimMaskLayer.fillRule = .evenOdd
+        dimOverlayView.layer.mask = dimMaskLayer
+        view.addSubview(dimOverlayView)
+
+        reticleLayer.fillColor = UIColor.clear.cgColor
+        reticleLayer.strokeColor = UIColor(red: 1.0, green: 0.42, blue: 0.0, alpha: 1.0).cgColor
+        reticleLayer.lineWidth = 3.0
+        view.layer.addSublayer(reticleLayer)
+
+        setupOverlayUI()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        hasFinished = false
+        sessionQueue.async { [weak self] in
+            self?.configureAndStartSession()
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        setTorch(enabled: false)
+        sessionQueue.async { [weak self] in
+            if self?.captureSession.isRunning == true {
+                self?.captureSession.stopRunning()
+            }
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let bounds = view.bounds
+        previewLayer?.frame = bounds
+        dimOverlayView.frame = bounds
+
+        if let connection = previewLayer?.connection, connection.isVideoOrientationSupported {
+            let interfaceOrientation = view.window?.windowScene?.interfaceOrientation ?? .portrait
+            switch interfaceOrientation {
+            case .landscapeLeft:
+                connection.videoOrientation = .landscapeLeft
+            case .landscapeRight:
+                connection.videoOrientation = .landscapeRight
+            case .portraitUpsideDown:
+                connection.videoOrientation = .portraitUpsideDown
+            default:
+                connection.videoOrientation = .portrait
+            }
+        }
+
+        let boxSize = min(max(min(bounds.width, bounds.height) * 0.64, 210), 290)
+        let cutoutRect = CGRect(
+            x: (bounds.width - boxSize) / 2.0,
+            y: (bounds.height - boxSize) / 2.0 - 18.0,
+            width: boxSize,
+            height: boxSize
+        )
+
+        let fullPath = UIBezierPath(rect: bounds)
+        let holePath = UIBezierPath(roundedRect: cutoutRect, cornerRadius: 18.0)
+        fullPath.append(holePath)
+        dimMaskLayer.path = fullPath.cgPath
+        reticleLayer.path = holePath.cgPath
+    }
+
+    private func makePillConfiguration(
+        title: String,
+        foregroundColor: UIColor,
+        backgroundColor: UIColor,
+        borderColor: UIColor,
+        cornerRadius: CGFloat,
+        fontSize: CGFloat,
+        insets: NSDirectionalEdgeInsets
+    ) -> UIButton.Configuration {
+        var config = UIButton.Configuration.plain()
+        config.title = title
+        config.baseForegroundColor = foregroundColor
+        config.contentInsets = insets
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = UIFont.boldSystemFont(ofSize: fontSize)
+            return outgoing
+        }
+        var bg = UIBackgroundConfiguration.clear()
+        bg.backgroundColor = backgroundColor
+        bg.cornerRadius = cornerRadius
+        bg.strokeColor = borderColor
+        bg.strokeWidth = 1.0
+        config.background = bg
+        return config
+    }
+
+    private func setupOverlayUI() {
+        let closeButton = UIButton(
+            configuration: makePillConfiguration(
+                title: "Cerrar",
+                foregroundColor: .white,
+                backgroundColor: UIColor.black.withAlphaComponent(0.6),
+                borderColor: UIColor.white.withAlphaComponent(0.2),
+                cornerRadius: 16,
+                fontSize: 13,
+                insets: NSDirectionalEdgeInsets(top: 7, leading: 14, bottom: 7, trailing: 14)
+            )
+        )
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+
+        let titleLabel = UILabel()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.text = "Escanear QR Moto"
+        titleLabel.textColor = .white
+        titleLabel.font = UIFont.boldSystemFont(ofSize: 16)
+        titleLabel.textAlignment = .center
+
+        torchButton.configuration = makePillConfiguration(
+            title: "Linterna",
+            foregroundColor: .white,
+            backgroundColor: UIColor.black.withAlphaComponent(0.6),
+            borderColor: UIColor.white.withAlphaComponent(0.2),
+            cornerRadius: 16,
+            fontSize: 12,
+            insets: NSDirectionalEdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12)
+        )
+        torchButton.translatesAutoresizingMaskIntoConstraints = false
+        torchButton.isHidden = true
+        torchButton.addTarget(self, action: #selector(torchTapped), for: .touchUpInside)
+
+        let hintLabel = UILabel()
+        hintLabel.translatesAutoresizingMaskIntoConstraints = false
+        hintLabel.text = "Apunta la cámara al código QR de la pantalla TFT de tu moto"
+        hintLabel.textColor = .white
+        hintLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
+        hintLabel.textAlignment = .center
+        hintLabel.numberOfLines = 0
+
+        let manualButton = UIButton(
+            configuration: makePillConfiguration(
+                title: "Introducir o pegar QR manualmente",
+                foregroundColor: UIColor(red: 1.0, green: 0.42, blue: 0.0, alpha: 1.0),
+                backgroundColor: UIColor.black.withAlphaComponent(0.72),
+                borderColor: UIColor.white.withAlphaComponent(0.25),
+                cornerRadius: 12,
+                fontSize: 13,
+                insets: NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)
+            )
+        )
+        manualButton.translatesAutoresizingMaskIntoConstraints = false
+        manualButton.addTarget(self, action: #selector(manualTapped), for: .touchUpInside)
+
+        view.addSubview(closeButton)
+        view.addSubview(titleLabel)
+        view.addSubview(torchButton)
+        view.addSubview(hintLabel)
+        view.addSubview(manualButton)
+
+        let guide = view.safeAreaLayoutGuide
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: guide.topAnchor, constant: 12),
+            closeButton.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
+
+            torchButton.topAnchor.constraint(equalTo: guide.topAnchor, constant: 12),
+            torchButton.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
+
+            titleLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            titleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+
+            manualButton.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -24),
+            manualButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+
+            hintLabel.bottomAnchor.constraint(equalTo: manualButton.topAnchor, constant: -14),
+            hintLabel.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 24),
+            hintLabel.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -24),
+        ])
+    }
+
+    private func configureAndStartSession() {
+        guard !hasFinished else { return }
+
+        if !isConfigured {
+            captureSession.beginConfiguration()
+            if captureSession.canSetSessionPreset(.high) {
+                captureSession.sessionPreset = .high
+            }
+
+            guard let device = AVCaptureDevice.default(for: .video) else {
+                captureSession.commitConfiguration()
+                reportErrorAndDismiss("No se encontró cámara disponible en este dispositivo.")
+                return
+            }
+            videoDevice = device
+
+            do {
+                let input = try AVCaptureDeviceInput(device: device)
+                guard captureSession.canAddInput(input) else {
+                    captureSession.commitConfiguration()
+                    reportErrorAndDismiss("No se pudo conectar la entrada de vídeo.")
+                    return
+                }
+                captureSession.addInput(input)
+
+                if device.isFocusModeSupported(.continuousAutoFocus) {
+                    try? device.lockForConfiguration()
+                    device.focusMode = .continuousAutoFocus
+                    if device.isAutoFocusRangeRestrictionSupported {
+                        device.autoFocusRangeRestriction = .near
+                    }
+                    device.unlockForConfiguration()
+                }
+            } catch {
+                captureSession.commitConfiguration()
+                reportErrorAndDismiss("Error abriendo la cámara: \(error.localizedDescription)")
+                return
+            }
+
+            let metadataOutput = AVCaptureMetadataOutput()
+            guard captureSession.canAddOutput(metadataOutput) else {
+                captureSession.commitConfiguration()
+                reportErrorAndDismiss("No se pudo inicializar el detector de códigos QR.")
+                return
+            }
+            captureSession.addOutput(metadataOutput)
+            metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
+            guard metadataOutput.availableMetadataObjectTypes.contains(.qr) else {
+                captureSession.commitConfiguration()
+                reportErrorAndDismiss("Este dispositivo no soporta detección de códigos QR.")
+                return
+            }
+            metadataOutput.metadataObjectTypes = [.qr]
+
+            captureSession.commitConfiguration()
+            isConfigured = true
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.torchButton.isHidden = !(self.videoDevice?.hasTorch ?? false)
+            }
+        }
+
+        if !captureSession.isRunning {
+            captureSession.startRunning()
+        }
+    }
+
+    private func reportErrorAndDismiss(_ message: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.hasFinished else { return }
+            self.hasFinished = true
+            let handler = self.onError
+            self.dismiss(animated: true) {
+                handler?(message)
+            }
+        }
+    }
+
+    private func setTorch(enabled: Bool) {
+        guard isTorchOn != enabled else { return }
+        guard let device = videoDevice, device.hasTorch else { return }
+        do {
+            try device.lockForConfiguration()
+            device.torchMode = enabled ? .on : .off
+            device.unlockForConfiguration()
+            isTorchOn = enabled
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                let accent = UIColor(red: 1.0, green: 0.42, blue: 0.0, alpha: 1.0)
+                self.torchButton.configuration = self.makePillConfiguration(
+                    title: enabled ? "Linterna ON" : "Linterna",
+                    foregroundColor: .white,
+                    backgroundColor: enabled ? accent : UIColor.black.withAlphaComponent(0.6),
+                    borderColor: enabled ? accent : UIColor.white.withAlphaComponent(0.2),
+                    cornerRadius: 16,
+                    fontSize: 12,
+                    insets: NSDirectionalEdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12)
+                )
+            }
+        } catch {}
+    }
+
+    @objc private func closeTapped() {
+        hasFinished = true
+        setTorch(enabled: false)
+        dismiss(animated: true)
+    }
+
+    @objc private func manualTapped() {
+        hasFinished = true
+        setTorch(enabled: false)
+        let handler = onManualFallback
+        dismiss(animated: true) {
+            handler?()
+        }
+    }
+
+    @objc private func torchTapped() {
+        setTorch(enabled: !isTorchOn)
+    }
+
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
+        guard !hasFinished else { return }
+        for obj in metadataObjects {
+            guard let readable = obj as? AVMetadataMachineReadableCodeObject,
+                  readable.type == .qr,
+                  let value = readable.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty else {
+                continue
+            }
+            hasFinished = true
+            setTorch(enabled: false)
+            sessionQueue.async { [weak self] in
+                if self?.captureSession.isRunning == true {
+                    self?.captureSession.stopRunning()
+                }
+            }
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            let handler = onScanned
+            dismiss(animated: true) {
+                handler?(value)
+            }
+            break
+        }
+    }
+}
+
+final class IosQrScannerBridgeImpl: NSObject, IosQrScannerBridge {
+    func startQrScan(callback: IosQrScannerCallback) {
+        DispatchQueue.main.async {
+            guard let presenter = Self.topViewController() else {
+                callback.onError(message: "No se pudo abrir el visor de cámara.")
+                callback.onManualFallback()
+                return
+            }
+            if presenter is QrScannerViewController {
+                return
+            }
+            guard AVCaptureDevice.default(for: .video) != nil else {
+                callback.onError(message: "Cámara no disponible en este dispositivo. Puedes introducir el QR manualmente.")
+                callback.onManualFallback()
+                return
+            }
+
+            let status = AVCaptureDevice.authorizationStatus(for: .video)
+            switch status {
+            case .authorized:
+                Self.presentScanner(from: presenter, callback: callback)
+            case .notDetermined:
+                AVCaptureDevice.requestAccess(for: .video) { granted in
+                    DispatchQueue.main.async {
+                        let currentPresenter = Self.topViewController() ?? presenter
+                        if granted {
+                            Self.presentScanner(from: currentPresenter, callback: callback)
+                        } else {
+                            Self.presentPermissionAlert(from: currentPresenter, callback: callback)
+                        }
+                    }
+                }
+            case .denied, .restricted:
+                Self.presentPermissionAlert(from: presenter, callback: callback)
+            @unknown default:
+                callback.onError(message: "Permiso de cámara no disponible.")
+                callback.onManualFallback()
+            }
+        }
+    }
+
+    func openSettings() {
+        DispatchQueue.main.async {
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        }
+    }
+
+    private static func presentScanner(from presenter: UIViewController, callback: IosQrScannerCallback) {
+        let vc = QrScannerViewController()
+        vc.modalPresentationStyle = .fullScreen
+        vc.onScanned = { rawText in
+            DispatchQueue.main.async {
+                callback.onQrScanned(rawText: rawText)
+            }
+        }
+        vc.onManualFallback = {
+            DispatchQueue.main.async {
+                callback.onManualFallback()
+            }
+        }
+        vc.onError = { message in
+            DispatchQueue.main.async {
+                callback.onError(message: message)
+                callback.onManualFallback()
+            }
+        }
+        presenter.present(vc, animated: true)
+    }
+
+    private static func presentPermissionAlert(from presenter: UIViewController, callback: IosQrScannerCallback) {
+        let alert = UIAlertController(
+            title: "Permiso de cámara requerido",
+            message: "Activa el permiso de cámara para escanear el QR de la pantalla de tu moto o introduce el código manualmente.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Abrir Ajustes", style: .default) { _ in
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            }
+        })
+        alert.addAction(UIAlertAction(title: "Pegar manualmente", style: .default) { _ in
+            callback.onManualFallback()
+        })
+        alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        presenter.present(alert, animated: true)
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+        let keyWindow = scenes
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
+            ?? scenes.first?.windows.first
+        var top = keyWindow?.rootViewController
+        while let presented = top?.presentedViewController {
+            top = presented
+        }
+        return top
+    }
+}
+
 struct ComposeView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
         MainViewControllerKt.MainViewController()
@@ -508,6 +969,7 @@ struct iOSApp: App {
     init() {
         IosH264BridgeHolder.shared.bridge = VideoToolboxBridge()
         IosWifiBridgeHolder.shared.bridge = IosWifiBridgeImpl()
+        IosQrScannerBridgeHolder.shared.bridge = IosQrScannerBridgeImpl()
     }
 
     var body: some Scene {

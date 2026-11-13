@@ -189,6 +189,7 @@ class EnduController {
         val savedSettings = SettingsStore.loadSettings()
         _selectedLayer.value = MapLayer.fromRaw(savedSettings.selectedLayerRaw)
         _bikeMapConfig.value = savedSettings.bikeMapConfig
+        _bikeQr.value = savedSettings.bikeQr
         _quickMarkers.value = WaypointStore.loadWaypoints()
         _routes.value = RouteStore.loadRoutes()
 
@@ -364,9 +365,13 @@ class EnduController {
         }
     }
 
+    private fun persistSettings() {
+        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value, _bikeQr.value)
+    }
+
     fun setLayer(layer: MapLayer) {
         _selectedLayer.value = layer
-        SettingsStore.saveSettings(layer, _bikeMapConfig.value)
+        persistSettings()
     }
 
     fun toggleCrowFlies() {
@@ -992,11 +997,19 @@ class EnduController {
         val parsed = BikeQr.parse(text)
         if (parsed != null) {
             _bikeQr.value = parsed
+            persistSettings()
             logBike("QR reconocido: ${parsed.name} (SSID: ${parsed.ssid})")
             _statusBannerMessage.value = "QR reconocido: Red «${parsed.ssid}»"
+            showPlatformToast("QR guardado: ${parsed.ssid}")
             return true
         }
         return false
+    }
+
+    fun clearScannedQr() {
+        _bikeQr.value = null
+        persistSettings()
+        logBike("QR Wi-Fi de la moto eliminado")
     }
 
     fun connectViaQr() {
@@ -1091,36 +1104,36 @@ class EnduController {
 
     fun setBikeZoom(zoom: Int) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(zoom = zoom.coerceIn(8, 18))
-        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
+        persistSettings()
         refreshStaticPreview()
     }
 
     fun setBikeOrientation(orientation: String) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(orientation = orientation)
-        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
+        persistSettings()
         refreshStaticPreview()
     }
 
     fun setBikeTileMagnification(magnification: Double) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(tileMagnification = magnification)
-        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
+        persistSettings()
         refreshStaticPreview()
     }
 
     fun setBikeAutoZoomBySpeed(enabled: Boolean) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(autoZoomBySpeed = enabled)
-        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
+        persistSettings()
         refreshStaticPreview()
     }
 
     fun setBikeBitrate(bitrateKbps: Int) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(bitrateKbps = bitrateKbps)
-        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
+        persistSettings()
     }
 
     fun setBikeMapLayer(layer: MapLayer?) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(mapLayerRaw = layer?.raw)
-        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value)
+        persistSettings()
         refreshStaticPreview()
     }
 

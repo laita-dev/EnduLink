@@ -504,6 +504,7 @@ fun App() {
                         onSetBikeMapLayer = { controller.setBikeMapLayer(it) },
                         onSetAllowLocalLanTesting = { controller.setAllowLocalLanTesting(it) },
                         onSaveQr = { controller.saveScannedQr(it) },
+                        onClearQr = { controller.clearScannedQr() },
                         onStartStream = { controller.startBikeStream() },
                         onStopStream = { controller.stopBikeStream() },
                         onKnock = { ip -> controller.knockBike(ip) },

@@ -30,7 +30,10 @@ import com.oscar.endulink.bike.BikeMapConfig
 import com.oscar.endulink.bike.BikeQr
 import com.oscar.endulink.bike.BikeState
 import com.oscar.endulink.bike.WifiSnapshot
+import com.oscar.endulink.bike.openPlatformWifiSettings
+import com.oscar.endulink.bike.rememberBikeQrScanner
 import com.oscar.endulink.platform.EncoderStats
+import com.oscar.endulink.platform.showPlatformToast
 import com.oscar.endulink.tiles.MapLayer
 import kotlin.math.abs
 import kotlin.math.max
@@ -55,6 +58,7 @@ fun BikeConnectionSheet(
     onSetBikeMapLayer: (MapLayer?) -> Unit,
     onSetAllowLocalLanTesting: (Boolean) -> Unit,
     onSaveQr: (String) -> Boolean,
+    onClearQr: () -> Unit = {},
     onStartStream: () -> Unit,
     onStopStream: () -> Unit,
     onKnock: (String) -> Unit,
@@ -65,10 +69,37 @@ fun BikeConnectionSheet(
     var showQrInputDialog by remember { mutableStateOf(false) }
     var qrTextInput by remember { mutableStateOf("") }
     var qrError by remember { mutableStateOf<String?>(null) }
+    var copiedPassword by remember { mutableStateOf(false) }
     var showLogsDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copiedPassword) {
+        if (copiedPassword) {
+            kotlinx.coroutines.delay(2000)
+            copiedPassword = false
+        }
+    }
     var bikeIpInput by remember { mutableStateOf(wifiSnapshot?.gatewayCandidateIP ?: "192.168.43.1") }
     val clipboardManager = LocalClipboardManager.current
     val scrollState = rememberScrollState()
+
+    val launchQrScanner = rememberBikeQrScanner(
+        onQrScanned = { scanned ->
+            val ok = onSaveQr(scanned)
+            if (!ok) {
+                qrTextInput = scanned
+                qrError = "El QR escaneado no corresponde a Carbit/EasyConn ni a una red Wi-Fi válida."
+                showQrInputDialog = true
+            }
+        },
+        onManualInputRequested = {
+            qrError = null
+            showQrInputDialog = true
+        },
+        onScannerError = { msg ->
+            qrError = msg
+            showPlatformToast(msg)
+        }
+    )
 
     val isRunning = (state != BikeState.CLOSED)
 
@@ -645,82 +676,151 @@ fun BikeConnectionSheet(
                         )
 
                         if (bikeQr != null) {
-                            Row(
+                            Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "SSID: ${bikeQr.ssid}",
-                                        color = EnduPalette.TextPrimary,
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = "Contraseña guardada",
-                                        color = EnduPalette.TextMuted,
-                                        fontSize = 11.sp
-                                    )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "SSID: ${bikeQr.ssid}",
+                                            color = EnduPalette.TextPrimary,
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        val details = buildList {
+                                            if (bikeQr.password.isNotEmpty()) add("Clave: ${bikeQr.password}")
+                                            if (bikeQr.model.isNotEmpty()) add("Modelo ${bikeQr.model}")
+                                            if (bikeQr.serial.isNotEmpty()) add("SN ${bikeQr.serial}")
+                                        }.joinToString(" · ")
+                                        Text(
+                                            text = if (details.isNotEmpty()) details else "Red Wi-Fi reconocida",
+                                            color = EnduPalette.TextMuted,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(EnduPalette.SurfaceHigh)
+                                            .clickable { launchQrScanner() }
+                                    ) {
+                                        QrScannerIcon(color = EnduPalette.Accent, size = 18.dp)
+                                    }
                                 }
 
-                                if (bikeQr.password.isNotEmpty()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (bikeQr.password.isNotEmpty()) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(
+                                                    if (copiedPassword) EnduPalette.Success.copy(alpha = 0.2f)
+                                                    else EnduPalette.SurfaceHigh
+                                                )
+                                                .clickable {
+                                                    clipboardManager.setText(AnnotatedString(bikeQr.password))
+                                                    copiedPassword = true
+                                                    showPlatformToast("Contraseña copiada: ${bikeQr.password}")
+                                                }
+                                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = if (copiedPassword) "✓ Copiada" else "Copiar clave",
+                                                color = if (copiedPassword) EnduPalette.Success else EnduPalette.Accent,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+
                                     Box(
                                         contentAlignment = Alignment.Center,
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(EnduPalette.SurfaceHigh)
-                                            .clickable {
-                                                clipboardManager.setText(AnnotatedString(bikeQr.password))
-                                            }
-                                            .padding(horizontal = 9.dp, vertical = 6.dp)
+                                            .clickable { openPlatformWifiSettings() }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
                                     ) {
                                         Text(
-                                            text = "Copiar clave",
-                                            color = EnduPalette.Accent,
+                                            text = "Ajustes Wi-Fi",
+                                            color = EnduPalette.TextPrimary,
                                             fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.weight(1f))
+
+                                    Text(
+                                        text = "Borrar",
+                                        color = EnduPalette.Danger,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .clickable { onClearQr() }
+                                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(44.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(EnduPalette.SurfaceHigh)
+                                        .clickable { launchQrScanner() }
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        QrScannerIcon(color = EnduPalette.Accent, size = 18.dp)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Escanear QR Wi-Fi de la pantalla",
+                                            color = EnduPalette.Accent,
+                                            fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.width(8.dp))
-
-                                Box(
-                                    contentAlignment = Alignment.Center,
+                                Text(
+                                    text = "Introducir o pegar texto del QR manualmente",
+                                    color = EnduPalette.TextMuted,
+                                    fontSize = 11.sp,
                                     modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(CircleShape)
-                                        .background(EnduPalette.SurfaceHigh)
-                                        .clickable { showQrInputDialog = true }
-                                ) {
-                                    Text("📷", fontSize = 15.sp)
-                                }
-                            }
-                        } else {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(42.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(EnduPalette.SurfaceHigh)
-                                    .clickable { showQrInputDialog = true }
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("📷", fontSize = 14.sp)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Escanear QR Wi-Fi de la pantalla",
-                                        color = EnduPalette.Accent,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable {
+                                            qrError = null
+                                            showQrInputDialog = true
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
                             }
                         }
 
-                        Divider(color = EnduPalette.Outline.copy(alpha = 0.4f))
+                        HorizontalDivider(color = EnduPalette.Outline.copy(alpha = 0.4f))
 
                         // Estado de red IP
                         if (wifiSnapshot != null) {

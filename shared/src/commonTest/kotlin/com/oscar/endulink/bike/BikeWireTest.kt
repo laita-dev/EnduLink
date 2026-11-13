@@ -121,6 +121,14 @@ class BikeWireTest {
         assertEquals("password99", qr.password)
         assertEquals("37512", qr.model)
         assertEquals("ABC12345", qr.serial)
+
+        val wifiQr = BikeQr.parse("WIFI:T:WPA;S:DIRECT-HJ-5G-RIEJU307;P:clave\\;123;;")
+        assertNotNull(wifiQr)
+        assertEquals("DIRECT-HJ-5G-RIEJU307", wifiQr.ssid)
+        assertEquals("HJ-5G-RIEJU307", wifiQr.name)
+        assertEquals("clave;123", wifiQr.password)
+
+        assertNull(BikeQr.parse("texto cualquiera sin formato"))
     }
 }
 
