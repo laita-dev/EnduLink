@@ -29,6 +29,7 @@ fun RoutesDrawer(
     onInvertRoute: (GPXRoute) -> Unit,
     onCycleColor: (GPXRoute) -> Unit,
     onOpenElevation: (GPXRoute) -> Unit = {},
+    onEditRoute: (GPXRoute) -> Unit = {},
     onDownloadCorridor: (GPXRoute) -> Unit = {},
     onShareRoute: (GPXRoute) -> Unit = {},
     onDeleteRoute: (GPXRoute) -> Unit = {},
@@ -125,6 +126,7 @@ fun RoutesDrawer(
                             onInvert = { onInvertRoute(route) },
                             onCycleColor = { onCycleColor(route) },
                             onOpenElevation = { onOpenElevation(route) },
+                            onEdit = { onEditRoute(route) },
                             onDownloadCorridor = { onDownloadCorridor(route) },
                             onShare = { onShareRoute(route) },
                             onDelete = { onDeleteRoute(route) }
@@ -145,6 +147,7 @@ private fun RouteItemRow(
     onInvert: () -> Unit,
     onCycleColor: () -> Unit,
     onOpenElevation: () -> Unit,
+    onEdit: () -> Unit,
     onDownloadCorridor: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit
@@ -221,13 +224,20 @@ private fun RouteItemRow(
             }
         }
 
-        // Fila inferior: 6 botones de acción vectoriales 100% alineados en cuadrícula uniforme
+        // Fila inferior: botones de acción vectoriales 100% alineados en cuadrícula uniforme
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 1. Descargar corredor de mapa offline alrededor del track
+            // 1. Editar nombre, color y ajustes del track
+            RouteActionIconButton(
+                onClick = onEdit,
+                modifier = Modifier.weight(1f)
+            ) {
+                EditPencilIcon(color = EnduPalette.TextPrimary, size = 15.dp)
+            }
+            // 2. Descargar corredor de mapa offline alrededor del track
             RouteActionIconButton(
                 onClick = onDownloadCorridor,
                 modifier = Modifier.weight(1f)

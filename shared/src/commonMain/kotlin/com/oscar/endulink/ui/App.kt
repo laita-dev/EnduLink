@@ -1,13 +1,26 @@
 package com.oscar.endulink.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.zIndex
 import com.oscar.endulink.platform.PlatformBackHandler
+import com.oscar.endulink.platform.PlatformToastCenter
 import com.oscar.endulink.platform.closeApp
 import com.oscar.endulink.platform.rememberPlatformSafeAreaPadding
 import com.oscar.endulink.platform.showPlatformToast
@@ -66,6 +79,14 @@ fun App() {
     val wifiSnapshot by controller.wifiSnapshot.collectAsState()
     val offlineProgress by controller.offlineProgress.collectAsState()
     val downloadedPackages by controller.tileStore.downloadedPackages.collectAsState()
+    val tileRevision by controller.tileRevision.collectAsState()
+    val inAppToast by PlatformToastCenter.toast.collectAsState()
+
+    LaunchedEffect(inAppToast?.id) {
+        val current = inAppToast ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(2200L)
+        PlatformToastCenter.clearIfMatches(current.id)
+    }
 
     // Control de ventanas modales
     var showLayersPanel by remember { mutableStateOf(false) }
@@ -88,6 +109,8 @@ fun App() {
     var showSaveRecordingDialog by remember { mutableStateOf(false) }
     var pendingRecordingStats by remember { mutableStateOf(Triple(0.0, 0.0, 0L)) }
     var showUpdateDialog by remember { mutableStateOf(false) }
+    var routeForDetailId by remember { mutableStateOf<String?>(null) }
+    var routeToEditId by remember { mutableStateOf<String?>(null) }
 
     // Geocodificación inversa continua del centro de la pantalla en modo selección en el mapa
     LaunchedEffect(isPickingOnMap, center) {
@@ -100,6 +123,20 @@ fun App() {
     // Diálogo de enlace por carretera al seleccionar track lejano
     var pendingApproachRoute by remember { mutableStateOf<GPXRoute?>(null) }
     var pendingApproachDistance by remember { mutableStateOf(0.0) }
+
+    fun activateRouteWithApproachPrompt(route: GPXRoute) {
+        val rPos = rider.coordinate
+        val startPt = route.points.firstOrNull()?.coordinate
+        if (rPos != null && startPt != null) {
+            val dist = rPos.distanceTo(startPt)
+            if (dist > 300.0) {
+                pendingApproachRoute = route
+                pendingApproachDistance = dist
+                return
+            }
+        }
+        controller.selectRoute(route)
+    }
 
     // Control del botón atrás físico de Android con doble pulsación para salir
     var lastBackPressTime by remember { mutableStateOf(0L) }
@@ -116,6 +153,8 @@ fun App() {
                 showSaveWaypointDialog = false
                 waypointToEdit = null
             }
+            routeToEditId != null -> routeToEditId = null
+            routeForDetailId != null -> routeForDetailId = null
             selectedWaypointForDetail != null -> selectedWaypointForDetail = null
             showWaypointsSheet -> showWaypointsSheet = false
             droppedPin != null -> controller.clearDroppedPin()
@@ -166,7 +205,12 @@ fun App() {
                     trackProgress = trackProgress,
                     isPickingOnMap = isPickingOnMap,
                     onSelectWaypoint = { wpt ->
+                        routeForDetailId = null
                         selectedWaypointForDetail = wpt
+                    },
+                    onSelectRoute = { tappedRoute ->
+                        selectedWaypointForDetail = null
+                        routeForDetailId = tappedRoute.id
                     },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -255,6 +299,12 @@ fun App() {
                     onOpenElevation = { showElevationSheet = true },
                     onShareSelectedRoute = {
                         activeRoute?.let { controller.shareRoute(it) }
+                    },
+                    onOpenSelectedRouteOptions = {
+                        activeRoute?.let {
+                            selectedWaypointForDetail = null
+                            routeForDetailId = it.id
+                        }
                     },
                     isPickingOnMap = isPickingOnMap,
                     isSearchingForStop = isSearchingForStop,
@@ -411,19 +461,8 @@ fun App() {
                         routes = routes,
                         activeRouteId = activeRoute?.id,
                         onSelectRoute = { route ->
-                            val rPos = rider.coordinate
-                            val startPt = route.points.firstOrNull()?.coordinate
-                            if (rPos != null && startPt != null) {
-                                val dist = rPos.distanceTo(startPt)
-                                if (dist > 300.0) {
-                                    pendingApproachRoute = route
-                                    pendingApproachDistance = dist
-                                    showRoutesSheet = false
-                                    return@RoutesDrawer
-                                }
-                            }
-                            controller.selectRoute(route)
                             showRoutesSheet = false
+                            activateRouteWithApproachPrompt(route)
                         },
                         onToggleVisibility = { controller.toggleRouteVisibility(it) },
                         onInvertRoute = { controller.invertRoute(it) },
@@ -432,6 +471,10 @@ fun App() {
                             controller.selectRoute(route)
                             showRoutesSheet = false
                             showElevationSheet = true
+                        },
+                        onEditRoute = { route ->
+                            showRoutesSheet = false
+                            routeToEditId = route.id
                         },
                         onDownloadCorridor = { route ->
                             controller.downloadRouteCorridor(route)
@@ -480,10 +523,16 @@ fun App() {
                 }
 
                 if (showBikeSheet) {
-                    LaunchedEffect(showBikeSheet, layer, bikeMapConfig, activeRoute) {
+                    LaunchedEffect(layer, bikeMapConfig, activeRoute, quickMarkers, intermediateWaypoints) {
                         while (true) {
                             controller.refreshStaticPreview()
                             kotlinx.coroutines.delay(1000)
+                        }
+                    }
+                    LaunchedEffect(tileRevision) {
+                        if (tileRevision > 0) {
+                            kotlinx.coroutines.delay(120)
+                            controller.refreshStaticPreview()
                         }
                     }
                     BikeConnectionSheet(
@@ -507,7 +556,6 @@ fun App() {
                         onClearQr = { controller.clearScannedQr() },
                         onStartStream = { controller.startBikeStream() },
                         onStopStream = { controller.stopBikeStream() },
-                        onKnock = { ip -> controller.knockBike(ip) },
                         onClearLogs = { controller.clearBikeLogs() },
                         onClose = { showBikeSheet = false },
                         modifier = Modifier.align(Alignment.BottomCenter)
@@ -553,6 +601,56 @@ fun App() {
                         },
                         onClose = {
                             selectedWaypointForDetail = null
+                        },
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
+                }
+
+                // Tarjeta inferior de Opciones del track GPX seleccionado en el mapa o HUD
+                val selectedRouteForDetail = routeForDetailId?.let { id -> routes.firstOrNull { it.id == id } }
+                if (selectedRouteForDetail != null) {
+                    RouteDetailSheet(
+                        route = selectedRouteForDetail,
+                        isActive = selectedRouteForDetail.id == activeRoute?.id,
+                        riderCoord = rider.coordinate,
+                        onStartNavigation = { route ->
+                            routeForDetailId = null
+                            activateRouteWithApproachPrompt(route)
+                        },
+                        onCenterOnMap = { route ->
+                            controller.focusRouteOnMap(route)
+                            routeForDetailId = null
+                        },
+                        onOpenElevation = { route ->
+                            controller.selectRoute(route, fitToBounds = false)
+                            routeForDetailId = null
+                            showElevationSheet = true
+                        },
+                        onSelectColor = { route, color ->
+                            controller.setRouteColor(route, color)
+                        },
+                        onEditDetails = { route ->
+                            routeToEditId = route.id
+                        },
+                        onInvertRoute = { route ->
+                            controller.invertRoute(route)
+                        },
+                        onToggleVisibility = { route ->
+                            controller.toggleRouteVisibility(route)
+                        },
+                        onDownloadCorridor = { route ->
+                            controller.downloadRouteCorridor(route)
+                            routeForDetailId = null
+                        },
+                        onShareRoute = { route ->
+                            controller.shareRoute(route)
+                        },
+                        onDeleteRoute = { route ->
+                            controller.deleteRoute(route)
+                            routeForDetailId = null
+                        },
+                        onClose = {
+                            routeForDetailId = null
                         },
                         modifier = Modifier.align(Alignment.BottomCenter)
                     )
@@ -634,11 +732,64 @@ fun App() {
                     }
                 }
 
+                // Diálogo para editar propiedades de un track GPX (nombre, color, notas, sentido)
+                val routeToEdit = routeToEditId?.let { id -> routes.firstOrNull { it.id == id } }
+                if (routeToEdit != null) {
+                    Dialog(
+                        onDismissRequest = { routeToEditId = null }
+                    ) {
+                        EditRouteDialog(
+                            route = routeToEdit,
+                            onSave = { newName, newColor, newNotes, newIsVisible, toggleInvert ->
+                                controller.updateRouteDetails(
+                                    routeId = routeToEdit.id,
+                                    newName = newName,
+                                    newColor = newColor,
+                                    newNotes = newNotes,
+                                    newIsVisible = newIsVisible
+                                )
+                                if (toggleInvert) {
+                                    controller.invertRoute(routeToEdit)
+                                }
+                                routeToEditId = null
+                            },
+                            onDismiss = { routeToEditId = null }
+                        )
+                    }
+                }
+
                 // Diálogo de comprobación y descarga de actualizaciones
                 if (showUpdateDialog) {
                     AppUpdateDialog(
                         onDismiss = { showUpdateDialog = false }
                     )
+                }
+
+                // Aviso flotante multiplataforma (usado en iOS cuando showPlatformToast se dispara)
+                AnimatedVisibility(
+                    visible = inAppToast != null,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 20.dp, vertical = 22.dp)
+                        .zIndex(50f)
+                ) {
+                    val toastMsg = inAppToast?.message.orEmpty()
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xEE181D26))
+                            .border(1.dp, EnduPalette.Accent.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = toastMsg,
+                            color = Color.White,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
                 }
             }

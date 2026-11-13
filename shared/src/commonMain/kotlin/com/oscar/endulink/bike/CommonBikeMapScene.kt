@@ -36,9 +36,6 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
     private var intPixels: IntArray? = null
     private var rgbaBuffer: ByteArray? = null
 
-    private var previewBitmap: ImageBitmap? = null
-    private var previewCanvas: Canvas? = null
-
     // Caché en memoria de teselas decodificadas (máx 128 entradas)
     private val decodedTileCache = LinkedHashMap<TileCoord, ImageBitmap>(128)
 
@@ -68,13 +65,8 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         style = PaintingStyle.Fill
     }
     private val tilePaint = Paint().apply {
-        isAntiAlias = true
-        filterQuality = FilterQuality.High
-    }
-    private val gridPaint = Paint().apply {
-        color = Color(30, 34, 45)
-        style = PaintingStyle.Stroke
-        strokeWidth = 1f
+        isAntiAlias = false
+        filterQuality = FilterQuality.Low
     }
     private val routePaint = Paint().apply {
         color = Color(255, 107, 0)
@@ -161,16 +153,8 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         remainingMinutes: Int? = null,
         routeTypeLabel: String? = null
     ): ImageBitmap = lock.withLock {
-        val cur = previewBitmap
-        val bmp = if (cur != null && cur.width == width && cur.height == height) {
-            cur
-        } else {
-            ImageBitmap(width, height, ImageBitmapConfig.Argb8888).also {
-                previewBitmap = it
-                previewCanvas = Canvas(it)
-            }
-        }
-        val canvas = previewCanvas ?: Canvas(bmp).also { previewCanvas = it }
+        val bmp = ImageBitmap(width, height, ImageBitmapConfig.Argb8888)
+        val canvas = Canvas(bmp)
         drawScene(
             canvas = canvas,
             width = width.toFloat(),
@@ -325,7 +309,6 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         val centerTileX = floor(centerFracX).toInt()
         val centerTileY = floor(centerFracY).toInt()
         val maxTileIndex = if (zoom in 0..30) (1 shl zoom) - 1 else 0
-        val dstTileInt = tileSizePx.roundToInt().coerceAtLeast(1)
 
         for (dx in -3..3) {
             val tx = centerTileX + dx
@@ -334,8 +317,12 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                 val ty = centerTileY + dy
                 if (ty < 0 || ty > maxTileIndex) continue
 
-                val posX = ((tx - centerFracX) * tileSizePx).roundToInt()
-                val posY = ((ty - centerFracY) * tileSizePx).roundToInt()
+                val x0 = floor((tx - centerFracX) * tileSizePx).toInt()
+                val y0 = floor((ty - centerFracY) * tileSizePx).toInt()
+                val x1 = kotlin.math.ceil(((tx + 1) - centerFracX) * tileSizePx).toInt() + 1
+                val y1 = kotlin.math.ceil(((ty + 1) - centerFracY) * tileSizePx).toInt() + 1
+                val dstOffset = IntOffset(x0, y0)
+                val dstSize = IntSize((x1 - x0).coerceAtLeast(1), (y1 - y0).coerceAtLeast(1))
 
                 val tileCoord = TileCoord(layer, zoom, tx, ty)
                 var drewTile = false
@@ -354,8 +341,8 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                         image = tileBmp,
                         srcOffset = IntOffset.Zero,
                         srcSize = IntSize(tileBmp.width, tileBmp.height),
-                        dstOffset = IntOffset(posX, posY),
-                        dstSize = IntSize(dstTileInt, dstTileInt),
+                        dstOffset = dstOffset,
+                        dstSize = dstSize,
                         paint = tilePaint
                     )
                     drewTile = true
@@ -379,23 +366,12 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                                 image = parentBmp,
                                 srcOffset = IntOffset(oz.subX * subW, oz.subY * subH),
                                 srcSize = IntSize(subW, subH),
-                                dstOffset = IntOffset(posX, posY),
-                                dstSize = IntSize(dstTileInt, dstTileInt),
+                                dstOffset = dstOffset,
+                                dstSize = dstSize,
                                 paint = tilePaint
                             )
-                            drewTile = true
                         }
                     }
-                }
-
-                if (!drewTile) {
-                    canvas.drawRect(
-                        posX.toFloat(),
-                        posY.toFloat(),
-                        (posX + dstTileInt).toFloat(),
-                        (posY + dstTileInt).toFloat(),
-                        gridPaint
-                    )
                 }
             }
         }

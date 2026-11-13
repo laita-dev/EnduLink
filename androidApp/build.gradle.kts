@@ -17,16 +17,17 @@ android {
         val envVersionName = project.findProperty("appVersionName") as? String
         val envVersionCode = (project.findProperty("appVersionCode") as? String)?.toIntOrNull()
 
-        val resolvedVersionName = envVersionName ?: "0.1.15"
+        val resolvedVersionName = envVersionName ?: "0.1.16"
         val versionParts = resolvedVersionName.split(".").mapNotNull { it.toIntOrNull() }
         val derivedVersionCode = if (versionParts.size >= 3) {
             versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
         } else {
-            115
+            116
         }
 
         versionCode = envVersionCode ?: derivedVersionCode
         versionName = resolvedVersionName
+        resourceConfigurations += listOf("es", "en")
     }
 
     signingConfigs {
@@ -40,7 +41,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            ndk {
+                abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+            }
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -49,6 +54,16 @@ android {
         }
         debug {
             signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
+    packaging {
+        resources {
+            excludes += listOf(
+                "META-INF/INDEX.LIST",
+                "META-INF/io.netty.versions.properties",
+                "DebugProbesKt.bin"
+            )
         }
     }
 

@@ -30,6 +30,8 @@ actual class LocationProvider actual constructor() : NSObject(), CLLocationManag
         manager.headingFilter = 1.5
         manager.activityType = CLActivityTypeOtherNavigation
         manager.pausesLocationUpdatesAutomatically = false
+        manager.allowsBackgroundLocationUpdates = true
+        manager.showsBackgroundLocationIndicator = true
     }
 
     actual fun startTracking() {

@@ -4,13 +4,15 @@ import kotlinx.serialization.Serializable
 import kotlin.math.*
 
 @Serializable
-enum class TrackColor(val id: String, val rgbHex: Long) {
-    ORANGE("orange", 0xFFFF600AL),
-    RED("red", 0xFFF23842L),
-    BLUE("blue", 0xFF2E9EFFL),
-    GREEN("green", 0xFF2ED673L),
-    MAGENTA("magenta", 0xFFEB47DBL),
-    CYAN("cyan", 0xFF14D1E0L);
+enum class TrackColor(val id: String, val rgbHex: Long, val label: String) {
+    ORANGE("orange", 0xFFFF600AL, "Naranja"),
+    RED("red", 0xFFF23842L, "Rojo"),
+    YELLOW("yellow", 0xFFFFD600L, "Amarillo"),
+    GREEN("green", 0xFF2ED673L, "Verde"),
+    CYAN("cyan", 0xFF14D1E0L, "Cian"),
+    BLUE("blue", 0xFF2E9EFFL, "Azul"),
+    PURPLE("purple", 0xFF9E66FFL, "Morado"),
+    MAGENTA("magenta", 0xFFEB47DBL, "Magenta");
 
     val nextColor: TrackColor
         get() {
@@ -75,7 +77,8 @@ data class GPXRoute(
     var importedAtEpochMs: Long,
     var isVisible: Boolean = true,
     var color: TrackColor = TrackColor.ORANGE,
-    var isInverted: Boolean = false
+    var isInverted: Boolean = false,
+    var notes: String = ""
 ) {
     fun reversedRoute(): GPXRoute {
         val revPoints = points.reversed().map {
@@ -93,7 +96,8 @@ data class GPXRoute(
             importedAtEpochMs = importedAtEpochMs,
             isVisible = isVisible,
             color = color,
-            isInverted = !isInverted
+            isInverted = !isInverted,
+            notes = notes
         )
     }
 
@@ -108,7 +112,11 @@ data class GPXRoute(
         val sb = StringBuilder()
         sb.appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
         sb.appendLine("""<gpx version="1.1" creator="EnduLink" xmlns="http://www.topografix.com/GPX/1/1">""")
-        sb.appendLine("  <metadata><name>${esc(name)}</name></metadata>")
+        if (notes.isNotBlank()) {
+            sb.appendLine("  <metadata><name>${esc(name)}</name><desc>${esc(notes)}</desc></metadata>")
+        } else {
+            sb.appendLine("  <metadata><name>${esc(name)}</name></metadata>")
+        }
         for (wpt in waypoints) {
             sb.append("""  <wpt lat="${wpt.latitude}" lon="${wpt.longitude}">""")
             wpt.elevation?.let { sb.append("<ele>${(it * 10.0).roundToInt() / 10.0}</ele>") }

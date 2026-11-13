@@ -976,6 +976,108 @@ struct iOSApp: App {
         WindowGroup {
             ComposeView()
                 .ignoresSafeArea(.all)
+                .onOpenURL { url in
+                    Self.handleIncomingGpxURL(url)
+                }
+        }
+    }
+
+    private static func handleIncomingGpxURL(_ url: URL) {
+        guard url.isFileURL else { return }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let maxBytes = 25 * 1024 * 1024
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessed {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            var coordinatorError: NSError?
+            var loadedData: Data?
+            var readError: Error?
+            var resolvedName = url.lastPathComponent
+            var isTooLarge = false
+
+            NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinatorError) { readableURL in
+                let nameCandidate = readableURL.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !nameCandidate.isEmpty {
+                    resolvedName = nameCandidate
+                }
+                if let values = try? readableURL.resourceValues(forKeys: [.fileSizeKey]),
+                   let size = values.fileSize,
+                   size > maxBytes {
+                    isTooLarge = true
+                    return
+                }
+                do {
+                    let data = try Data(contentsOf: readableURL)
+                    if data.count > maxBytes {
+                        isTooLarge = true
+                    } else {
+                        loadedData = data
+                    }
+                } catch {
+                    readError = error
+                }
+            }
+
+            if isTooLarge {
+                DispatchQueue.main.async {
+                    MainViewControllerKt.notifyExternalGpxError(message: "El archivo supera el límite de 25 MB para GPX.")
+                }
+                return
+            }
+
+            guard let data = loadedData else {
+                let reason = (coordinatorError ?? readError)?.localizedDescription ?? "error desconocido"
+                DispatchQueue.main.async {
+                    MainViewControllerKt.notifyExternalGpxError(message: "No se pudo leer el archivo GPX: \(reason)")
+                }
+                return
+            }
+
+            // Limpiar copia temporal en Documents/Inbox generada al abrir desde WhatsApp/Mail
+            let parentDir = url.deletingLastPathComponent()
+            let grandParentDir = parentDir.deletingLastPathComponent()
+            if parentDir.lastPathComponent == "Inbox" && grandParentDir.lastPathComponent == "Documents" {
+                try? FileManager.default.removeItem(at: url)
+            }
+
+            var decoded = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? ""
+            if decoded.hasPrefix("\u{FEFF}") {
+                decoded = String(decoded.dropFirst())
+            }
+
+            let trimmed = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                DispatchQueue.main.async {
+                    MainViewControllerKt.notifyExternalGpxError(message: "El archivo GPX está vacío.")
+                }
+                return
+            }
+
+            let hasGpxExtension = resolvedName.lowercased().hasSuffix(".gpx")
+            let looksLikeGpx = decoded.range(of: "<gpx", options: .caseInsensitive) != nil
+                || decoded.range(of: "<trkpt", options: .caseInsensitive) != nil
+                || decoded.range(of: "<rtept", options: .caseInsensitive) != nil
+
+            guard hasGpxExtension || looksLikeGpx else {
+                DispatchQueue.main.async {
+                    MainViewControllerKt.notifyExternalGpxError(message: "El archivo seleccionado no es un GPX válido.")
+                }
+                return
+            }
+
+            let cleanName = resolvedName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let safeName = cleanName.isEmpty
+                ? "Ruta_Importada.gpx"
+                : (cleanName.lowercased().hasSuffix(".gpx") ? cleanName : "\(cleanName).gpx")
+
+            DispatchQueue.main.async {
+                MainViewControllerKt.importExternalGpx(fileName: safeName, content: decoded)
+            }
         }
     }
 }

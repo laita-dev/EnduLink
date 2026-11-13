@@ -9,7 +9,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
@@ -53,11 +52,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.google.mlkit.vision.barcode.BarcodeScanner
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.ReaderException
+import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.qrcode.QRCodeReader
 import com.oscar.endulink.platform.AndroidAppContext
 import com.oscar.endulink.ui.EnduPalette
 import java.util.concurrent.Executors
@@ -157,12 +157,7 @@ private fun AndroidQrScannerDialog(
     }
 
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
-    val barcodeScanner = remember {
-        val options = BarcodeScannerOptions.Builder()
-            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-            .build()
-        BarcodeScanning.getClient(options)
-    }
+    val qrDecoder = remember { ZxingQrDecoder() }
 
     DisposableEffect(lifecycleOwner, previewView) {
         var isDisposed = false
@@ -198,7 +193,7 @@ private fun AndroidQrScannerDialog(
                     imageAnalysis.setAnalyzer(analysisExecutor) { imageProxy ->
                         analyzeQrFrame(
                             imageProxy = imageProxy,
-                            scanner = barcodeScanner,
+                            decoder = qrDecoder,
                             handled = handled,
                             onDetected = { raw ->
                                 mainExecutor.execute {
@@ -239,7 +234,6 @@ private fun AndroidQrScannerDialog(
             isDisposed = true
             runCatching { boundCamera?.cameraControl?.enableTorch(false) }
             runCatching { cameraProvider?.unbindAll() }
-            runCatching { barcodeScanner.close() }
             runCatching { analysisExecutor.shutdown() }
         }
     }
@@ -431,35 +425,81 @@ private fun AndroidQrScannerDialog(
     }
 }
 
-@androidx.annotation.OptIn(ExperimentalGetImage::class)
+private class ZxingQrDecoder {
+    private val reader = QRCodeReader()
+    private val hints: Map<DecodeHintType, Any> = mapOf(
+        DecodeHintType.CHARACTER_SET to "UTF-8",
+        DecodeHintType.TRY_HARDER to true
+    )
+    private var yBuffer = ByteArray(0)
+    private var frameCounter = 0
+
+    fun decode(imageProxy: ImageProxy): String? {
+        val plane = imageProxy.planes.firstOrNull() ?: return null
+        val width = imageProxy.width
+        val height = imageProxy.height
+        if (width <= 0 || height <= 0) return null
+
+        val needed = width * height
+        if (yBuffer.size < needed) {
+            yBuffer = ByteArray(needed)
+        }
+
+        val buf = plane.buffer
+        val rowStride = plane.rowStride
+        buf.rewind()
+        val remaining = buf.remaining()
+
+        if (rowStride == width && remaining >= needed) {
+            buf.get(yBuffer, 0, needed)
+        } else {
+            var dstOffset = 0
+            for (row in 0 until height) {
+                val srcPos = row * rowStride
+                if (srcPos + width > remaining) return null
+                buf.position(srcPos)
+                buf.get(yBuffer, dstOffset, width)
+                dstOffset += width
+            }
+        }
+
+        val baseSource = PlanarYUVLuminanceSource(
+            yBuffer,
+            width,
+            height,
+            0,
+            0,
+            width,
+            height,
+            false
+        )
+        // Alternar normal e invertido para cubrir tanto QR oscuro/claro como pantallas TFT modo noche
+        val source = if ((frameCounter++ and 1) == 0) baseSource else baseSource.invert()
+        val bitmap = BinaryBitmap(HybridBinarizer(source))
+        return try {
+            reader.decode(bitmap, hints).text?.trim()?.takeIf { it.isNotEmpty() }
+        } catch (_: ReaderException) {
+            null
+        } finally {
+            reader.reset()
+        }
+    }
+}
+
 private fun analyzeQrFrame(
     imageProxy: ImageProxy,
-    scanner: BarcodeScanner,
+    decoder: ZxingQrDecoder,
     handled: AtomicBoolean,
     onDetected: (String) -> Unit
 ) {
-    if (handled.get()) {
-        imageProxy.close()
-        return
-    }
-    val mediaImage = imageProxy.image
-    if (mediaImage == null) {
-        imageProxy.close()
-        return
-    }
-
-    val inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-    scanner.process(inputImage)
-        .addOnSuccessListener { barcodes ->
-            val raw = barcodes.firstNotNullOfOrNull { barcode ->
-                barcode.rawValue?.trim()?.takeIf { it.isNotEmpty() }
-            }
-            if (raw != null && handled.compareAndSet(false, true)) {
-                onDetected(raw)
-            }
+    try {
+        if (handled.get()) return
+        val raw = decoder.decode(imageProxy)
+        if (raw != null && handled.compareAndSet(false, true)) {
+            onDetected(raw)
         }
-        .addOnCompleteListener {
-            imageProxy.close()
-        }
+    } finally {
+        imageProxy.close()
+    }
 }
 

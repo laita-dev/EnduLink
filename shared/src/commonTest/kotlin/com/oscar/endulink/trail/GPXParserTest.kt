@@ -62,5 +62,25 @@ class GPXParserTest {
         assertEquals("Ruta Trail", GPXParser.stripInvSuffix("Ruta Trail (Inv) (Inv)"))
         assertEquals("Ruta Normal", GPXParser.stripInvSuffix("Ruta Normal"))
     }
+
+    @Test
+    fun testDottedFallbackFilenameAndInvalidXmlRejection() {
+        val namelessGpx = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <gpx version="1.1">
+              <trk><trkseg>
+                <trkpt lat="40.7000" lon="-4.0000" />
+                <trkpt lat="40.7100" lon="-4.0000" />
+              </trkseg></trk>
+            </gpx>
+        """.trimIndent()
+        val route = GPXParser.parse(namelessGpx, fallbackName = "Sierra.v2.gpx")
+        assertEquals("Sierra.v2", route.name)
+        assertEquals("Sierra.v2.gpx", route.fileName)
+
+        assertFailsWith<Exception> {
+            GPXParser.parse("<config><item>not a gpx</item></config>", fallbackName = "config.xml")
+        }
+    }
 }
 

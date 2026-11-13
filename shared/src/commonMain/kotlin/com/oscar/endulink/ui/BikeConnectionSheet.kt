@@ -61,7 +61,6 @@ fun BikeConnectionSheet(
     onClearQr: () -> Unit = {},
     onStartStream: () -> Unit,
     onStopStream: () -> Unit,
-    onKnock: (String) -> Unit,
     onClearLogs: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
@@ -78,7 +77,6 @@ fun BikeConnectionSheet(
             copiedPassword = false
         }
     }
-    var bikeIpInput by remember { mutableStateOf(wifiSnapshot?.gatewayCandidateIP ?: "192.168.43.1") }
     val clipboardManager = LocalClipboardManager.current
     val scrollState = rememberScrollState()
 
@@ -183,7 +181,7 @@ fun BikeConnectionSheet(
                 }
             }
 
-            Divider(color = EnduPalette.Outline.copy(alpha = 0.5f))
+            HorizontalDivider(color = EnduPalette.Outline.copy(alpha = 0.5f))
 
             // ==========================================
             // CONTENIDO DESPLAZABLE (Tarjetas 1:1 MotIOS)
@@ -844,11 +842,23 @@ fun BikeConnectionSheet(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Aceptar conexión de simulador en red local",
-                                color = EnduPalette.TextMuted,
-                                fontSize = 11.5.sp
-                            )
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp)
+                            ) {
+                                Text(
+                                    text = "Aceptar conexión de simulador en red local",
+                                    color = EnduPalette.TextMuted,
+                                    fontSize = 11.5.sp
+                                )
+                                Text(
+                                    text = "Permite recibir la conexión desde simulador PC o redes locales personalizadas",
+                                    color = EnduPalette.TextMuted.copy(alpha = 0.7f),
+                                    fontSize = 9.5.sp,
+                                    lineHeight = 12.sp
+                                )
+                            }
                             Switch(
                                 checked = allowLocalLanTesting,
                                 onCheckedChange = { onSetAllowLocalLanTesting(it) },
@@ -859,36 +869,6 @@ fun BikeConnectionSheet(
                                     uncheckedTrackColor = EnduPalette.SurfaceHigh
                                 )
                             )
-                        }
-
-                        // Despertar pantalla (Knock)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedTextField(
-                                value = bikeIpInput,
-                                onValueChange = { bikeIpInput = it },
-                                label = { Text("IP Pantalla", fontSize = 10.sp) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedBorderColor = EnduPalette.Accent,
-                                    unfocusedBorderColor = EnduPalette.Outline
-                                )
-                            )
-
-                            Button(
-                                onClick = { onKnock(bikeIpInput.trim()) },
-                                colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.SurfaceHigh),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.padding(top = 6.dp)
-                            ) {
-                                Text(text = "🔔 Despertar", color = EnduPalette.TextPrimary, fontSize = 12.sp)
-                            }
                         }
                     }
                 }

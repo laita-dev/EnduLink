@@ -170,13 +170,18 @@ class EnduController {
     private val _livePreviewBitmap = MutableStateFlow<androidx.compose.ui.graphics.ImageBitmap?>(null)
     val livePreviewBitmap: StateFlow<androidx.compose.ui.graphics.ImageBitmap?> = _livePreviewBitmap.asStateFlow()
 
-    private val _allowLocalLanTesting = MutableStateFlow(false)
+    private val _allowLocalLanTesting = MutableStateFlow(true)
     val allowLocalLanTesting: StateFlow<Boolean> = _allowLocalLanTesting.asStateFlow()
 
     private val _wifiSnapshot = MutableStateFlow<WifiSnapshot?>(null)
     val wifiSnapshot: StateFlow<WifiSnapshot?> = _wifiSnapshot.asStateFlow()
 
+    private val rejectedIpsLock = SynchronizedLock()
+    private val rejectedIps = mutableSetOf<String>()
+
     private var previewDecimator = 0
+    private val previewSeqLock = SynchronizedLock()
+    private var previewRequestSeq = 0L
     private var routeCalcJob: Job? = null
     private var approachCalcJob: Job? = null
     private var lastApproachTarget = ApproachTarget.NEAREST
@@ -190,8 +195,12 @@ class EnduController {
         _selectedLayer.value = MapLayer.fromRaw(savedSettings.selectedLayerRaw)
         _bikeMapConfig.value = savedSettings.bikeMapConfig
         _bikeQr.value = savedSettings.bikeQr
+        _allowLocalLanTesting.value = savedSettings.allowLocalLanTesting
         _quickMarkers.value = WaypointStore.loadWaypoints()
         _routes.value = RouteStore.loadRoutes()
+        if (!savedSettings.lanTestingDefaultApplied) {
+            persistSettings()
+        }
 
         tileStore.onTileLoaded = {
             _tileRevision.value++
@@ -366,7 +375,12 @@ class EnduController {
     }
 
     private fun persistSettings() {
-        SettingsStore.saveSettings(_selectedLayer.value, _bikeMapConfig.value, _bikeQr.value)
+        SettingsStore.saveSettings(
+            layer = _selectedLayer.value,
+            bikeConfig = _bikeMapConfig.value,
+            bikeQr = _bikeQr.value,
+            allowLocalLanTesting = _allowLocalLanTesting.value
+        )
     }
 
     fun setLayer(layer: MapLayer) {
@@ -667,9 +681,13 @@ class EnduController {
             addRoute(route)
             selectRoute(route)
             fitCoordinates(route.points.map { it.coordinate })
-            _statusBannerMessage.value = "Track importado: ${route.name} (${(route.totalDistanceKm * 10.0).roundToInt() / 10.0} km)"
+            val msg = "Track importado: ${route.name} (${(route.totalDistanceKm * 10.0).roundToInt() / 10.0} km)"
+            _statusBannerMessage.value = msg
+            showPlatformToast(msg)
         } catch (e: Exception) {
-            _statusBannerMessage.value = "Error importando GPX: ${e.message}"
+            val err = "Error importando GPX: ${e.message}"
+            _statusBannerMessage.value = err
+            showPlatformToast(err)
         }
     }
 
@@ -683,15 +701,22 @@ class EnduController {
         } catch (_: Exception) {}
     }
 
-    fun selectRoute(route: GPXRoute) {
+    fun selectRoute(route: GPXRoute, fitToBounds: Boolean = true) {
         // Al seleccionar un GPX, limpiamos el destino de búsqueda
         clearSearchAndDestinationRoute()
         approachCalcJob?.cancel()
         _isCalculatingApproach.value = false
         _approachRoadRoute.value = null
         _trackProgress.value = null
-        _selectedRouteId.value = route.id
-        _activeRouteFlow.value = route
+        val latest = _routes.value.firstOrNull { it.id == route.id } ?: route
+        _selectedRouteId.value = latest.id
+        _activeRouteFlow.value = latest
+        if (fitToBounds) {
+            fitCoordinates(latest.points.map { it.coordinate })
+        }
+    }
+
+    fun focusRouteOnMap(route: GPXRoute) {
         fitCoordinates(route.points.map { it.coordinate })
     }
 
@@ -707,41 +732,75 @@ class EnduController {
         }
     }
 
-    fun toggleRouteVisibility(route: GPXRoute) {
-        val updated = route.copy(isVisible = !route.isVisible)
-        _routes.value = _routes.value.map {
-            if (it.id == route.id) updated else it
-        }
-        RouteStore.saveRoutes(_routes.value)
-        if (_selectedRouteId.value == route.id) {
-            _activeRouteFlow.value = updated
-            if (!updated.isVisible && _isNavigating.value && destinationRoadRoute == null && _approachRoadRoute.value == null) {
-                stopNavigation()
+    private fun updateStoredRoute(routeId: String, transform: (GPXRoute) -> GPXRoute): GPXRoute? {
+        var modified: GPXRoute? = null
+        _routes.value = _routes.value.map { existing ->
+            if (existing.id == routeId) {
+                transform(existing).also { modified = it }
+            } else {
+                existing
             }
+        }
+        if (modified != null) {
+            RouteStore.saveRoutes(_routes.value)
+            if (_selectedRouteId.value == routeId) {
+                _activeRouteFlow.value = modified
+            }
+        }
+        return modified
+    }
+
+    fun toggleRouteVisibility(route: GPXRoute) {
+        val updated = updateStoredRoute(route.id) { it.copy(isVisible = !it.isVisible) } ?: return
+        if (_selectedRouteId.value == route.id &&
+            !updated.isVisible &&
+            _isNavigating.value &&
+            destinationRoadRoute == null &&
+            _approachRoadRoute.value == null
+        ) {
+            stopNavigation()
         }
     }
 
     fun invertRoute(route: GPXRoute) {
-        val inverted = route.reversedRoute()
-        _routes.value = _routes.value.map {
-            if (it.id == route.id) inverted else it
-        }
-        RouteStore.saveRoutes(_routes.value)
+        updateStoredRoute(route.id) { it.reversedRoute() } ?: return
         if (_selectedRouteId.value == route.id) {
-            _activeRouteFlow.value = inverted
             _trackProgress.value = null
         }
     }
 
     fun cycleRouteColor(route: GPXRoute) {
-        val nextCol = route.color.nextColor
-        val updated = route.copy(color = nextCol)
-        _routes.value = _routes.value.map {
-            if (it.id == route.id) updated else it
-        }
-        RouteStore.saveRoutes(_routes.value)
-        if (_selectedRouteId.value == route.id) {
-            _activeRouteFlow.value = updated
+        updateStoredRoute(route.id) { it.copy(color = it.color.nextColor) }
+    }
+
+    fun setRouteColor(route: GPXRoute, color: TrackColor) {
+        updateStoredRoute(route.id) { it.copy(color = color) }
+    }
+
+    fun updateRouteDetails(
+        routeId: String,
+        newName: String,
+        newColor: TrackColor,
+        newNotes: String,
+        newIsVisible: Boolean? = null
+    ) {
+        updateStoredRoute(routeId) { existing ->
+            val cleanedName = GPXParser.stripInvSuffix(newName.trim()).ifBlank { existing.name }
+            existing.copy(
+                name = cleanedName,
+                color = newColor,
+                notes = newNotes.trim(),
+                isVisible = newIsVisible ?: existing.isVisible
+            )
+        }?.let { updated ->
+            if (_selectedRouteId.value == routeId &&
+                !updated.isVisible &&
+                _isNavigating.value &&
+                destinationRoadRoute == null &&
+                _approachRoadRoute.value == null
+            ) {
+                stopNavigation()
+            }
         }
     }
 
@@ -955,7 +1014,13 @@ class EnduController {
             }
         }
 
-        val link = BikeLink(card = card, picture = enc, events = events)
+        rejectedIpsLock.withLock { rejectedIps.clear() }
+        val link = BikeLink(
+            card = card,
+            picture = enc,
+            events = events,
+            allow = { fromIp, _ -> isAllowedBikeConnection(fromIp) }
+        )
         bikeLink = link
         link.open()
         refreshStaticPreview()
@@ -965,32 +1030,54 @@ class EnduController {
             if (snap != null) {
                 _wifiSnapshot.value = snap
             }
-            val candidateIp = snap?.gatewayCandidateIP ?: "192.168.43.1"
-            if (link.isOpen && _bikeState.value == BikeState.LISTENING) {
+            val knockCandidates = listOfNotNull(
+                snap?.gatewayCandidateIP,
+                "192.168.43.1",
+                "192.168.49.1"
+            ).distinct()
+
+            for (candidateIp in knockCandidates) {
+                if (!link.isOpen || _bikeState.value != BikeState.LISTENING) break
                 logBike("Llamando a pantalla TFT (knock) en $candidateIp:10930...")
-                link.knock(candidateIp)
-                if (candidateIp != "192.168.43.1" && link.isOpen && _bikeState.value == BikeState.LISTENING) {
-                    link.knock("192.168.43.1")
-                }
+                if (link.knock(candidateIp)) break
             }
         }
     }
 
+    private fun isAllowedBikeConnection(fromIp: String): Boolean {
+        if (_allowLocalLanTesting.value) return true
+        val expectedGateway = _wifiSnapshot.value?.gatewayCandidateIP
+        val allowed = (!expectedGateway.isNullOrEmpty() && fromIp == expectedGateway) ||
+            fromIp == "127.0.0.1" ||
+            fromIp == "::1" ||
+            fromIp.endsWith(".1") ||
+            fromIp.startsWith("192.168.43.") ||
+            fromIp.startsWith("192.168.49.") ||
+            fromIp.startsWith("192.168.5.") ||
+            fromIp.startsWith("192.168.8.") ||
+            fromIp.startsWith("192.168.10.") ||
+            fromIp.startsWith("192.168.100.") ||
+            fromIp.startsWith("192.168.137.") ||
+            fromIp.startsWith("172.20.10.")
+        if (!allowed) {
+            val isNew = rejectedIpsLock.withLock { rejectedIps.add(fromIp) }
+            if (isNew) {
+                val msg = "Conexión bloqueada ($fromIp): activa «Aceptar conexión de simulador en red local»"
+                _statusBannerMessage.value = msg
+                showPlatformToast(msg)
+            }
+        }
+        return allowed
+    }
+
     fun stopBikeStream() {
+        rejectedIpsLock.withLock { rejectedIps.clear() }
         bikeLink?.close()
         bikeLink = null
         encoder?.stop()
         encoder = null
         _bikeState.value = BikeState.CLOSED
         updateBackgroundKeepAlive()
-    }
-
-    fun knockBike(bikeIP: String) {
-        scope.launch {
-            logBike("Llamando a la moto (knock) en $bikeIP:10930...")
-            val ok = bikeLink?.knock(bikeIP) ?: false
-            logBike(if (ok) "La moto ha aceptado la llamada" else "La llamada knock no tuvo respuesta")
-        }
     }
 
     fun saveScannedQr(text: String): Boolean {
@@ -1010,11 +1097,6 @@ class EnduController {
         _bikeQr.value = null
         persistSettings()
         logBike("QR Wi-Fi de la moto eliminado")
-    }
-
-    fun connectViaQr() {
-        startBikeStream()
-        knockBike("192.168.43.1")
     }
 
     private data class TftRouteHudSnapshot(
@@ -1061,6 +1143,7 @@ class EnduController {
 
         // Actualizar preview en directo periódicamente (~1.5 veces por segundo)
         if (++previewDecimator % 10 == 0) {
+            val seq = previewSeqLock.withLock { ++previewRequestSeq }
             scope.launch(Dispatchers.Default) {
                 val preview = bikeMapRenderer.renderPreview(
                     width = 296,
@@ -1079,7 +1162,10 @@ class EnduController {
                     routeTypeLabel = snap.routeTypeLabel
                 )
                 if (preview != null) {
-                    _livePreviewBitmap.value = preview
+                    val shouldPublish = previewSeqLock.withLock { seq == previewRequestSeq }
+                    if (shouldPublish) {
+                        _livePreviewBitmap.value = preview
+                    }
                 }
             }
         }
@@ -1139,9 +1225,11 @@ class EnduController {
 
     fun setAllowLocalLanTesting(allow: Boolean) {
         _allowLocalLanTesting.value = allow
+        persistSettings()
     }
 
     fun refreshStaticPreview() {
+        val seq = previewSeqLock.withLock { ++previewRequestSeq }
         scope.launch(Dispatchers.Default) {
             val snap = buildTftRouteHudSnapshot()
 
@@ -1162,7 +1250,10 @@ class EnduController {
                 routeTypeLabel = snap.routeTypeLabel
             )
             if (preview != null) {
-                _livePreviewBitmap.value = preview
+                val shouldPublish = previewSeqLock.withLock { seq == previewRequestSeq }
+                if (shouldPublish) {
+                    _livePreviewBitmap.value = preview
+                }
             }
         }
     }

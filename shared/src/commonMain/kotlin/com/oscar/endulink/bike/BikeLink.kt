@@ -184,7 +184,7 @@ class BikeLink(
                 if (remote.isNotEmpty() && !allow(remote, client.localIP)) {
                     val isNew = refusedLock.withLock { refusedIPs.add(remote) }
                     if (isNew) {
-                        events.log("Conexión rechazada de $remote")
+                        events.log("Conexión rechazada de $remote (activa «Aceptar conexión de simulador en red local» si pruebas desde PC)")
                     }
                     client.close()
                     continue

@@ -3,7 +3,7 @@ package com.oscar.endulink.bike
 import androidx.compose.runtime.Composable
 
 /**
- * Lanza el escáner nativo de códigos QR usando la cámara del dispositivo (Android CameraX+MLKit / iOS AVFoundation).
+ * Lanza el escáner nativo de códigos QR usando la cámara del dispositivo (Android CameraX+ZXing / iOS AVFoundation).
  */
 @Composable
 expect fun rememberBikeQrScanner(

@@ -1,6 +1,9 @@
 package com.oscar.endulink.bike
 
+import android.content.Context
+import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
@@ -96,11 +99,27 @@ actual object BikeSocketFactory {
         socket.tcpNoDelay = true
         socket.keepAlive = true
 
-        // En Android, si tenemos la red Wi-Fi detectada, atamos el socket para no perder el 4G/5G
-        AndroidSocketBinder.wifiNetwork?.bindSocket(socket)
+        // En Android, si estamos conectados a un Wi-Fi sin Internet (la pantalla de la moto),
+        // atamos el socket TCP saliente a la interfaz Wi-Fi para evitar que el sistema lo desvíe al 4G/5G.
+        if (!host.startsWith("127.")) {
+            try {
+                val targetNetwork = AndroidSocketBinder.wifiNetwork ?: findActiveWifiNetwork()
+                targetNetwork?.bindSocket(socket)
+            } catch (_: Exception) {}
+        }
 
         socket.connect(InetSocketAddress(host, port), timeoutMs)
         return AndroidBikeSocket(socket)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun findActiveWifiNetwork(): Network? {
+        val ctx = AndroidBikeKeysStorage.appContext ?: return null
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return null
+        return cm.allNetworks.firstOrNull { net ->
+            val caps = cm.getNetworkCapabilities(net)
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        }
     }
 }
 

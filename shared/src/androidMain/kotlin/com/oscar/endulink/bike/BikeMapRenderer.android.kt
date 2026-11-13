@@ -23,7 +23,9 @@ actual fun getWifiSnapshot(): WifiSnapshot? {
         for (iface in interfaces) {
             if (!iface.isUp || iface.isLoopback) continue
             val name = iface.name.lowercase()
-            if (name.startsWith("wlan") || name.startsWith("wifi") || name.startsWith("ap")) {
+            if (name.startsWith("wlan") || name.startsWith("wifi") || name.startsWith("ap") ||
+                name.startsWith("swlan") || name.startsWith("mlan")
+            ) {
                 for (addr in iface.inetAddresses) {
                     if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
                         val host = addr.hostAddress ?: continue
@@ -46,21 +48,13 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
     private var cachedCanvas: Canvas? = null
     private var rgbaBuffer: ByteArray? = null
 
-    private var previewBitmap: Bitmap? = null
-    private var previewCanvas: Canvas? = null
-
     // Caché LRU en memoria de bitmaps de teselas decodificadas para evitar decodificar PNG/JPG en cada frame a 15 FPS
     private val decodedTileCache = android.util.LruCache<TileCoord, Bitmap>(128)
 
     // Paints preconfigurados para alto rendimiento (cero allocations por frame)
     private val bgPaint = Paint().apply { color = android.graphics.Color.rgb(20, 23, 28) }
     private val blackEdgePaint = Paint().apply { color = android.graphics.Color.BLACK }
-    private val tileFilterPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-    private val gridPaint = Paint().apply {
-        color = android.graphics.Color.rgb(30, 34, 45)
-        style = Paint.Style.STROKE
-        strokeWidth = 1f
-    }
+    private val tileFilterPaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val routePaint = Paint().apply {
         color = android.graphics.Color.rgb(255, 107, 0) // Naranja vivo
         style = Paint.Style.STROKE
@@ -225,14 +219,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         remainingMinutes: Int?,
         routeTypeLabel: String?
     ): ImageBitmap? {
-        val cur = previewBitmap
-        val bmp = if (cur != null && cur.width == width && cur.height == height) cur else {
-            Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
-                previewBitmap = it
-                previewCanvas = Canvas(it)
-            }
-        }
-        val canvas = previewCanvas ?: Canvas(bmp).also { previewCanvas = it }
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
         drawScene(
             canvas = canvas,
             width = width.toFloat(),
@@ -346,7 +334,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                     }
                 }
                 if (tileBmp != null) {
-                    val dst = RectF(posX, posY, posX + tileSizePx, posY + tileSizePx)
+                    val dst = RectF(posX - 0.6f, posY - 0.6f, posX + tileSizePx + 0.6f, posY + tileSizePx + 0.6f)
                     canvas.drawBitmap(tileBmp, null, dst, tileFilterPaint)
                     drewTile = true
                 }
@@ -366,15 +354,10 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                             val subW = parentBmp.width / oz.scale
                             val subH = parentBmp.height / oz.scale
                             val src = Rect(oz.subX * subW, oz.subY * subH, (oz.subX + 1) * subW, (oz.subY + 1) * subH)
-                            val dst = RectF(posX, posY, posX + tileSizePx, posY + tileSizePx)
+                            val dst = RectF(posX - 0.6f, posY - 0.6f, posX + tileSizePx + 0.6f, posY + tileSizePx + 0.6f)
                             canvas.drawBitmap(parentBmp, src, dst, tileFilterPaint)
-                            drewTile = true
                         }
                     }
-                }
-
-                if (!drewTile) {
-                    canvas.drawRect(posX, posY, posX + tileSizePx, posY + tileSizePx, gridPaint)
                 }
             }
         }

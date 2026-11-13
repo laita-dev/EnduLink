@@ -57,6 +57,7 @@ fun InteractiveMap(
     trackProgress: TrackProgress?,
     isPickingOnMap: Boolean = false,
     onSelectWaypoint: (GPXWaypoint) -> Unit = {},
+    onSelectRoute: (GPXRoute) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Escuchar revisiones de teselas descargadas para repintado reactivo inmediato
@@ -71,6 +72,7 @@ fun InteractiveMap(
     val scrubbedPoint by controller.scrubbedPoint.collectAsState()
     val textMeasurer = rememberTextMeasurer()
     val currentOnSelectWaypoint by rememberUpdatedState(onSelectWaypoint)
+    val currentOnSelectRoute by rememberUpdatedState(onSelectRoute)
     val currentIsPickingOnMap by rememberUpdatedState(isPickingOnMap)
     val currentLayer by rememberUpdatedState(layer)
     val useNativeBackdrop = isNativeAppleMapsSupported() && layer == MapLayer.CARRETERAS
@@ -130,8 +132,30 @@ fun InteractiveMap(
 
                         if (tappedWpt != null) {
                             currentOnSelectWaypoint(tappedWpt)
-                        } else if (controller.droppedPin.value != null) {
-                            controller.clearDroppedPin()
+                        } else {
+                            val activeRoadActive = controller.destinationRouteOptions.value
+                                .getOrNull(controller.selectedDestinationOptionIndex.value) != null
+                            val visibleTracks = controller.routes.value.filter {
+                                it.isVisible && it.points.isNotEmpty() && (!activeRoadActive || it.id != controller.activeRoute.value?.id)
+                            }
+                            val tappedRoute = findTappedRoute(
+                                routes = visibleTracks,
+                                activeRouteId = controller.activeRoute.value?.id,
+                                tapScreenX = tapOffset.x.toDouble(),
+                                tapScreenY = tapOffset.y.toDouble(),
+                                viewportWidthPx = size.width.toDouble(),
+                                viewportHeightPx = size.height.toDouble(),
+                                center = curCenter,
+                                zoom = curZoom,
+                                headingDeg = curHeading,
+                                baseTilePx = baseTilePx,
+                                hitRadiusPx = 24.dp.toPx().toDouble()
+                            )
+                            if (tappedRoute != null) {
+                                currentOnSelectRoute(tappedRoute)
+                            } else if (controller.droppedPin.value != null) {
+                                controller.clearDroppedPin()
+                            }
                         }
                     },
                     onLongPress = { offset ->
@@ -419,7 +443,6 @@ private fun DrawScope.drawTileGrid(
     val endY = floor(centerFracY).toInt() + radius
 
     val maxTileIndex = if (zoom in 0..30) (1 shl zoom) - 1 else 0
-    val gridPaint = Color(0xFF1E, 0x22, 0x2D)
 
     for (x in startX..endX) {
         if (x < 0 || x > maxTileIndex) continue
@@ -427,6 +450,12 @@ private fun DrawScope.drawTileGrid(
             if (y < 0 || y > maxTileIndex) continue
             val posX = screenCenter.x + ((x - centerFracX) * tileSizePx).toFloat()
             val posY = screenCenter.y + ((y - centerFracY) * tileSizePx).toFloat()
+            val x0 = floor(posX).toInt()
+            val y0 = floor(posY).toInt()
+            val x1 = ceil(posX + tileSizePx).toInt() + 1
+            val y1 = ceil(posY + tileSizePx).toInt() + 1
+            val dstOffset = IntOffset(x0, y0)
+            val dstSize = IntSize((x1 - x0).coerceAtLeast(1), (y1 - y0).coerceAtLeast(1))
 
             val tileCoord = TileCoord(layer, zoom, x, y)
             val bmp = tileStore.requestBitmap(tileCoord)
@@ -434,14 +463,13 @@ private fun DrawScope.drawTileGrid(
             if (bmp != null) {
                 drawImage(
                     image = bmp,
-                    dstOffset = IntOffset(posX.roundToInt(), posY.roundToInt()),
-                    dstSize = IntSize(ceil(tileSizePx).toInt(), ceil(tileSizePx).toInt()),
-                    filterQuality = FilterQuality.High
+                    dstOffset = dstOffset,
+                    dstSize = dstSize,
+                    filterQuality = FilterQuality.Low
                 )
             } else {
                 // Algoritmo Parent Overzoom: escala la tesela padre desde RAM/Disco para evitar cuadros negros al hacer zoom
                 val oz = tileStore.getOverzoomBitmap(tileCoord)
-                var drewParent = false
                 if (oz != null) {
                     val subW = oz.bitmap.width / oz.scale
                     val subH = oz.bitmap.height / oz.scale
@@ -449,19 +477,9 @@ private fun DrawScope.drawTileGrid(
                         image = oz.bitmap,
                         srcOffset = IntOffset(oz.subX * subW, oz.subY * subH),
                         srcSize = IntSize(subW, subH),
-                        dstOffset = IntOffset(posX.roundToInt(), posY.roundToInt()),
-                        dstSize = IntSize(ceil(tileSizePx).toInt(), ceil(tileSizePx).toInt()),
-                        filterQuality = FilterQuality.High
-                    )
-                    drewParent = true
-                }
-
-                if (!drewParent) {
-                    drawRect(
-                        color = gridPaint,
-                        topLeft = Offset(posX, posY),
-                        size = androidx.compose.ui.geometry.Size(tileSizePx, tileSizePx),
-                        style = Stroke(width = 1f)
+                        dstOffset = dstOffset,
+                        dstSize = dstSize,
+                        filterQuality = FilterQuality.Low
                     )
                 }
             }
@@ -662,6 +680,118 @@ private fun screenOffsetToGeoCoord(
 
     val (lat, lon) = TileMath.fractionalTileToLatLon(targetFracX, targetFracY, zInt)
     return GeoCoord(lat, lon)
+}
+
+/**
+ * Localiza el track GPX visible más cercano al toque sobre el mapa compensando zoom,
+ * rotación del viewport y densidad de pantalla.
+ */
+internal fun findTappedRoute(
+    routes: List<GPXRoute>,
+    activeRouteId: String?,
+    tapScreenX: Double,
+    tapScreenY: Double,
+    viewportWidthPx: Double,
+    viewportHeightPx: Double,
+    center: GeoCoord,
+    zoom: Double,
+    headingDeg: Double,
+    baseTilePx: Double,
+    hitRadiusPx: Double
+): GPXRoute? {
+    if (routes.isEmpty() || viewportWidthPx <= 0.0 || viewportHeightPx <= 0.0 || baseTilePx <= 0.0 || hitRadiusPx <= 0.0) {
+        return null
+    }
+    val zInt = zoom.toInt()
+    val tileSizePx = baseTilePx * (2.0.pow(zoom - zInt))
+    if (tileSizePx <= 0.0) return null
+
+    val (centerFracX, centerFracY) = TileMath.latLonToFractionalTile(center.latitude, center.longitude, zInt)
+    val dx = tapScreenX - viewportWidthPx / 2.0
+    val dy = tapScreenY - viewportHeightPx / 2.0
+    val rad = headingDeg * PI / 180.0
+    val unrotX = dx * cos(rad) - dy * sin(rad)
+    val unrotY = dx * sin(rad) + dy * cos(rad)
+    val tapFracX = centerFracX + (unrotX / tileSizePx)
+    val tapFracY = centerFracY + (unrotY / tileSizePx)
+
+    val maxFracDist = hitRadiusPx / tileSizePx
+    val maxFracDistSq = maxFracDist * maxFracDist
+
+    var bestRoute: GPXRoute? = null
+    var bestScore = Double.POSITIVE_INFINITY
+
+    for (route in routes) {
+        if (!route.isVisible || route.points.isEmpty()) continue
+        val distSq = minFracDistanceSqToRoute(route.points, tapFracX, tapFracY, zInt, maxFracDist)
+        if (distSq <= maxFracDistSq) {
+            // Priorizar ligeramente el track activo si coincide sobre otros solapados
+            val score = if (route.id == activeRouteId) distSq * 0.7 else distSq
+            if (score < bestScore) {
+                bestScore = score
+                bestRoute = route
+            }
+        }
+    }
+    return bestRoute
+}
+
+private fun minFracDistanceSqToRoute(
+    points: List<GPXPoint>,
+    tapFracX: Double,
+    tapFracY: Double,
+    zoomInt: Int,
+    maxFracDist: Double
+): Double {
+    var minDistSq = Double.POSITIVE_INFINITY
+    var (prevX, prevY) = TileMath.latLonToFractionalTile(points[0].latitude, points[0].longitude, zoomInt)
+    if (points.size == 1) {
+        val dpx = tapFracX - prevX
+        val dpy = tapFracY - prevY
+        return dpx * dpx + dpy * dpy
+    }
+
+    for (i in 1 until points.size) {
+        val (curX, curY) = TileMath.latLonToFractionalTile(points[i].latitude, points[i].longitude, zoomInt)
+        val minSegX = minOf(prevX, curX) - maxFracDist
+        val maxSegX = maxOf(prevX, curX) + maxFracDist
+        val minSegY = minOf(prevY, curY) - maxFracDist
+        val maxSegY = maxOf(prevY, curY) + maxFracDist
+        if (tapFracX in minSegX..maxSegX && tapFracY in minSegY..maxSegY) {
+            val dSq = pointToSegmentDistanceSq(tapFracX, tapFracY, prevX, prevY, curX, curY)
+            if (dSq < minDistSq) {
+                minDistSq = dSq
+                if (minDistSq <= 1e-18) return minDistSq
+            }
+        }
+        prevX = curX
+        prevY = curY
+    }
+    return minDistSq
+}
+
+private fun pointToSegmentDistanceSq(
+    px: Double,
+    py: Double,
+    ax: Double,
+    ay: Double,
+    bx: Double,
+    by: Double
+): Double {
+    val abX = bx - ax
+    val abY = by - ay
+    val lenSq = abX * abX + abY * abY
+    if (lenSq <= 1e-24) {
+        val dpx = px - ax
+        val dpy = py - ay
+        return dpx * dpx + dpy * dpy
+    }
+    val t = (((px - ax) * abX + (py - ay) * abY) / lenSq).coerceIn(0.0, 1.0)
+    val projX = ax + t * abX
+    val projY = ay + t * abY
+    val dx = px - projX
+    val dy = py - projY
+    return dx * dx + dy * dy
 }
 
 /**

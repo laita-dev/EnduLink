@@ -1,5 +1,6 @@
 package com.oscar.endulink.bike
 
+import com.oscar.endulink.trail.SettingsStore
 import kotlin.test.*
 
 class MockBikeSocket(val incomingData: ByteArray = ByteArray(0)) : BikeSocket {
@@ -129,6 +130,19 @@ class BikeWireTest {
         assertEquals("clave;123", wifiQr.password)
 
         assertNull(BikeQr.parse("texto cualquiera sin formato"))
+    }
+
+    @Test
+    fun testLanTestingSettingMigrationAndExplicitDisable() {
+        val legacyFalse = SettingsStore.decodeSettings("""{"allowLocalLanTesting":false}""")
+        assertTrue(legacyFalse.allowLocalLanTesting)
+        assertFalse(legacyFalse.lanTestingDefaultApplied)
+
+        val explicitFalse = SettingsStore.decodeSettings(
+            """{"allowLocalLanTesting":false,"lanTestingDefaultApplied":true}"""
+        )
+        assertFalse(explicitFalse.allowLocalLanTesting)
+        assertTrue(explicitFalse.lanTestingDefaultApplied)
     }
 }
 

@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.oscar.endulink.trail.GPXPoint
@@ -84,18 +85,25 @@ fun ElevationProfileSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp)
+                ) {
                     Text(
                         text = "Perfil de Altitud · ${route.name}",
                         color = EnduPalette.TextPrimary,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = "${minEle.roundToInt()} m – ${maxEle.roundToInt()} m  |  +${route.elevationGainM.roundToInt()} m desnivel  |  ${(totalKm * 10.0).roundToInt() / 10.0} km",
                         color = EnduPalette.TextMuted,
-                        fontSize = 12.sp
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 Text(
@@ -103,10 +111,15 @@ fun ElevationProfileSheet(
                     color = EnduPalette.Accent,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clickable {
-                        onScrubPoint(null)
-                        onClose()
-                    }
+                    softWrap = false,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable {
+                            onScrubPoint(null)
+                            onClose()
+                        }
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
                 )
             }
 

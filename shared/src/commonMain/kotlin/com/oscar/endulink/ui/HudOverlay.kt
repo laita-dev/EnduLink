@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.oscar.endulink.bike.BikeState
@@ -78,6 +79,7 @@ fun HudOverlay(
     onOpenWaypoints: () -> Unit = {},
     onOpenElevation: () -> Unit = {},
     onShareSelectedRoute: () -> Unit = {},
+    onOpenSelectedRouteOptions: () -> Unit = {},
     isPickingOnMap: Boolean = false,
     isSearchingForStop: Boolean = false,
     pickingCoordAddress: String? = null,
@@ -904,13 +906,20 @@ fun HudOverlay(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onOpenSelectedRouteOptions() }
+                                .padding(vertical = 2.dp, horizontal = 2.dp)
+                        ) {
                             Text(
                                 text = "Track: ${selectedRoute.name}",
                                 color = EnduPalette.TextPrimary,
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             val gpxRemText = if (approachRoute == null && trackProgress != null) {
                                 " · Restan ${(trackProgress.remainingKm * 10.0).roundToInt() / 10.0} km"
@@ -920,11 +929,30 @@ fun HudOverlay(
                             Text(
                                 text = "${(selectedRoute.totalDistanceKm * 10.0).roundToInt() / 10.0} km · +${selectedRoute.elevationGainM.roundToInt()} m$gpxRemText",
                                 color = EnduPalette.TextMuted,
-                                fontSize = 10.5.sp
+                                fontSize = 10.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Botón para abrir opciones / editar el track activo
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(EnduPalette.SurfaceHigh)
+                                    .clickable { onOpenSelectedRouteOptions() }
+                                    .padding(horizontal = 7.dp, vertical = 4.dp)
+                            ) {
+                                EditPencilIcon(
+                                    color = EnduPalette.TextPrimary,
+                                    size = 13.dp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(5.dp))
+
                             // Botón para compartir / exportar el archivo .GPX
                             Box(
                                 contentAlignment = Alignment.Center,

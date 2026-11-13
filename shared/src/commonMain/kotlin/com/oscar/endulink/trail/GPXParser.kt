@@ -97,6 +97,13 @@ object GPXParser {
         val cleanFallback = fallbackName.substringBeforeLast(".")
         val finalName = if (routeName.isNotBlank()) routeName else cleanFallback
 
+        // Leer descripción limpia de metadata/trk si no contiene markup HTML externo largo
+        val descMatch = Regex("(?s)<(?:metadata|trk|rte)\\b[^>]*>.*?<desc>(.*?)</desc>", RegexOption.IGNORE_CASE)
+            .find(xmlContent)
+        val parsedNotes = descMatch?.groupValues?.get(1)?.let { cleanXmlText(it) }
+            ?.takeIf { it.isNotEmpty() && !it.contains("<") && it.length <= 280 }
+            .orEmpty()
+
         val nowMs = Clock.System.now().toEpochMilliseconds()
         val routeId = "${nowMs}_${abs(finalName.hashCode())}"
 
@@ -110,7 +117,8 @@ object GPXParser {
             elevationGainM = stats.second,
             importedAtEpochMs = nowMs,
             isVisible = true,
-            color = color
+            color = color,
+            notes = parsedNotes
         )
     }
 

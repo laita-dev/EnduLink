@@ -22,11 +22,11 @@ private class IosGpxDocumentPickerDelegate(
         try {
             val path = url.path ?: return
             val bytes = TileDiskStorage.readBytes(path) ?: return
-            val text = bytes.decodeToString()
+            val text = bytes.decodeToString().removePrefix("\uFEFF")
             if (text.isNotBlank()) {
-                val rawName = url.lastPathComponent ?: "Ruta Importada"
-                val cleanName = rawName.replace(".gpx", "", ignoreCase = true)
-                onPicked(cleanName, text)
+                val rawName = url.lastPathComponent?.trim()?.takeIf { it.isNotEmpty() } ?: "Ruta Importada.gpx"
+                val finalName = if (rawName.endsWith(".gpx", ignoreCase = true)) rawName else "$rawName.gpx"
+                onPicked(finalName, text)
             }
         } finally {
             if (accessed) {
