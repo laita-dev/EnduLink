@@ -1156,15 +1156,16 @@ class EnduController {
 
     // --- Descarga Offline ---
 
-    fun downloadRegion(preset: OfflineRegionPreset, layer: MapLayer) {
+    fun downloadRegion(preset: OfflineRegionPreset, layer: MapLayer, customMaxZoom: Int? = null) {
         val bbox = MapBoundingBox(preset.minLat, preset.maxLat, preset.minLon, preset.maxLon)
-        val packageKey = "${preset.id}_${layer.raw}"
+        val effectiveMaxZ = minOf(maxOf(customMaxZoom ?: preset.maxZoom, preset.minZoom), layer.maxNativeZoom)
+        val packageKey = "${preset.id}_${layer.raw}@$effectiveMaxZ"
         tileStore.downloadBoundingBox(
             bbox = bbox,
             layer = layer,
             minZ = preset.minZoom,
-            maxZ = preset.maxZoom,
-            label = "${preset.name} (${layer.shortBadge})",
+            maxZ = effectiveMaxZ,
+            label = "${preset.name} Z${preset.minZoom}-Z$effectiveMaxZ (${layer.shortBadge})",
             packageKey = packageKey,
             onProgress = { _offlineProgress.value = it }
         )

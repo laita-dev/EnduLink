@@ -131,7 +131,15 @@ class TileStore(
     }
 
     fun markPackageDownloaded(packageKey: String) {
-        val updated = _downloadedPackages.value + packageKey
+        val newSpec = MapLayer.parseOfflinePackageSpec(packageKey)
+        val updated = if (newSpec != null) {
+            _downloadedPackages.value.filterNot { existing ->
+                val spec = MapLayer.parseOfflinePackageSpec(existing)
+                spec != null && spec.preset.id == newSpec.preset.id && spec.layer == newSpec.layer
+            }.toSet() + packageKey
+        } else {
+            _downloadedPackages.value + packageKey
+        }
         _downloadedPackages.value = updated
         saveDownloadedPackages(updated)
     }
@@ -141,19 +149,18 @@ class TileStore(
         _downloadedPackages.value = updated
         saveDownloadedPackages(updated)
 
-        val parsed = MapLayer.parseOfflinePackageKey(packageKey) ?: return
-        val (preset, layer) = parsed
+        val spec = MapLayer.parseOfflinePackageSpec(packageKey) ?: return
         scope.launch(Dispatchers.Default) {
             val coveredByRemaining = updated
-                .mapNotNull { MapLayer.parseOfflinePackageKey(it) }
-                .filter { it.second == layer }
-                .flatMapTo(HashSet()) { (otherPreset, _) ->
-                    val otherBbox = MapBoundingBox(otherPreset.minLat, otherPreset.maxLat, otherPreset.minLon, otherPreset.maxLon)
-                    TileMath.enumerateBoundingBoxTiles(otherBbox, layer, otherPreset.minZoom, otherPreset.maxZoom)
+                .mapNotNull { MapLayer.parseOfflinePackageSpec(it) }
+                .filter { it.layer == spec.layer }
+                .flatMapTo(HashSet()) { other ->
+                    val otherBbox = MapBoundingBox(other.preset.minLat, other.preset.maxLat, other.preset.minLon, other.preset.maxLon)
+                    TileMath.enumerateBoundingBoxTiles(otherBbox, spec.layer, other.preset.minZoom, other.maxZoom)
                 }
 
-            val bbox = MapBoundingBox(preset.minLat, preset.maxLat, preset.minLon, preset.maxLon)
-            val tiles = TileMath.enumerateBoundingBoxTiles(bbox, layer, preset.minZoom, preset.maxZoom)
+            val bbox = MapBoundingBox(spec.preset.minLat, spec.preset.maxLat, spec.preset.minLon, spec.preset.maxLon)
+            val tiles = TileMath.enumerateBoundingBoxTiles(bbox, spec.layer, spec.preset.minZoom, spec.maxZoom)
             for (coord in tiles) {
                 if (coord !in coveredByRemaining) {
                     memoryCacheLock.withLock { memoryCache.remove(coord) }
@@ -174,7 +181,9 @@ class TileStore(
     }
 
     fun clearLayerCache(layer: MapLayer) {
-        val updated = _downloadedPackages.value.filterNot { it.endsWith("_${layer.raw}") }.toSet()
+        val updated = _downloadedPackages.value.filterNot { key ->
+            MapLayer.parseOfflinePackageSpec(key)?.layer == layer
+        }.toSet()
         _downloadedPackages.value = updated
         saveDownloadedPackages(updated)
         memoryCacheLock.withLock { memoryCache.clear() }
@@ -423,8 +432,13 @@ class TileStore(
         packageKey: String? = null,
         onProgress: (OfflineDownloadProgress) -> Unit
     ) {
-        val tiles = TileMath.enumerateBoundingBoxTiles(bbox, layer, minZ, maxZ)
-        downloadTiles(tiles, label, packageKey, onProgress)
+        downloadJob?.cancel()
+        isCancelled = false
+        downloadJob = scope.launch(Dispatchers.Default) {
+            onProgress(OfflineDownloadProgress(isDownloading = true, label = label, completed = 0, total = 0, failed = 0))
+            val tiles = TileMath.enumerateBoundingBoxTiles(bbox, layer, minZ, maxZ, maxTiles = 60_000)
+            runTileDownloadWorkers(tiles, label, packageKey, onProgress)
+        }
     }
 
     fun cancelDownload() {
@@ -439,81 +453,102 @@ class TileStore(
         packageKey: String? = null,
         onProgress: (OfflineDownloadProgress) -> Unit
     ) {
+        downloadJob?.cancel()
+        isCancelled = false
+        downloadJob = scope.launch(Dispatchers.Default) {
+            runTileDownloadWorkers(tiles, label, packageKey, onProgress)
+        }
+    }
+
+    private suspend fun runTileDownloadWorkers(
+        tiles: List<TileCoord>,
+        label: String,
+        packageKey: String?,
+        onProgress: (OfflineDownloadProgress) -> Unit
+    ) {
         if (tiles.isEmpty()) {
             onProgress(OfflineDownloadProgress(isDownloading = false, label = label, completed = 0, total = 0, failed = 0))
             return
         }
 
-        downloadJob?.cancel()
-        isCancelled = false
         val total = tiles.size
-        val concurrency = tiles.firstOrNull()?.layer?.recommendedConcurrency ?: 3
-        val semaphore = Semaphore(concurrency)
+        val workerCount = (tiles.firstOrNull()?.layer?.recommendedConcurrency ?: 4).coerceIn(1, 6)
+        var nextIndex = 0
+        var completed = 0
+        var failed = 0
+        var lastEmitMs = 0L
 
-        downloadJob = scope.launch(Dispatchers.Default) {
-            var completed = 0
-            var failed = 0
-            onProgress(OfflineDownloadProgress(isDownloading = true, label = label, completed = 0, total = total, failed = 0))
+        onProgress(OfflineDownloadProgress(isDownloading = true, label = label, completed = 0, total = total, failed = 0))
 
-            val jobs = tiles.map { coord ->
+        coroutineScope {
+            val workers = (0 until workerCount).map {
                 launch {
-                    if (isCancelled) return@launch
-
-                    val path = diskPath(coord)
-                    if (TileDiskStorage.fileExists(path) && TileDiskStorage.fileSize(path) > 120) {
-                        val c = progressLock.withLock { ++completed }
-                        if (c % 20 == 0 || c == total) {
-                            onProgress(OfflineDownloadProgress(isDownloading = true, label = label, completed = c, total = total, failed = failed))
+                    while (!isCancelled) {
+                        val idx = progressLock.withLock {
+                            if (nextIndex < total) nextIndex++ else -1
                         }
-                        return@launch
-                    }
+                        if (idx < 0) break
 
-                    val url = coord.layer.tileURL(coord.z, coord.x, coord.y) ?: run {
-                        progressLock.withLock { ++failed }
-                        return@launch
-                    }
-
-                    semaphore.withPermit {
-                        if (isCancelled) return@launch
+                        val coord = tiles[idx]
+                        val path = diskPath(coord)
                         var success = false
-                        for (attempt in 0..1) {
-                            try {
-                                val resp = httpClient.get(url) {
-                                    headers {
-                                        append(HttpHeaders.UserAgent, "EnduLink/0.1.0 (Mobile Trail Navigation; https://github.com)")
-                                        append(HttpHeaders.Accept, "image/png,image/jpeg,image/*;q=0.9,*/*;q=0.8")
+
+                        if (TileDiskStorage.fileExists(path) && TileDiskStorage.fileSize(path) > 120) {
+                            success = true
+                        } else {
+                            val url = coord.layer.tileURL(coord.z, coord.x, coord.y)
+                            if (url != null) {
+                                for (attempt in 0..1) {
+                                    if (isCancelled) break
+                                    try {
+                                        val resp = httpClient.get(url) {
+                                            headers {
+                                                append(HttpHeaders.UserAgent, "EnduLink/0.1.0 (Mobile Trail Navigation; https://github.com)")
+                                                append(HttpHeaders.Accept, "image/png,image/jpeg,image/*;q=0.9,*/*;q=0.8")
+                                            }
+                                        }
+                                        if (resp.status == HttpStatusCode.OK) {
+                                            val bytes = resp.readBytes()
+                                            if (bytes.size > 100) {
+                                                TileDiskStorage.writeBytes(path, bytes)
+                                                success = true
+                                                break
+                                            }
+                                        }
+                                    } catch (_: Exception) {
+                                        if (attempt == 0) delay(250)
                                     }
                                 }
-                                if (resp.status == HttpStatusCode.OK) {
-                                    val bytes = resp.readBytes()
-                                    if (bytes.size > 100) {
-                                        TileDiskStorage.writeBytes(path, bytes)
-                                        success = true
-                                        break
-                                    }
-                                }
-                            } catch (_: Exception) {
-                                delay(300)
                             }
                         }
 
-                        val (c, f) = progressLock.withLock {
+                        var snapshot: OfflineDownloadProgress? = null
+                        val nowMs = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                        progressLock.withLock {
                             if (success) completed++ else failed++
-                            Pair(completed, failed)
+                            val done = completed + failed
+                            if (done == total || nowMs - lastEmitMs >= 150L) {
+                                lastEmitMs = nowMs
+                                snapshot = OfflineDownloadProgress(
+                                    isDownloading = true,
+                                    label = label,
+                                    completed = completed,
+                                    total = total,
+                                    failed = failed
+                                )
+                            }
                         }
-
-                        if ((c + f) % 8 == 0 || (c + f) == total) {
-                            onProgress(OfflineDownloadProgress(isDownloading = true, label = label, completed = c, total = total, failed = f))
-                        }
+                        snapshot?.let(onProgress)
                     }
                 }
             }
-            jobs.joinAll()
-            if (!isCancelled && completed > 0 && failed <= total / 5 && packageKey != null) {
-                markPackageDownloaded(packageKey)
-            }
-            onProgress(OfflineDownloadProgress(isDownloading = false, label = label, completed = completed, total = total, failed = failed))
+            workers.joinAll()
         }
+
+        if (!isCancelled && completed > 0 && failed <= total / 5 && packageKey != null) {
+            markPackageDownloaded(packageKey)
+        }
+        onProgress(OfflineDownloadProgress(isDownloading = false, label = label, completed = completed, total = total, failed = failed))
     }
 
     fun clearDiskCache() {

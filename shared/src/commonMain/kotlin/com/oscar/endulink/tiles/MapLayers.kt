@@ -75,6 +75,14 @@ enum class MapLayer(
         isRetina512 = false
     );
 
+    val estimatedTileBytes: Long
+        get() = when {
+            isRetina512 -> 49_152L
+            this == IGN_TOPO -> 30_720L
+            this == TRAIL_OSM -> 26_624L
+            else -> 20_480L
+        }
+
     fun tileURL(z: Int, x: Int, y: Int): String? {
         val clampedZ = minOf(maxOf(z, 1), maxNativeZoom)
         return when (this) {
@@ -126,14 +134,28 @@ enum class MapLayer(
         val offlineCapableLayers: List<MapLayer>
             get() = entries.filter { it.supportsOfflineDownload }
 
-        fun parseOfflinePackageKey(packageKey: String): Pair<OfflineRegionPreset, MapLayer>? {
-            val layer = entries.firstOrNull { packageKey.endsWith("_${it.raw}") } ?: return null
-            val presetId = packageKey.removeSuffix("_${layer.raw}")
+        fun parseOfflinePackageSpec(packageKey: String): OfflinePackageSpec? {
+            val parts = packageKey.split("@")
+            val baseKey = parts.firstOrNull() ?: return null
+            val customMaxZ = parts.getOrNull(1)?.toIntOrNull()
+            val layer = entries.firstOrNull { baseKey.endsWith("_${it.raw}") } ?: return null
+            val presetId = baseKey.removeSuffix("_${layer.raw}")
             val preset = OfflineRegionPreset.catalog.firstOrNull { it.id == presetId } ?: return null
-            return preset to layer
+            val effectiveMaxZ = minOf(maxOf(customMaxZ ?: preset.maxZoom, preset.minZoom), layer.maxNativeZoom)
+            return OfflinePackageSpec(preset = preset, layer = layer, maxZoom = effectiveMaxZ)
+        }
+
+        fun parseOfflinePackageKey(packageKey: String): Pair<OfflineRegionPreset, MapLayer>? {
+            return parseOfflinePackageSpec(packageKey)?.let { it.preset to it.layer }
         }
     }
 }
+
+data class OfflinePackageSpec(
+    val preset: OfflineRegionPreset,
+    val layer: MapLayer,
+    val maxZoom: Int
+)
 
 data class OfflineRegionPreset(
     val id: String,

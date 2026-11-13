@@ -466,7 +466,9 @@ fun App() {
                         onSelectLayer = { controller.setLayer(it) },
                         downloadedPackages = downloadedPackages,
                         progress = offlineProgress,
-                        onDownloadRegion = { preset, targetLayer -> controller.downloadRegion(preset, targetLayer) },
+                        onDownloadRegion = { preset, targetLayer, customMaxZoom ->
+                            controller.downloadRegion(preset, targetLayer, customMaxZoom)
+                        },
                         onRemovePackage = { key -> controller.tileStore.removePackage(key) },
                         onClearLayerCache = { targetLayer -> controller.tileStore.clearLayerCache(targetLayer) },
                         getCacheSizeBytes = { targetLayer -> controller.tileStore.getCacheSizeBytes(targetLayer) },

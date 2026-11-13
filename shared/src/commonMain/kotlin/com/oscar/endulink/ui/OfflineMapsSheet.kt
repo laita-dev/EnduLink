@@ -22,10 +22,17 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.oscar.endulink.tiles.MapBoundingBox
 import com.oscar.endulink.tiles.MapLayer
 import com.oscar.endulink.tiles.OfflineDownloadProgress
+import com.oscar.endulink.tiles.OfflinePackageSpec
 import com.oscar.endulink.tiles.OfflineRegionPreset
+import com.oscar.endulink.tiles.TileMath
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+
+private const val MAX_TILES_PER_DOWNLOAD = 60_000L
 
 private enum class OfflineSheetTab {
     DOWNLOAD,
@@ -34,8 +41,8 @@ private enum class OfflineSheetTab {
 
 /**
  * Gestor completo de Mapas Offline para EnduLink:
- * - Pestaña "Descargar": selector de capa y catálogo por Comunidades, Países y Zonas Trail.
- * - Pestaña "Descargados": administración de paquetes guardados y uso de almacenamiento por capa.
+ * - Pestaña "Descargar zonas": selector de capa, selector de zoom máximo, estimación de tamaño y catálogo.
+ * - Pestaña "Descargados": administración de paquetes guardados y uso de almacenamiento por capa en segundo plano.
  */
 @Composable
 fun OfflineMapsSheet(
@@ -43,7 +50,7 @@ fun OfflineMapsSheet(
     onSelectLayer: (MapLayer) -> Unit,
     downloadedPackages: Set<String>,
     progress: OfflineDownloadProgress,
-    onDownloadRegion: (OfflineRegionPreset, MapLayer) -> Unit,
+    onDownloadRegion: (OfflineRegionPreset, MapLayer, Int?) -> Unit,
     onRemovePackage: (String) -> Unit,
     onClearLayerCache: (MapLayer) -> Unit,
     getCacheSizeBytes: (MapLayer?) -> Long,
@@ -59,14 +66,53 @@ fun OfflineMapsSheet(
         )
     }
     var selectedCategory by remember { mutableStateOf("Comunidades España") }
+    var selectedMaxZoomOverride by remember { mutableStateOf<Int?>(null) }
     var filterQuery by remember { mutableStateOf("") }
     var storageRevision by remember { mutableStateOf(0) }
 
-    val totalBytes = remember(downloadedPackages, progress.isDownloading, progress.completed, storageRevision) {
-        getCacheSizeBytes(null)
+    var totalBytes by remember { mutableStateOf(0L) }
+    var layerStorage by remember { mutableStateOf<List<Triple<MapLayer, Int, Long>>>(emptyList()) }
+    var isScanningStorage by remember { mutableStateOf(false) }
+
+    val parsedDownloadedItems = remember(downloadedPackages) {
+        downloadedPackages.mapNotNull { key ->
+            MapLayer.parseOfflinePackageSpec(key)?.let { spec -> key to spec }
+        }.sortedWith(compareBy({ it.second.preset.name }, { it.second.layer.shortBadge }))
     }
 
-    val categories = listOf("Comunidades España", "Países", "Zonas Trail", "Todas")
+    // Cálculo de caché en disco fuera del hilo de UI y solo cuando cambia la pestaña, descarga terminada o limpieza
+    LaunchedEffect(activeTab, downloadedPackages, progress.isDownloading, storageRevision) {
+        isScanningStorage = true
+        val needPerLayer = (activeTab == OfflineSheetTab.MANAGE)
+        val (computedTotal, computedPerLayer) = withContext(Dispatchers.Default) {
+            val tot = getCacheSizeBytes(null)
+            val perLayer = if (needPerLayer) {
+                MapLayer.entries.mapNotNull { lay ->
+                    val size = getCacheSizeBytes(lay)
+                    val count = parsedDownloadedItems.count { it.second.layer == lay }
+                    if (size > 0L || count > 0) Triple(lay, count, size) else null
+                }
+            } else {
+                emptyList()
+            }
+            tot to perLayer
+        }
+        totalBytes = computedTotal
+        if (needPerLayer) {
+            layerStorage = computedPerLayer
+        }
+        isScanningStorage = false
+    }
+
+    val downloadedPackageByPresetLayer = remember(parsedDownloadedItems) {
+        buildMap {
+            for ((key, spec) in parsedDownloadedItems) {
+                put(spec.preset.id to spec.layer, key to spec)
+            }
+        }
+    }
+
+    val categories = remember { listOf("Comunidades España", "Países", "Zonas Trail", "Todas") }
 
     val filteredPresets = remember(selectedCategory, filterQuery) {
         OfflineRegionPreset.catalog.filter { preset ->
@@ -76,14 +122,6 @@ fun OfflineMapsSheet(
                 preset.subtitle.contains(filterQuery, ignoreCase = true)
             matchesCategory && matchesQuery
         }
-    }
-
-    val parsedDownloadedItems = remember(downloadedPackages) {
-        downloadedPackages.mapNotNull { key ->
-            MapLayer.parseOfflinePackageKey(key)?.let { (preset, layer) ->
-                Triple(key, preset, layer)
-            }
-        }.sortedWith(compareBy({ it.second.name }, { it.third.shortBadge }))
     }
 
     Card(
@@ -118,8 +156,9 @@ fun OfflineMapsSheet(
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold
                         )
+                        val sizeText = if (isScanningStorage && totalBytes == 0L) "calculando..." else "${formatBytesCompact(totalBytes)} en caché"
                         Text(
-                            text = "${downloadedPackages.size} zonas · ${formatBytesCompact(totalBytes)} en caché",
+                            text = "${downloadedPackages.size} zonas · $sizeText",
                             color = if (downloadedPackages.isNotEmpty()) EnduPalette.Success else EnduPalette.TextMuted,
                             fontSize = 11.sp
                         )
@@ -207,8 +246,9 @@ fun OfflineMapsSheet(
                             trackColor = EnduPalette.Outline
                         )
                         Spacer(modifier = Modifier.height(4.dp))
+                        val totalText = if (progress.total > 0) "${progress.completed} / ${progress.total} teselas (${(pct * 100).toInt()}%)" else "Preparando teselas..."
                         Text(
-                            text = "${progress.completed} / ${progress.total} teselas (${(pct * 100).toInt()}%)",
+                            text = totalText,
                             color = EnduPalette.TextSecondary,
                             fontSize = 11.sp
                         )
@@ -241,16 +281,20 @@ fun OfflineMapsSheet(
                 }
                 Spacer(modifier = Modifier.height(6.dp))
 
-                val row1Layers = listOf(
-                    Triple(MapLayer.OSMAND, "OsmAnd HD", "Pistas y curvas"),
-                    Triple(MapLayer.TRAIL_OSM, "Trail OSM", "Caminos y relieve"),
-                    Triple(MapLayer.IGN_TOPO, "IGN Topo", "MTN25 España")
-                )
-                val row2Layers = listOf(
-                    Triple(MapLayer.ESRI_STREET, "Esri Street", "Vial clásico"),
-                    Triple(MapLayer.SATELITE_PURO, "Satélite Puro", "Ortofoto Esri"),
-                    Triple(MapLayer.SATELITE_HIBRIDO, "Sat + Calles", "Híbrido HD")
-                )
+                val row1Layers = remember {
+                    listOf(
+                        Triple(MapLayer.OSMAND, "OsmAnd HD", "Pistas y curvas"),
+                        Triple(MapLayer.TRAIL_OSM, "Trail OSM", "Caminos y relieve"),
+                        Triple(MapLayer.IGN_TOPO, "IGN Topo", "MTN25 España")
+                    )
+                }
+                val row2Layers = remember {
+                    listOf(
+                        Triple(MapLayer.ESRI_STREET, "Esri Street", "Vial clásico"),
+                        Triple(MapLayer.SATELITE_PURO, "Satélite Puro", "Ortofoto Esri"),
+                        Triple(MapLayer.SATELITE_HIBRIDO, "Sat + Calles", "Híbrido HD")
+                    )
+                }
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(row1Layers, row2Layers).forEach { rowItems ->
@@ -297,7 +341,71 @@ fun OfflineMapsSheet(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Selector de detalle / zoom máximo a descargar
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Nivel de zoom máximo",
+                        color = EnduPalette.TextSecondary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = selectedMaxZoomOverride?.let { "Hasta Z$it (máx. capa Z${offlineTargetLayer.maxNativeZoom})" }
+                            ?: "Estándar por región",
+                        color = EnduPalette.TextMuted,
+                        fontSize = 10.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(5.dp))
+                val zoomOptions = remember { listOf<Int?>(null, 11, 12, 13, 14, 15) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    zoomOptions.forEach { zOpt ->
+                        val isSel = (selectedMaxZoomOverride == zOpt)
+                        val isSupported = zOpt == null || zOpt <= offlineTargetLayer.maxNativeZoom
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    when {
+                                        !isSupported -> EnduPalette.SurfaceHigh.copy(alpha = 0.45f)
+                                        isSel -> EnduPalette.Accent
+                                        else -> EnduPalette.SurfaceHigh
+                                    }
+                                )
+                                .border(
+                                    width = if (isSel) 1.dp else 0.5.dp,
+                                    color = if (isSel) EnduPalette.Accent else EnduPalette.Outline,
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clickable(enabled = isSupported) { selectedMaxZoomOverride = zOpt }
+                                .padding(vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = zOpt?.let { "Z$it" } ?: "Auto",
+                                color = when {
+                                    !isSupported -> EnduPalette.TextMuted.copy(alpha = 0.45f)
+                                    isSel -> Color.White
+                                    else -> EnduPalette.TextSecondary
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Selector de Categorías
                 Row(
@@ -376,7 +484,7 @@ fun OfflineMapsSheet(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Lista filtrada de zonas
+                // Lista filtrada de zonas con tamaño estimado por nivel de zoom
                 if (filteredPresets.isEmpty()) {
                     Box(
                         modifier = Modifier.fillMaxWidth().weight(1f),
@@ -394,8 +502,25 @@ fun OfflineMapsSheet(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(filteredPresets, key = { it.id }) { preset ->
-                            val packageKey = "${preset.id}_${offlineTargetLayer.raw}"
-                            val isDownloaded = packageKey in downloadedPackages
+                            val existingEntry = downloadedPackageByPresetLayer[preset.id to offlineTargetLayer]
+                            val isDownloaded = existingEntry != null
+                            val effMaxZ = minOf(
+                                maxOf(selectedMaxZoomOverride ?: preset.maxZoom, preset.minZoom),
+                                offlineTargetLayer.maxNativeZoom
+                            )
+                            val estimate = remember(preset.id, offlineTargetLayer, effMaxZ) {
+                                val bbox = MapBoundingBox(preset.minLat, preset.maxLat, preset.minLon, preset.maxLon)
+                                val tiles = TileMath.countBoundingBoxTilesLong(
+                                    bbox = bbox,
+                                    minZ = preset.minZoom,
+                                    maxZ = effMaxZ,
+                                    maxNativeZ = offlineTargetLayer.maxNativeZoom
+                                )
+                                tiles to (tiles * offlineTargetLayer.estimatedTileBytes)
+                            }
+                            val estTiles = estimate.first
+                            val estBytes = estimate.second
+                            val exceedsLimit = estTiles > MAX_TILES_PER_DOWNLOAD
 
                             Row(
                                 modifier = Modifier
@@ -430,10 +555,30 @@ fun OfflineMapsSheet(
                                         }
                                     }
                                     Text(
-                                        text = "${preset.subtitle} · ${preset.category}",
-                                        color = EnduPalette.TextMuted,
-                                        fontSize = 11.sp
+                                        text = "Z${preset.minZoom}–Z$effMaxZ · ~${formatTileCountCompact(estTiles)} teselas · ~${formatBytesCompact(estBytes)}",
+                                        color = if (exceedsLimit) EnduPalette.Warning else EnduPalette.AccentBlue,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
                                     )
+                                    if (exceedsLimit) {
+                                        Text(
+                                            text = "Supera ${formatTileCountCompact(MAX_TILES_PER_DOWNLOAD)} teselas; elige un zoom menor.",
+                                            color = EnduPalette.Warning,
+                                            fontSize = 10.sp
+                                        )
+                                    } else if (existingEntry != null) {
+                                        Text(
+                                            text = "Guardado hasta Z${existingEntry.second.maxZoom} · ${preset.category}",
+                                            color = EnduPalette.TextMuted,
+                                            fontSize = 10.sp
+                                        )
+                                    } else {
+                                        Text(
+                                            text = preset.category,
+                                            color = EnduPalette.TextMuted,
+                                            fontSize = 10.sp
+                                        )
+                                    }
                                 }
 
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -443,9 +588,11 @@ fun OfflineMapsSheet(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Button(
-                                        onClick = { onDownloadRegion(preset, offlineTargetLayer) },
+                                        onClick = { onDownloadRegion(preset, offlineTargetLayer, effMaxZ) },
+                                        enabled = !exceedsLimit,
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isDownloaded) EnduPalette.SurfaceHigh else EnduPalette.Accent
+                                            containerColor = if (isDownloaded) EnduPalette.SurfaceHigh else EnduPalette.Accent,
+                                            disabledContainerColor = EnduPalette.SurfaceHigh.copy(alpha = 0.45f)
                                         ),
                                         shape = RoundedCornerShape(8.dp),
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -458,25 +605,32 @@ fun OfflineMapsSheet(
                                             if (isDownloaded) {
                                                 RefreshArrowsIcon(color = EnduPalette.TextPrimary, size = 12.dp)
                                             } else {
-                                                DownloadTrayIcon(color = Color.White, size = 12.dp)
+                                                DownloadTrayIcon(
+                                                    color = if (exceedsLimit) EnduPalette.TextMuted else Color.White,
+                                                    size = 12.dp
+                                                )
                                             }
                                             Text(
                                                 text = if (isDownloaded) "Actualizar" else "Descargar",
-                                                color = if (isDownloaded) EnduPalette.TextPrimary else Color.White,
+                                                color = when {
+                                                    exceedsLimit -> EnduPalette.TextMuted
+                                                    isDownloaded -> EnduPalette.TextPrimary
+                                                    else -> Color.White
+                                                },
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }
                                     }
 
-                                    if (isDownloaded) {
+                                    if (existingEntry != null) {
                                         Box(
                                             modifier = Modifier
                                                 .size(32.dp)
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(EnduPalette.Danger.copy(alpha = 0.12f))
                                                 .clickable {
-                                                    onRemovePackage(packageKey)
+                                                    onRemovePackage(existingEntry.first)
                                                     storageRevision++
                                                 },
                                             contentAlignment = Alignment.Center
@@ -493,15 +647,6 @@ fun OfflineMapsSheet(
                 // ==========================================
                 // PESTAÑA 2: ADMINISTRAR MAPAS DESCARGADOS
                 // ==========================================
-                val layerStorage = remember(downloadedPackages, storageRevision, progress.completed) {
-                    MapLayer.entries.mapNotNull { lay ->
-                        val size = getCacheSizeBytes(lay)
-                        val count = parsedDownloadedItems.count { it.third == lay }
-                        if (size > 0L || count > 0) Triple(lay, count, size) else null
-                    }
-                }
-
-                // Tarjeta resumen de almacenamiento y limpieza por capa
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -516,8 +661,9 @@ fun OfflineMapsSheet(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val usedStr = if (isScanningStorage && totalBytes == 0L) "calculando..." else formatBytesCompact(totalBytes)
                         Text(
-                            text = "Espacio usado: ${formatBytesCompact(totalBytes)}",
+                            text = "Espacio usado: $usedStr",
                             color = EnduPalette.TextPrimary,
                             fontSize = 12.5.sp,
                             fontWeight = FontWeight.Bold
@@ -620,7 +766,12 @@ fun OfflineMapsSheet(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(parsedDownloadedItems, key = { it.first }) { (packageKey, preset, layer) ->
+                        items(parsedDownloadedItems, key = { it.first }) { (packageKey, spec) ->
+                            val estBytes = remember(packageKey) {
+                                val bbox = MapBoundingBox(spec.preset.minLat, spec.preset.maxLat, spec.preset.minLon, spec.preset.maxLon)
+                                val tiles = TileMath.countBoundingBoxTilesLong(bbox, spec.preset.minZoom, spec.maxZoom, spec.layer.maxNativeZoom)
+                                tiles * spec.layer.estimatedTileBytes
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -641,7 +792,7 @@ fun OfflineMapsSheet(
                                     ) {
                                         CheckCircleIcon(color = EnduPalette.Success, size = 14.dp)
                                         Text(
-                                            text = preset.name,
+                                            text = spec.preset.name,
                                             color = EnduPalette.TextPrimary,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold
@@ -658,14 +809,14 @@ fun OfflineMapsSheet(
                                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                                         ) {
                                             Text(
-                                                text = layer.shortBadge,
+                                                text = spec.layer.shortBadge,
                                                 color = EnduPalette.Accent,
                                                 fontSize = 9.5.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }
                                         Text(
-                                            text = "Z${preset.minZoom}–Z${preset.maxZoom} · ${preset.category}",
+                                            text = "Z${spec.preset.minZoom}–Z${spec.maxZoom} · ~${formatBytesCompact(estBytes)} · ${spec.preset.category}",
                                             color = EnduPalette.TextMuted,
                                             fontSize = 10.5.sp
                                         )
@@ -682,7 +833,7 @@ fun OfflineMapsSheet(
                                             .size(32.dp)
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(EnduPalette.SurfaceHigh)
-                                            .clickable { onDownloadRegion(preset, layer) }
+                                            .clickable { onDownloadRegion(spec.preset, spec.layer, spec.maxZoom) }
                                     ) {
                                         RefreshArrowsIcon(color = EnduPalette.Accent, size = 14.dp)
                                     }
@@ -752,8 +903,21 @@ private fun OfflineTabButton(
     }
 }
 
+private fun formatTileCountCompact(count: Long): String {
+    return when {
+        count >= 1_000_000L -> "${((count / 100_000.0).roundToInt() / 10.0)}M"
+        count >= 10_000L -> "${(count / 1000.0).roundToInt()}k"
+        count >= 1_000L -> "${((count / 100.0).roundToInt() / 10.0)}k"
+        else -> "$count"
+    }
+}
+
 private fun formatBytesCompact(bytes: Long): String {
     if (bytes <= 0L) return "0 MB"
+    val gb = bytes / (1024.0 * 1024.0 * 1024.0)
+    if (gb >= 1.0) {
+        return "${((gb * 10.0).roundToInt() / 10.0)} GB"
+    }
     val mb = bytes / (1024.0 * 1024.0)
     return if (mb >= 100.0) {
         "${mb.roundToInt()} MB"

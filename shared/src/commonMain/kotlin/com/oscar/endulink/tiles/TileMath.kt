@@ -58,15 +58,23 @@ object TileMath {
     }
 
     fun countBoundingBoxTiles(bbox: MapBoundingBox, minZ: Int, maxZ: Int, maxNativeZ: Int): Int {
+        return countBoundingBoxTilesLong(bbox, minZ, maxZ, maxNativeZ).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    fun countBoundingBoxTilesLong(bbox: MapBoundingBox, minZ: Int, maxZ: Int, maxNativeZ: Int): Long {
         val hiZ = minOf(maxZ, maxNativeZ)
-        if (minZ > hiZ) return 0
-        var total = 0
+        if (minZ > hiZ) return 0L
+        var total = 0L
         for (z in minZ..hiZ) {
-            val (xMin, yMin) = latLonToTile(bbox.maxLat, bbox.minLon, z)
-            val (xMax, yMax) = latLonToTile(bbox.minLat, bbox.maxLon, z)
-            val w = maxOf(1, abs(xMax - xMin) + 1)
-            val h = maxOf(1, abs(yMax - yMin) + 1)
-            total += w * h
+            val n = 1L shl z
+            val (tx1, ty1) = latLonToTile(bbox.maxLat, bbox.minLon, z)
+            val (tx2, ty2) = latLonToTile(bbox.minLat, bbox.maxLon, z)
+            val xStart = maxOf(0L, minOf(tx1, tx2).toLong())
+            val xEnd = minOf(n - 1L, maxOf(tx1, tx2).toLong())
+            val yStart = maxOf(0L, minOf(ty1, ty2).toLong())
+            val yEnd = minOf(n - 1L, maxOf(ty1, ty2).toLong())
+            if (xStart > xEnd || yStart > yEnd) continue
+            total += (xEnd - xStart + 1L) * (yEnd - yStart + 1L)
         }
         return total
     }
@@ -76,7 +84,7 @@ object TileMath {
         layer: MapLayer,
         minZ: Int,
         maxZ: Int,
-        maxTiles: Int = 10_000
+        maxTiles: Int = 60_000
     ): List<TileCoord> {
         val hiZ = minOf(maxZ, layer.maxNativeZoom)
         if (minZ > hiZ) return emptyList()
