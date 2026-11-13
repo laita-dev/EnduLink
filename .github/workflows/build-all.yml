@@ -134,6 +134,11 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout historial para notas dinámicas de versión
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Descargar artefactos Android
         uses: actions/download-artifact@v4
         with:
@@ -145,11 +150,6 @@ jobs:
         with:
           name: EnduLink-iOS-unsigned-ipa
           path: release-artifacts
-
-      - name: Checkout historial para notas dinámicas de versión
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Generar notas de versión dinámicas
         run: |
