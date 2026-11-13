@@ -11,8 +11,8 @@ settings:
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.1.13"
-    CURRENT_PROJECT_VERSION: "13"
+    MARKETING_VERSION: "0.1.14"
+    CURRENT_PROJECT_VERSION: "14"
 
 targets:
   EnduLink:
@@ -42,6 +42,7 @@ targets:
       - framework: ../shared/build/XCFrameworks/release/SharedApp.xcframework
         embed: false
       - sdk: CoreLocation.framework
+      - sdk: MapKit.framework
       - sdk: VideoToolbox.framework
       - sdk: CoreMedia.framework
       - sdk: CoreVideo.framework

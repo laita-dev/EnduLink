@@ -72,8 +72,13 @@ fun LayersFloatingCard(
                 .heightIn(max = 460.dp)
                 .verticalScroll(rememberScrollState())
         ) {
+            val useAppleNative = isNativeAppleMapsSupported()
             val layers = listOf(
-                Triple(MapLayer.CARRETERAS, "Carreteras (Vial HD)", "Cartografía vial limpia estilo Apple Maps / MotIOS"),
+                Triple(
+                    MapLayer.CARRETERAS,
+                    if (useAppleNative) "Apple Maps (Nativo)" else "Carreteras (Vial HD)",
+                    if (useAppleNative) "Mapa nativo de Apple en iPhone · Vial HD en TFT" else "Cartografía vial limpia HD · Online"
+                ),
                 Triple(MapLayer.ESRI_STREET, "Esri World Street", "Mapa vial Esri (idéntico al usado por MotIOS en TFT, Offline)"),
                 Triple(MapLayer.OSMAND, "OsmAnd Outdoor (HD)", "Mapa oficial OsmAnd de pistas, senderos y curvas (Offline)"),
                 Triple(MapLayer.TRAIL_OSM, "Trail OSM (CyclOSM)", "Pistas de tierra, senderos, fuentes y curvas (Offline)"),

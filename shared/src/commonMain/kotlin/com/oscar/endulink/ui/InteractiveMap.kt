@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.calculateCentroidSize
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateRotation
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -23,6 +24,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -71,11 +73,29 @@ fun InteractiveMap(
     val currentOnSelectWaypoint by rememberUpdatedState(onSelectWaypoint)
     val currentIsPickingOnMap by rememberUpdatedState(isPickingOnMap)
     val currentLayer by rememberUpdatedState(layer)
+    val useNativeBackdrop = isNativeAppleMapsSupported() && layer == MapLayer.CARRETERAS
+    val density = LocalDensity.current.density.toDouble().coerceAtLeast(1.0)
+    val baseTileDp = if (layer.isRetina512) 148.dp else 132.dp
+    val baseTilePoints = with(LocalDensity.current) {
+        maxOf(256.0, baseTileDp.toPx().toDouble()) / density
+    }
 
-    Canvas(
-        modifier = modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
+    Box(modifier = modifier.fillMaxSize()) {
+        if (useNativeBackdrop) {
+            NativeMapBackdrop(
+                layer = layer,
+                center = center,
+                zoom = zoom,
+                heading = heading,
+                baseTilePoints = baseTilePoints,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
                 detectMapInteractions(
                     onTap = { tapOffset ->
                         if (currentIsPickingOnMap) return@detectMapInteractions
@@ -189,8 +209,10 @@ fun InteractiveMap(
         val h = size.height
         val screenCenter = Offset(w / 2f, h / 2f)
 
-        // Fondo oscuro base
-        drawRect(color = EnduPalette.Background)
+        // Fondo oscuro base (transparente cuando iOS muestra Apple Maps nativo debajo)
+        if (!useNativeBackdrop) {
+            drawRect(color = EnduPalette.Background)
+        }
 
         val zInt = zoom.toInt()
         val baseTileDp = if (layer.isRetina512) 148.dp else 132.dp
@@ -208,20 +230,21 @@ fun InteractiveMap(
         // Rotar toda la escena según el rumbo del mapa
         rotate(degrees = -heading.toFloat(), pivot = screenCenter) {
 
-            // 1. Teselas raster (asíncronas, nunca bloquean UI)
-            // 1. Teselas con radio dinámico (cubre el 100% de la pantalla incluso rotada)
-            drawTileGrid(
-                tileStore = controller.tileStore,
-                centerFracX = centerFracX,
-                centerFracY = centerFracY,
-                zoom = zInt,
-                tileSizePx = tileSizePx,
-                screenCenter = screenCenter,
-                layer = layer,
-                w = w,
-                h = h,
-                revision = tileRevision
-            )
+            // 1. Teselas raster (solo cuando no hay mapa nativo de Apple debajo)
+            if (!useNativeBackdrop) {
+                drawTileGrid(
+                    tileStore = controller.tileStore,
+                    centerFracX = centerFracX,
+                    centerFracY = centerFracY,
+                    zoom = zInt,
+                    tileSizePx = tileSizePx,
+                    screenCenter = screenCenter,
+                    layer = layer,
+                    w = w,
+                    h = h,
+                    revision = tileRevision
+                )
+            }
 
             // 2. Rutas secundarias GPX de la biblioteca
             // 2. Rutas secundarias GPX
@@ -370,6 +393,7 @@ fun InteractiveMap(
             drawCircle(color = EnduPalette.Accent, radius = 6.8.dp.toPx(), center = Offset(pinTip.x, pinHeadY))
             drawCircle(color = Color.White, radius = 2.8.dp.toPx(), center = Offset(pinTip.x, pinHeadY))
         }
+    }
     }
 }
 
