@@ -54,11 +54,14 @@ fun BikeConnectionSheet(
     onSetOrientation: (String) -> Unit,
     onSetTileMagnification: (Double) -> Unit,
     onSetAutoZoomBySpeed: (Boolean) -> Unit,
+    onSetAutoZoomConfig: (lowSpeedKmh: Int, midSpeedKmh: Int, lowZoom: Int, midZoom: Int, highZoom: Int) -> Unit,
     onSetBitrate: (Int) -> Unit,
     onSetBikeMapLayer: (MapLayer?) -> Unit,
     onSetAllowLocalLanTesting: (Boolean) -> Unit,
     onSaveQr: (String) -> Boolean,
     onClearQr: () -> Unit = {},
+    onConnectBikeWifi: () -> Unit = {},
+    searchRemainingSeconds: Int? = null,
     onStartStream: () -> Unit,
     onStopStream: () -> Unit,
     onClearLogs: () -> Unit,
@@ -119,8 +122,14 @@ fun BikeConnectionSheet(
         )
         state == BikeState.LISTENING -> Triple(
             EnduPalette.Warning,
-            "Buscando pantalla Wi-Fi...",
-            "Llamando en puerto 10930 y escuchando en 10920-10922"
+            if (searchRemainingSeconds != null) "Buscando pantalla Wi-Fi..." else "En espera del Wi-Fi de la moto",
+            if (searchRemainingSeconds != null) {
+                val m = searchRemainingSeconds / 60
+                val s = (searchRemainingSeconds % 60).toString().padStart(2, '0')
+                "Al conectar al Wi-Fi se enviará la pantalla · pausa en $m:$s"
+            } else {
+                "La pantalla se pondrá sola en cuanto el móvil se conecte al Wi-Fi"
+            }
         )
         else -> Triple(
             EnduPalette.TextMuted,
@@ -632,7 +641,7 @@ fun BikeConnectionSheet(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "Z17 al parar o ir en trialera lenta (<25 km/h), Z15 a ritmo medio y Z13 rápido en carretera (>75 km/h).",
+                                    text = "Z${config.autoZoomLowLevel} (<${config.autoZoomLowSpeedKmh} km/h) · Z${config.autoZoomMidLevel} (<${config.autoZoomMidSpeedKmh} km/h) · Z${config.autoZoomHighLevel} (≥${config.autoZoomMidSpeedKmh} km/h)",
                                     color = EnduPalette.TextMuted,
                                     fontSize = 10.5.sp,
                                     lineHeight = 14.sp
@@ -648,6 +657,144 @@ fun BikeConnectionSheet(
                                     uncheckedTrackColor = EnduPalette.SurfaceHigh
                                 )
                             )
+                        }
+
+                        if (config.autoZoomBySpeed) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(EnduPalette.SurfaceHigh.copy(alpha = 0.65f))
+                                    .padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "CONFIGURACIÓN VELOCIDAD Y ZOOM",
+                                    color = EnduPalette.TextMuted,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                // Tramo 1: Lento (< autoZoomLowSpeedKmh)
+                                AutoZoomTierRow(
+                                    label = "Lento / Trialera",
+                                    speedText = "< ${config.autoZoomLowSpeedKmh} km/h",
+                                    zoomLevel = config.autoZoomLowLevel,
+                                    canDecSpeed = config.autoZoomLowSpeedKmh > 10,
+                                    canIncSpeed = config.autoZoomLowSpeedKmh + 5 <= config.autoZoomMidSpeedKmh - 10,
+                                    onDecSpeed = {
+                                        onSetAutoZoomConfig(
+                                            config.autoZoomLowSpeedKmh - 5,
+                                            config.autoZoomMidSpeedKmh,
+                                            config.autoZoomLowLevel,
+                                            config.autoZoomMidLevel,
+                                            config.autoZoomHighLevel
+                                        )
+                                    },
+                                    onIncSpeed = {
+                                        onSetAutoZoomConfig(
+                                            config.autoZoomLowSpeedKmh + 5,
+                                            config.autoZoomMidSpeedKmh,
+                                            config.autoZoomLowLevel,
+                                            config.autoZoomMidLevel,
+                                            config.autoZoomHighLevel
+                                        )
+                                    },
+                                    onDecZoom = {
+                                        onSetAutoZoomConfig(
+                                            config.autoZoomLowSpeedKmh,
+                                            config.autoZoomMidSpeedKmh,
+                                            config.autoZoomLowLevel - 1,
+                                            config.autoZoomMidLevel,
+                                            config.autoZoomHighLevel
+                                        )
+                                    },
+                                    onIncZoom = {
+                                        onSetAutoZoomConfig(
+                                            config.autoZoomLowSpeedKmh,
+                                            config.autoZoomMidSpeedKmh,
+                                            config.autoZoomLowLevel + 1,
+                                            config.autoZoomMidLevel,
+                                            config.autoZoomHighLevel
+                                        )
+                                    }
+                                )
+
+                                // Tramo 2: Medio (< autoZoomMidSpeedKmh)
+                                AutoZoomTierRow(
+                                    label = "Medio / Pista",
+                                    speedText = "< ${config.autoZoomMidSpeedKmh} km/h",
+                                    zoomLevel = config.autoZoomMidLevel,
+                                    canDecSpeed = config.autoZoomMidSpeedKmh - 5 >= config.autoZoomLowSpeedKmh + 10,
+                                    canIncSpeed = config.autoZoomMidSpeedKmh + 5 <= 150,
+                                    onDecSpeed = {
+                                        onSetAutoZoomConfig(
+                                            config.autoZoomLowSpeedKmh,
+                                            config.autoZoomMidSpeedKmh - 5,
+                                            config.autoZoomLowLevel,
+                                            config.autoZoomMidLevel,
+                                            config.autoZoomHighLevel
+                                        )
+                                    },
+                                    onIncSpeed = {
+                                        onSetAutoZoomConfig(
+                                            config.autoZoomLowSpeedKmh,
+                                            config.autoZoomMidSpeedKmh + 5,
+                                            config.autoZoomLowLevel,
+                                            config.autoZoomMidLevel,
+                                            config.autoZoomHighLevel
+                                        )
+                                    },
+                                    onDecZoom = {
+                                        onSetAutoZoomConfig(
+                                            config.autoZoomLowSpeedKmh,
+                                            config.autoZoomMidSpeedKmh,
+                                            config.autoZoomLowLevel,
+                                            config.autoZoomMidLevel - 1,
+                                            config.autoZoomHighLevel
+                                        )
+                                    },
+                                    onIncZoom = {
+                                        onSetAutoZoomConfig(
+                                            config.autoZoomLowSpeedKmh,
+                                            config.autoZoomMidSpeedKmh,
+                                            config.autoZoomLowLevel,
+                                            config.autoZoomMidLevel + 1,
+                                            config.autoZoomHighLevel
+                                        )
+                                    }
+                                )
+
+                                // Tramo 3: Rápido (>= autoZoomMidSpeedKmh)
+                                AutoZoomTierRow(
+                                    label = "Rápido / Ctra",
+                                    speedText = "≥ ${config.autoZoomMidSpeedKmh} km/h",
+                                    zoomLevel = config.autoZoomHighLevel,
+                                    canDecSpeed = false,
+                                    canIncSpeed = false,
+                                    showSpeedButtons = false,
+                                    onDecSpeed = {},
+                                    onIncSpeed = {},
+                                    onDecZoom = {
+                                        onSetAutoZoomConfig(
+                                            config.autoZoomLowSpeedKmh,
+                                            config.autoZoomMidSpeedKmh,
+                                            config.autoZoomLowLevel,
+                                            config.autoZoomMidLevel,
+                                            config.autoZoomHighLevel - 1
+                                        )
+                                    },
+                                    onIncZoom = {
+                                        onSetAutoZoomConfig(
+                                            config.autoZoomLowSpeedKmh,
+                                            config.autoZoomMidSpeedKmh,
+                                            config.autoZoomLowLevel,
+                                            config.autoZoomMidLevel,
+                                            config.autoZoomHighLevel + 1
+                                        )
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -721,6 +868,23 @@ fun BikeConnectionSheet(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(EnduPalette.Accent.copy(alpha = 0.22f))
+                                            .border(1.dp, EnduPalette.Accent.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                            .clickable { onConnectBikeWifi() }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = "Conectar Wi-Fi",
+                                            color = EnduPalette.Accent,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
                                     if (bikeQr.password.isNotEmpty()) {
                                         Box(
                                             contentAlignment = Alignment.Center,
@@ -972,7 +1136,7 @@ fun BikeConnectionSheet(
             text = {
                 Column {
                     Text(
-                        text = "Pega aquí el enlace o texto escaneado del código QR que muestra la pantalla de tu moto (ej. Rieju 500, CFMoto):",
+                        text = "Pega el enlace del QR de la pantalla o escribe directamente el código de Cuenta (ej. HJ-064441):",
                         color = EnduPalette.TextMuted,
                         fontSize = 12.sp
                     )
@@ -983,7 +1147,7 @@ fun BikeConnectionSheet(
                             qrTextInput = it
                             qrError = null
                         },
-                        placeholder = { Text("http://www.carbit.com.cn/... o texto del QR", fontSize = 11.sp) },
+                        placeholder = { Text("http://www.carbit.com.cn/... o HJ-064441", fontSize = 11.sp) },
                         modifier = Modifier.fillMaxWidth(),
                         maxLines = 3,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -1022,6 +1186,89 @@ fun BikeConnectionSheet(
                 }
             },
             containerColor = EnduPalette.Surface
+        )
+    }
+}
+
+@Composable
+private fun AutoZoomTierRow(
+    label: String,
+    speedText: String,
+    zoomLevel: Int,
+    canDecSpeed: Boolean,
+    canIncSpeed: Boolean,
+    showSpeedButtons: Boolean = true,
+    onDecSpeed: () -> Unit,
+    onIncSpeed: () -> Unit,
+    onDecZoom: () -> Unit,
+    onIncZoom: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                color = EnduPalette.TextPrimary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (showSpeedButtons) {
+                    CompactStepButton(text = "-", enabled = canDecSpeed, onClick = onDecSpeed)
+                }
+                Text(
+                    text = speedText,
+                    color = EnduPalette.TextSecondary,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                if (showSpeedButtons) {
+                    CompactStepButton(text = "+", enabled = canIncSpeed, onClick = onIncSpeed)
+                }
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            CompactStepButton(text = "−", enabled = zoomLevel > 10, onClick = onDecZoom)
+            Text(
+                text = "Z$zoomLevel",
+                color = EnduPalette.Accent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+            CompactStepButton(text = "+", enabled = zoomLevel < 18, onClick = onIncZoom)
+        }
+    }
+}
+
+@Composable
+private fun CompactStepButton(
+    text: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(24.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (enabled) EnduPalette.Surface else EnduPalette.Surface.copy(alpha = 0.45f))
+            .clickable(enabled = enabled) { onClick() }
+    ) {
+        Text(
+            text = text,
+            color = if (enabled) EnduPalette.TextPrimary else EnduPalette.TextMuted.copy(alpha = 0.5f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold
         )
     }
 }

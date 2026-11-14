@@ -101,10 +101,11 @@ class TileStore(
     private val maxBitmapCache = 1024
     private val bitmapCache = TileLruCache<TileCoord, androidx.compose.ui.graphics.ImageBitmap>(maxBitmapCache)
 
-    // Caché LRU en memoria de bytes (512 teselas)
+    // Caché LRU en memoria de bytes (512 teselas) y caché negativa de disco (4096 teselas)
     private val memoryCacheLock = SynchronizedLock()
     private val maxMemoryTiles = 512
     private val memoryCache = TileLruCache<TileCoord, ByteArray>(maxMemoryTiles)
+    private val missingOnDisk = TileLruCache<TileCoord, Boolean>(4096)
 
     private val progressLock = SynchronizedLock()
 
@@ -141,6 +142,7 @@ class TileStore(
             _downloadedPackages.value + packageKey
         }
         _downloadedPackages.value = updated
+        memoryCacheLock.withLock { missingOnDisk.clear() }
         saveDownloadedPackages(updated)
     }
 
@@ -186,7 +188,10 @@ class TileStore(
         }.toSet()
         _downloadedPackages.value = updated
         saveDownloadedPackages(updated)
-        memoryCacheLock.withLock { memoryCache.clear() }
+        memoryCacheLock.withLock {
+            memoryCache.clear()
+            missingOnDisk.clear()
+        }
         bitmapCacheLock.withLock { bitmapCache.clear() }
         TileDiskStorage.deleteDirectory("${PlatformPaths.getTileCacheDir()}/${layer.raw}")
     }
@@ -214,10 +219,16 @@ class TileStore(
      */
     fun requestBitmap(coord: TileCoord, allowNetwork: Boolean = true): androidx.compose.ui.graphics.ImageBitmap? {
         peekBitmap(coord)?.let { return it }
+        if (!allowNetwork) {
+            val skipDisk = memoryCacheLock.withLock {
+                memoryCache[coord] == null && missingOnDisk[coord] == true
+            }
+            if (skipDisk) return null
+        }
         val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
         val canStart = inFlightLock.withLock {
             val lastFail = failedAt[coord]
-            if (lastFail != null && now - lastFail < 3_000L) false else bitmapLoading.add(coord)
+            if (allowNetwork && lastFail != null && now - lastFail < 3_000L) false else bitmapLoading.add(coord)
         }
         if (!canStart) return null
 
@@ -225,12 +236,29 @@ class TileStore(
             var ok = false
             try {
                 var bytes: ByteArray? = memoryCacheLock.withLock { memoryCache[coord] }
-                    ?: TileDiskStorage.readBytes(diskPath(coord))?.takeIf { it.size > 100 }
+                if (bytes == null) {
+                    val isMissing = memoryCacheLock.withLock { missingOnDisk[coord] == true }
+                    if (!isMissing) {
+                        val read = TileDiskStorage.readBytes(diskPath(coord))?.takeIf { it.size > 100 }
+                        if (read != null) {
+                            memoryCacheLock.withLock {
+                                missingOnDisk.remove(coord)
+                                memoryCache[coord] = read
+                            }
+                            bytes = read
+                        } else {
+                            memoryCacheLock.withLock { missingOnDisk[coord] = true }
+                        }
+                    }
+                }
                 if (bytes == null && allowNetwork) {
                     bytes = networkSemaphore.withPermit { downloadTileBytes(coord) }
                 }
                 if (bytes != null) {
-                    memoryCacheLock.withLock { memoryCache[coord] = bytes }
+                    memoryCacheLock.withLock {
+                        missingOnDisk.remove(coord)
+                        memoryCache[coord] = bytes
+                    }
                     val bmp = decodeByteArrayToBitmap(bytes)
                     if (bmp != null) {
                         bitmapCacheLock.withLock { bitmapCache[coord] = bmp }
@@ -261,6 +289,10 @@ class TileStore(
         val bytes = response.readBytes()
         if (bytes.size <= 100) return null
         TileDiskStorage.writeBytes(diskPath(coord), bytes)
+        memoryCacheLock.withLock {
+            missingOnDisk.remove(coord)
+            memoryCache[coord] = bytes
+        }
         return bytes
     }
 
@@ -297,14 +329,22 @@ class TileStore(
             if (inRam != null) return inRam
         }
 
-        // 2. Disco
-        val path = diskPath(coord)
-        val fromDisk = TileDiskStorage.readBytes(path)
-        if (fromDisk != null && fromDisk.size > 100) {
-            memoryCacheLock.withLock {
-                memoryCache[coord] = fromDisk
+        // 2. Disco (evita I/O si ya consta en caché negativa de disco)
+        val knownMissing = memoryCacheLock.withLock { missingOnDisk[coord] == true }
+        if (!knownMissing) {
+            val path = diskPath(coord)
+            val fromDisk = TileDiskStorage.readBytes(path)
+            if (fromDisk != null && fromDisk.size > 100) {
+                memoryCacheLock.withLock {
+                    missingOnDisk.remove(coord)
+                    memoryCache[coord] = fromDisk
+                }
+                return fromDisk
+            } else {
+                memoryCacheLock.withLock {
+                    missingOnDisk[coord] = true
+                }
             }
-            return fromDisk
         }
 
         // 3. Descarga asíncrona
@@ -325,29 +365,30 @@ class TileStore(
     }
 
     /**
-     * Obtiene directamente el ImageBitmap del padre sobre-escalado, decodificándolo
-     * si solo estaba en bytes de disco para que nunca aparezcan cuadros negros al cambiar zoom.
+     * Obtiene directamente el ImageBitmap del padre sobre-escalado de forma 100 % no bloqueante:
+     * solo consulta bitmaps ya presentes en RAM (`peekBitmap`) y dispara la lectura/decodificación
+     * en segundo plano con `requestBitmap(..., allowNetwork = false)` si el padre aún no está cargado.
      */
     fun getOverzoomBitmap(coord: TileCoord): OverzoomBitmapResult? {
-        val oz = getOverzoomedParent(coord) ?: return null
-        val parentCoord = TileCoord(coord.layer, oz.parentZ, oz.parentX, oz.parentY)
-        var parentBmp = peekBitmap(parentCoord)
-        if (parentBmp == null) {
-            parentBmp = decodeByteArrayToBitmap(oz.parentTileBytes)
+        for (delta in 1..4) {
+            val pZ = coord.z - delta
+            if (pZ < 1) break
+            val pX = coord.x shr delta
+            val pY = coord.y shr delta
+            val parentCoord = TileCoord(coord.layer, pZ, pX, pY)
+            val parentBmp = peekBitmap(parentCoord)
             if (parentBmp != null) {
-                bitmapCacheLock.withLock {
-                    bitmapCache[parentCoord] = parentBmp
-                }
+                val scale = 1 shl delta
+                return OverzoomBitmapResult(
+                    bitmap = parentBmp,
+                    subX = coord.x and (scale - 1),
+                    subY = coord.y and (scale - 1),
+                    scale = scale
+                )
             }
+            requestBitmap(parentCoord, allowNetwork = false)
         }
-        return if (parentBmp != null) {
-            OverzoomBitmapResult(
-                bitmap = parentBmp,
-                subX = oz.subX,
-                subY = oz.subY,
-                scale = oz.scale
-            )
-        } else null
+        return null
     }
 
     fun getOverzoomedParent(coord: TileCoord): OverzoomResult? {
@@ -359,8 +400,22 @@ class TileStore(
             val parentCoord = TileCoord(coord.layer, pZ, pX, pY)
 
             // Buscar padre en RAM o Disco (sin disparar descarga del padre)
-            val parentBytes = memoryCacheLock.withLock { memoryCache[parentCoord] }
-                ?: TileDiskStorage.readBytes(diskPath(parentCoord))
+            var parentBytes = memoryCacheLock.withLock { memoryCache[parentCoord] }
+            if (parentBytes == null) {
+                val knownMissing = memoryCacheLock.withLock { missingOnDisk[parentCoord] == true }
+                if (!knownMissing) {
+                    val read = TileDiskStorage.readBytes(diskPath(parentCoord))?.takeIf { it.size > 100 }
+                    if (read != null) {
+                        memoryCacheLock.withLock {
+                            missingOnDisk.remove(parentCoord)
+                            memoryCache[parentCoord] = read
+                        }
+                        parentBytes = read
+                    } else {
+                        memoryCacheLock.withLock { missingOnDisk[parentCoord] = true }
+                    }
+                }
+            }
 
             if (parentBytes != null && parentBytes.size > 100) {
                 val scale = 1 shl delta
@@ -401,6 +456,7 @@ class TileStore(
                     val bytes = response.readBytes()
                     if (bytes.size > 100) {
                         memoryCacheLock.withLock {
+                            missingOnDisk.remove(coord)
                             memoryCache[coord] = bytes
                         }
                         TileDiskStorage.writeBytes(diskPath(coord), bytes)
@@ -511,6 +567,9 @@ class TileStore(
                                             val bytes = resp.readBytes()
                                             if (bytes.size > 100) {
                                                 TileDiskStorage.writeBytes(path, bytes)
+                                                memoryCacheLock.withLock {
+                                                    missingOnDisk.remove(coord)
+                                                }
                                                 success = true
                                                 break
                                             }
@@ -552,7 +611,10 @@ class TileStore(
     }
 
     fun clearDiskCache() {
-        memoryCacheLock.withLock { memoryCache.clear() }
+        memoryCacheLock.withLock {
+            memoryCache.clear()
+            missingOnDisk.clear()
+        }
         bitmapCacheLock.withLock { bitmapCache.clear() }
         _downloadedPackages.value = emptySet()
         TileDiskStorage.deleteDirectory(PlatformPaths.getTileCacheDir())

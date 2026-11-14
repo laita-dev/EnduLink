@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -25,6 +26,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -71,6 +73,10 @@ fun InteractiveMap(
     val crowFliesActive by controller.crowFliesModeActive.collectAsState()
     val scrubbedPoint by controller.scrubbedPoint.collectAsState()
     val textMeasurer = rememberTextMeasurer()
+    val labelLayoutCache = remember { HashMap<String, TextLayoutResult>() }
+    val routeDrawPath = remember { Path() }
+    val chevronDrawPath = remember { Path() }
+    val recordedDrawPath = remember { Path() }
     val currentOnSelectWaypoint by rememberUpdatedState(onSelectWaypoint)
     val currentOnSelectRoute by rememberUpdatedState(onSelectRoute)
     val currentIsPickingOnMap by rememberUpdatedState(isPickingOnMap)
@@ -239,10 +245,16 @@ fun InteractiveMap(
         }
 
         val zInt = zoom.toInt()
+        val worldN = if (zInt in 0..30) (1 shl zInt).toDouble() else 1.0
         val baseTileDp = if (layer.isRetina512) 148.dp else 132.dp
         val baseTilePx = maxOf(256.0, baseTileDp.toPx().toDouble())
         val tileSizePx = (baseTilePx * (2.0.pow(zoom - zInt))).toFloat()
         val (centerFracX, centerFracY) = TileMath.latLonToFractionalTile(center.latitude, center.longitude, zInt)
+        val halfDiag = hypot(w, h) * 0.5f + 160f
+        val viewMinX = screenCenter.x - halfDiag
+        val viewMaxX = screenCenter.x + halfDiag
+        val viewMinY = screenCenter.y - halfDiag
+        val viewMaxY = screenCenter.y + halfDiag
 
         fun geoToScreen(coord: GeoCoord): Offset {
             val (ptFracX, ptFracY) = TileMath.latLonToFractionalTile(coord.latitude, coord.longitude, zInt)
@@ -270,32 +282,73 @@ fun InteractiveMap(
                 )
             }
 
-            // 2. Rutas secundarias GPX de la biblioteca
             // 2. Rutas secundarias GPX
             for (sec in secondaryRoutes) {
                 if (sec.isVisible && sec.id != activeRoute?.id) {
-                    drawRoutePolyline(sec.points.map { it.coordinate }, Color(sec.color.rgbHex), ::geoToScreen, isSecondary = true)
+                    drawRoutePolyline(
+                        coords = sec.cachedCoordinates,
+                        normX = sec.normMercatorX,
+                        normY = sec.normMercatorY,
+                        worldN = worldN,
+                        centerFracX = centerFracX,
+                        centerFracY = centerFracY,
+                        tileSizePx = tileSizePx,
+                        screenCenter = screenCenter,
+                        viewMinX = viewMinX,
+                        viewMaxX = viewMaxX,
+                        viewMinY = viewMinY,
+                        viewMaxY = viewMaxY,
+                        routePath = routeDrawPath,
+                        chevronPath = chevronDrawPath,
+                        baseColor = Color(sec.color.rgbHex),
+                        geoToScreen = ::geoToScreen,
+                        isSecondary = true,
+                        showArrows = true
+                    )
                 }
             }
 
             // 3. Traza grabada en directo (REC)
             if (recordedCoords.size >= 2) {
-                val path = Path()
+                recordedDrawPath.reset()
                 val first = geoToScreen(recordedCoords[0])
-                path.moveTo(first.x, first.y)
-                for (i in 1 until recordedCoords.size) {
+                recordedDrawPath.moveTo(first.x, first.y)
+                var prevX = first.x
+                var prevY = first.y
+                val lastRecIdx = recordedCoords.size - 1
+                for (i in 1..lastRecIdx) {
                     val p = geoToScreen(recordedCoords[i])
-                    path.lineTo(p.x, p.y)
+                    if (i < lastRecIdx && hypot(p.x - prevX, p.y - prevY) < 1.5f) continue
+                    recordedDrawPath.lineTo(p.x, p.y)
+                    prevX = p.x
+                    prevY = p.y
                 }
-                drawPath(path, color = EnduPalette.Danger, style = Stroke(width = 6f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawPath(recordedDrawPath, color = EnduPalette.Danger, style = Stroke(width = 6f, cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
 
             // 4. Rutas alternativas por carretera OSRM (en gris/azul tenue si hay varias)
-            // 4. Rutas alternativas por carretera OSRM
             if (roadOptions.size > 1) {
                 roadOptions.forEachIndexed { idx, opt ->
                     if (idx != selectedOptionIdx) {
-                        drawRoutePolyline(opt.coordinates, Color(0xFF6A, 0x82, 0x9B), ::geoToScreen, isSecondary = true)
+                        drawRoutePolyline(
+                            coords = opt.coordinates,
+                            normX = null,
+                            normY = null,
+                            worldN = worldN,
+                            centerFracX = centerFracX,
+                            centerFracY = centerFracY,
+                            tileSizePx = tileSizePx,
+                            screenCenter = screenCenter,
+                            viewMinX = viewMinX,
+                            viewMaxX = viewMaxX,
+                            viewMinY = viewMinY,
+                            viewMaxY = viewMaxY,
+                            routePath = routeDrawPath,
+                            chevronPath = chevronDrawPath,
+                            baseColor = Color(0xFF6A, 0x82, 0x9B),
+                            geoToScreen = ::geoToScreen,
+                            isSecondary = true
+                        )
                     }
                 }
             }
@@ -303,18 +356,71 @@ fun InteractiveMap(
             // 5. Ruta por carretera activa OSRM (Destino buscado)
             val activeRoad = roadOptions.getOrNull(selectedOptionIdx)
             if (activeRoad != null) {
-                drawRoutePolyline(activeRoad.coordinates, EnduPalette.AccentBlue, ::geoToScreen, isSecondary = false)
+                drawRoutePolyline(
+                    coords = activeRoad.coordinates,
+                    normX = null,
+                    normY = null,
+                    worldN = worldN,
+                    centerFracX = centerFracX,
+                    centerFracY = centerFracY,
+                    tileSizePx = tileSizePx,
+                    screenCenter = screenCenter,
+                    viewMinX = viewMinX,
+                    viewMaxX = viewMaxX,
+                    viewMinY = viewMinY,
+                    viewMaxY = viewMaxY,
+                    routePath = routeDrawPath,
+                    chevronPath = chevronDrawPath,
+                    baseColor = EnduPalette.AccentBlue,
+                    geoToScreen = ::geoToScreen,
+                    isSecondary = false
+                )
             }
 
             // 6. Enlace activo por carretera al track GPX
             if (approachRoad != null) {
-                drawRoutePolyline(approachRoad!!.coordinates, Color.Cyan, ::geoToScreen, isSecondary = false)
+                drawRoutePolyline(
+                    coords = approachRoad!!.coordinates,
+                    normX = null,
+                    normY = null,
+                    worldN = worldN,
+                    centerFracX = centerFracX,
+                    centerFracY = centerFracY,
+                    tileSizePx = tileSizePx,
+                    screenCenter = screenCenter,
+                    viewMinX = viewMinX,
+                    viewMaxX = viewMaxX,
+                    viewMinY = viewMinY,
+                    viewMaxY = viewMaxY,
+                    routePath = routeDrawPath,
+                    chevronPath = chevronDrawPath,
+                    baseColor = Color.Cyan,
+                    geoToScreen = ::geoToScreen,
+                    isSecondary = false
+                )
             }
 
-            // 7. Ruta GPX activa seleccionada
             // 7. Ruta GPX activa
             if (activeRoute != null && activeRoute.isVisible && activeRoad == null) {
-                drawRoutePolyline(activeRoute.points.map { it.coordinate }, Color(activeRoute.color.rgbHex), ::geoToScreen, isSecondary = false)
+                drawRoutePolyline(
+                    coords = activeRoute.cachedCoordinates,
+                    normX = activeRoute.normMercatorX,
+                    normY = activeRoute.normMercatorY,
+                    worldN = worldN,
+                    centerFracX = centerFracX,
+                    centerFracY = centerFracY,
+                    tileSizePx = tileSizePx,
+                    screenCenter = screenCenter,
+                    viewMinX = viewMinX,
+                    viewMaxX = viewMaxX,
+                    viewMinY = viewMinY,
+                    viewMaxY = viewMaxY,
+                    routePath = routeDrawPath,
+                    chevronPath = chevronDrawPath,
+                    baseColor = Color(activeRoute.color.rgbHex),
+                    geoToScreen = ::geoToScreen,
+                    isSecondary = false
+                )
             }
 
             // 8. Flecha de reconexión DMD2 si estamos desviados del track
@@ -385,12 +491,12 @@ fun InteractiveMap(
             if (activeRoute != null && activeRoute.isVisible) {
                 for (wpt in activeRoute.waypoints) {
                     val pt = geoToScreen(wpt.coordinate)
-                    drawWaypointMarker(pt, wpt, heading, textMeasurer)
+                    drawWaypointMarker(pt, wpt, heading, textMeasurer, labelLayoutCache)
                 }
             }
             for (wpt in quickMarkers) {
                 val pt = geoToScreen(wpt.coordinate)
-                drawWaypointMarker(pt, wpt, heading, textMeasurer)
+                drawWaypointMarker(pt, wpt, heading, textMeasurer, labelLayoutCache)
             }
 
             // 15. Icono del Piloto con precisión GPS y Rumbo
@@ -433,9 +539,9 @@ private fun DrawScope.drawTileGrid(
     h: Float,
     revision: Int
 ) {
-    // Cálculo dinámico para cubrir toda la pantalla en diagonal y con rotación (sin esquinas negras)
+    // Cálculo dinámico ajustado para cubrir toda la pantalla en diagonal y con rotación (25–49 teselas máx.)
     val diagonalPx = hypot(w.toDouble(), h.toDouble()) / 2.0
-    val radius = maxOf(5, ceil(diagonalPx / tileSizePx).toInt() + 2)
+    val radius = (ceil(diagonalPx / tileSizePx).toInt() + 1).coerceIn(2, 4)
 
     val startX = floor(centerFracX).toInt() - radius
     val endX = floor(centerFracX).toInt() + radius
@@ -487,47 +593,176 @@ private fun DrawScope.drawTileGrid(
     }
 }
 
+private val WaypointLabelTextStyle = TextStyle(
+    color = Color.White,
+    fontSize = 10.sp,
+    fontWeight = FontWeight.Bold
+)
+
 private fun DrawScope.drawRoutePolyline(
     coords: List<GeoCoord>,
+    normX: FloatArray?,
+    normY: FloatArray?,
+    worldN: Double,
+    centerFracX: Double,
+    centerFracY: Double,
+    tileSizePx: Float,
+    screenCenter: Offset,
+    viewMinX: Float,
+    viewMaxX: Float,
+    viewMinY: Float,
+    viewMaxY: Float,
+    routePath: Path,
+    chevronPath: Path,
     baseColor: Color,
     geoToScreen: (GeoCoord) -> Offset,
-    isSecondary: Boolean
+    isSecondary: Boolean,
+    showArrows: Boolean = !isSecondary
 ) {
-    if (coords.size < 2) return
+    val hasNorm = normX != null && normY != null && normX.size == coords.size && normY.size == coords.size
+    val count = coords.size
+    if (count < 2) return
 
-    val path = Path()
-    val first = geoToScreen(coords[0])
-    path.moveTo(first.x, first.y)
-    for (i in 1 until coords.size) {
-        val p = geoToScreen(coords[i])
-        path.lineTo(p.x, p.y)
+    routePath.reset()
+    chevronPath.reset()
+
+    val spacingPx = if (isSecondary) 128.dp.toPx() else 88.dp.toPx()
+    val arrowSizePx = if (isSecondary) 6.dp.toPx() else 7.5.dp.toPx()
+    val arrowStrokePx = if (isSecondary) 1.8.dp.toPx() else 2.2.dp.toPx()
+    val haloColor = if (isSecondary) Color(0xCC0E1117) else Color(0xFF0E, 0x11, 0x17)
+    val arrowColor = if (isSecondary) Color.White.copy(alpha = 0.85f) else Color.White
+
+    fun pointX(i: Int): Float = if (hasNorm) {
+        screenCenter.x + ((normX!![i].toDouble() * worldN - centerFracX) * tileSizePx).toFloat()
+    } else {
+        geoToScreen(coords[i]).x
+    }
+
+    fun pointY(i: Int): Float = if (hasNorm) {
+        screenCenter.y + ((normY!![i].toDouble() * worldN - centerFracY) * tileSizePx).toFloat()
+    } else {
+        geoToScreen(coords[i]).y
+    }
+
+    val startX = pointX(0)
+    val startY = pointY(0)
+    var prevX = startX
+    var prevY = startY
+    var isPenDown = false
+    var hasChevrons = false
+    var accum = spacingPx * 0.55f
+    val wingAngleOffset = 2.42f
+    val lastIdx = count - 1
+    var endX = startX
+    var endY = startY
+
+    for (i in 1..lastIdx) {
+        val bx = pointX(i)
+        val by = pointY(i)
+        if (i == lastIdx) {
+            endX = bx
+            endY = by
+        }
+        val dx = bx - prevX
+        val dy = by - prevY
+        val segLen = hypot(dx, dy)
+        if (i < lastIdx && segLen < 1.5f) continue
+        if (segLen < 0.01f) continue
+
+        val overlaps = maxOf(prevX, bx) >= viewMinX && minOf(prevX, bx) <= viewMaxX &&
+            maxOf(prevY, by) >= viewMinY && minOf(prevY, by) <= viewMaxY
+        if (overlaps) {
+            if (!isPenDown) {
+                routePath.moveTo(prevX, prevY)
+                isPenDown = true
+            }
+            routePath.lineTo(bx, by)
+
+            if (showArrows) {
+                var d = spacingPx - accum
+                if (d <= segLen) {
+                    val dirAngle = atan2(dy, dx)
+                    val cosDir = cos(dirAngle)
+                    val sinDir = sin(dirAngle)
+                    val cosL = cos(dirAngle + wingAngleOffset) * arrowSizePx
+                    val sinL = sin(dirAngle + wingAngleOffset) * arrowSizePx
+                    val cosR = cos(dirAngle - wingAngleOffset) * arrowSizePx
+                    val sinR = sin(dirAngle - wingAngleOffset) * arrowSizePx
+                    while (d <= segLen) {
+                        val t = d / segLen
+                        val px = prevX + dx * t
+                        val py = prevY + dy * t
+                        if (px in viewMinX..viewMaxX && py in viewMinY..viewMaxY) {
+                            val tipX = px + cosDir * arrowSizePx * 0.35f
+                            val tipY = py + sinDir * arrowSizePx * 0.35f
+                            chevronPath.moveTo(tipX + cosL, tipY + sinL)
+                            chevronPath.lineTo(tipX, tipY)
+                            chevronPath.lineTo(tipX + cosR, tipY + sinR)
+                            hasChevrons = true
+                        }
+                        d += spacingPx
+                    }
+                }
+            }
+        } else {
+            isPenDown = false
+        }
+        if (showArrows) {
+            accum = (accum + segLen) % spacingPx
+        }
+        prevX = bx
+        prevY = by
     }
 
     if (isSecondary) {
         drawPath(
-            path = path,
+            path = routePath,
             color = baseColor.copy(alpha = 0.55f),
             style = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
+        if (hasChevrons) {
+            drawPath(
+                path = chevronPath,
+                color = haloColor,
+                style = Stroke(width = arrowStrokePx * 2.0f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+            drawPath(
+                path = chevronPath,
+                color = arrowColor,
+                style = Stroke(width = arrowStrokePx, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+        }
     } else {
         // Línea principal con contorno negro de alto contraste
         drawPath(
-            path = path,
-            color = Color(0xFF0E, 0x11, 0x17),
+            path = routePath,
+            color = haloColor,
             style = Stroke(width = 7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
         drawPath(
-            path = path,
+            path = routePath,
             color = baseColor,
             style = Stroke(width = 4.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
+        if (hasChevrons) {
+            drawPath(
+                path = chevronPath,
+                color = haloColor,
+                style = Stroke(width = arrowStrokePx * 2.0f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+            drawPath(
+                path = chevronPath,
+                color = arrowColor,
+                style = Stroke(width = arrowStrokePx, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+        }
 
         // Inicio (Verde) y Fin (Rojo)
-        val startPos = geoToScreen(coords.first())
+        val startPos = Offset(startX, startY)
         drawCircle(color = Color.Black, radius = 6.5.dp.toPx(), center = startPos)
         drawCircle(color = EnduPalette.Success, radius = 5.dp.toPx(), center = startPos)
 
-        val endPos = geoToScreen(coords.last())
+        val endPos = Offset(endX, endY)
         drawCircle(color = Color.Black, radius = 6.5.dp.toPx(), center = endPos)
         drawCircle(color = EnduPalette.Danger, radius = 5.dp.toPx(), center = endPos)
     }
@@ -537,7 +772,8 @@ private fun DrawScope.drawWaypointMarker(
     pos: Offset,
     wpt: GPXWaypoint,
     heading: Double,
-    textMeasurer: TextMeasurer
+    textMeasurer: TextMeasurer,
+    labelLayoutCache: HashMap<String, TextLayoutResult>
 ) {
     val markerColor = when (wpt.symbol?.lowercase()) {
         "gate" -> Color(0xFFFF9800)
@@ -582,15 +818,14 @@ private fun DrawScope.drawWaypointMarker(
         drawCircle(color = Color.White, radius = 4.2.dp.toPx(), center = pinCenter)
         drawCircle(color = Color(0xFF0F172A), radius = 2.4.dp.toPx(), center = pinCenter)
 
-        // 4. Cartela flotante con el nombre del Waypoint
-        val textLayout = textMeasurer.measure(
+        // 4. Cartela flotante con el nombre del Waypoint (cacheada entre frames)
+        val textLayout = labelLayoutCache[wpt.name] ?: textMeasurer.measure(
             text = wpt.name,
-            style = TextStyle(
-                color = Color.White,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold
-            )
-        )
+            style = WaypointLabelTextStyle
+        ).also {
+            if (labelLayoutCache.size > 128) labelLayoutCache.clear()
+            labelLayoutCache[wpt.name] = it
+        }
         val padH = 5.dp.toPx()
         val padV = 2.5.dp.toPx()
         val badgeW = textLayout.size.width + padH * 2

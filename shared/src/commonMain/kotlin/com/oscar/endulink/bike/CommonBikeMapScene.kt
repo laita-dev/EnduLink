@@ -14,13 +14,17 @@ import com.oscar.endulink.tiles.MapLayer
 import com.oscar.endulink.tiles.TileCoord
 import com.oscar.endulink.tiles.TileMath
 import com.oscar.endulink.tiles.TileStore
-import com.oscar.endulink.tiles.decodeByteArrayToBitmap
 import com.oscar.endulink.trail.GPXRoute
 import com.oscar.endulink.trail.GPXWaypoint
 import com.oscar.endulink.trail.GeoCoord
 import kotlinx.datetime.Clock
+import kotlin.math.atan2
+import kotlin.math.ceil
+import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.hypot
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * Escena multiplataforma de renderizado TFT (Preview y Frame RGBA para streaming H.264).
@@ -36,25 +40,12 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
     private var intPixels: IntArray? = null
     private var rgbaBuffer: ByteArray? = null
 
-    // Caché en memoria de teselas decodificadas (máx 128 entradas)
-    private val decodedTileCache = LinkedHashMap<TileCoord, ImageBitmap>(128)
-
-    private fun getCachedTile(coord: TileCoord): ImageBitmap? {
-        val existing = decodedTileCache.remove(coord)
-        if (existing != null) {
-            decodedTileCache[coord] = existing
-            return existing
-        }
-        return null
-    }
-
-    private fun putCachedTile(coord: TileCoord, bmp: ImageBitmap) {
-        if (decodedTileCache.size >= 128) {
-            val firstKey = decodedTileCache.keys.firstOrNull()
-            if (firstKey != null) decodedTileCache.remove(firstKey)
-        }
-        decodedTileCache[coord] = bmp
-    }
+    private val routePath = Path()
+    private val approachPath = Path()
+    private val chevronPath = Path()
+    private val arrowPath = Path()
+    private val corePath = Path()
+    private val boltPath = Path()
 
     private val bgPaint = Paint().apply {
         color = Color(20, 23, 28)
@@ -65,8 +56,22 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         style = PaintingStyle.Fill
     }
     private val tilePaint = Paint().apply {
-        isAntiAlias = false
+        isAntiAlias = true
         filterQuality = FilterQuality.Low
+    }
+    private val dirArrowHaloPaint = Paint().apply {
+        color = Color(14, 17, 23)
+        style = PaintingStyle.Stroke
+        strokeCap = StrokeCap.Round
+        strokeJoin = StrokeJoin.Round
+        isAntiAlias = true
+    }
+    private val dirArrowFillPaint = Paint().apply {
+        color = Color.White
+        style = PaintingStyle.Stroke
+        strokeCap = StrokeCap.Round
+        strokeJoin = StrokeJoin.Round
+        isAntiAlias = true
     }
     private val routePaint = Paint().apply {
         color = Color(255, 107, 0)
@@ -272,15 +277,7 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             ?: activeRoute?.points?.firstOrNull()?.coordinate
             ?: GeoCoord(40.4168, -3.7038)
 
-        val zoom = if (config.autoZoomBySpeed) {
-            when {
-                rider.speedKmh < 25.0 -> 17
-                rider.speedKmh < 75.0 -> 15
-                else -> 13
-            }
-        } else {
-            config.zoom
-        }
+        val zoom = config.resolveEffectiveZoom(rider.speedKmh)
 
         val heading = if (config.orientation == "north") {
             0.0
@@ -309,33 +306,24 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         val centerTileX = floor(centerFracX).toInt()
         val centerTileY = floor(centerFracY).toInt()
         val maxTileIndex = if (zoom in 0..30) (1 shl zoom) - 1 else 0
+        val maxRadius = ceil(hypot(w * 0.5, h * 0.68) / tileSizePx).toInt().coerceIn(1, 3)
 
-        for (dx in -3..3) {
+        for (dx in -maxRadius..maxRadius) {
             val tx = centerTileX + dx
             if (tx < 0 || tx > maxTileIndex) continue
-            for (dy in -3..3) {
+            for (dy in -maxRadius..maxRadius) {
                 val ty = centerTileY + dy
                 if (ty < 0 || ty > maxTileIndex) continue
 
-                val x0 = floor((tx - centerFracX) * tileSizePx).toInt()
-                val y0 = floor((ty - centerFracY) * tileSizePx).toInt()
-                val x1 = kotlin.math.ceil(((tx + 1) - centerFracX) * tileSizePx).toInt() + 1
-                val y1 = kotlin.math.ceil(((ty + 1) - centerFracY) * tileSizePx).toInt() + 1
+                val x0 = floor((tx - centerFracX) * tileSizePx).toInt() - 1
+                val y0 = floor((ty - centerFracY) * tileSizePx).toInt() - 1
+                val x1 = floor(((tx + 1) - centerFracX) * tileSizePx).toInt() + 2
+                val y1 = floor(((ty + 1) - centerFracY) * tileSizePx).toInt() + 2
                 val dstOffset = IntOffset(x0, y0)
                 val dstSize = IntSize((x1 - x0).coerceAtLeast(1), (y1 - y0).coerceAtLeast(1))
 
                 val tileCoord = TileCoord(layer, zoom, tx, ty)
-                var drewTile = false
-                var tileBmp = getCachedTile(tileCoord)
-                if (tileBmp == null) {
-                    val bytes = tileStore.getTileBytes(tileCoord, allowAsyncFetch = true)
-                    if (bytes != null && bytes.size > 100) {
-                        tileBmp = decodeByteArrayToBitmap(bytes)
-                        if (tileBmp != null) {
-                            putCachedTile(tileCoord, tileBmp)
-                        }
-                    }
-                }
+                val tileBmp = tileStore.requestBitmap(tileCoord)
                 if (tileBmp != null) {
                     canvas.drawImageRect(
                         image = tileBmp,
@@ -345,60 +333,68 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                         dstSize = dstSize,
                         paint = tilePaint
                     )
-                    drewTile = true
-                }
-
-                if (!drewTile) {
-                    val oz = tileStore.getOverzoomedParent(tileCoord)
-                    if (oz != null && oz.parentTileBytes.size > 100) {
-                        val parentCoord = TileCoord(layer, oz.parentZ, oz.parentX, oz.parentY)
-                        var parentBmp = getCachedTile(parentCoord)
-                        if (parentBmp == null) {
-                            parentBmp = decodeByteArrayToBitmap(oz.parentTileBytes)
-                            if (parentBmp != null) {
-                                putCachedTile(parentCoord, parentBmp)
-                            }
-                        }
-                        if (parentBmp != null) {
-                            val subW = (parentBmp.width / oz.scale).coerceAtLeast(1)
-                            val subH = (parentBmp.height / oz.scale).coerceAtLeast(1)
-                            canvas.drawImageRect(
-                                image = parentBmp,
-                                srcOffset = IntOffset(oz.subX * subW, oz.subY * subH),
-                                srcSize = IntSize(subW, subH),
-                                dstOffset = dstOffset,
-                                dstSize = dstSize,
-                                paint = tilePaint
-                            )
-                        }
+                } else {
+                    val oz = tileStore.getOverzoomBitmap(tileCoord)
+                    if (oz != null) {
+                        val parentBmp = oz.bitmap
+                        val srcX0 = (oz.subX * parentBmp.width) / oz.scale
+                        val srcY0 = (oz.subY * parentBmp.height) / oz.scale
+                        val srcX1 = ((oz.subX + 1) * parentBmp.width) / oz.scale
+                        val srcY1 = ((oz.subY + 1) * parentBmp.height) / oz.scale
+                        canvas.drawImageRect(
+                            image = parentBmp,
+                            srcOffset = IntOffset(srcX0, srcY0),
+                            srcSize = IntSize((srcX1 - srcX0).coerceAtLeast(1), (srcY1 - srcY0).coerceAtLeast(1)),
+                            dstOffset = dstOffset,
+                            dstSize = dstSize,
+                            paint = tilePaint
+                        )
                     }
                 }
             }
         }
 
-        // 4. Polilíneas de rutas
+        // 4. Polilíneas de rutas y flechas de sentido (sin asignaciones por frame)
         routePaint.strokeWidth = 10f * scale
+        val maxBound = hypot(w, h) * 0.85f
+        val maxArrowRange = hypot(w, h) * 0.78f
+        val worldN = (1 shl zoom).toDouble()
+
         if (activeRoute != null && activeRoute.isVisible && activeRoute.points.size >= 2) {
-            val path = Path()
-            val first = geoToLocal(activeRoute.points[0].coordinate)
-            path.moveTo(first.first, first.second)
-            for (i in 1 until activeRoute.points.size) {
-                val p = geoToLocal(activeRoute.points[i].coordinate)
-                path.lineTo(p.first, p.second)
+            val nx = activeRoute.normMercatorX
+            val ny = activeRoute.normMercatorY
+            if (nx.size >= 2 && ny.size == nx.size) {
+                val hasChevrons = buildClippedRouteAndChevronsFromNorm(
+                    outPath = routePath,
+                    nx = nx,
+                    ny = ny,
+                    worldN = worldN,
+                    centerFracX = centerFracX,
+                    centerFracY = centerFracY,
+                    tileSizePx = tileSizePx,
+                    maxBound = maxBound,
+                    spacingPx = 88f * scale,
+                    arrowLenPx = 8.5f * scale,
+                    maxArrowRange = maxArrowRange
+                )
+                canvas.drawPath(routePath, routePaint)
+                if (hasChevrons) drawBatchedChevrons(canvas, scale)
             }
-            canvas.drawPath(path, routePaint)
         }
 
         approachPaint.strokeWidth = 9f * scale
         if (roadRouteCoordinates != null && roadRouteCoordinates.size >= 2) {
-            val path = Path()
-            val first = geoToLocal(roadRouteCoordinates[0])
-            path.moveTo(first.first, first.second)
-            for (i in 1 until roadRouteCoordinates.size) {
-                val p = geoToLocal(roadRouteCoordinates[i])
-                path.lineTo(p.first, p.second)
-            }
-            canvas.drawPath(path, approachPaint)
+            val hasChevrons = buildClippedRouteAndChevronsFromCoords(
+                outPath = approachPath,
+                coords = roadRouteCoordinates,
+                geoToLocal = ::geoToLocal,
+                maxBound = maxBound,
+                spacingPx = 88f * scale,
+                arrowLenPx = 8.0f * scale,
+                maxArrowRange = maxArrowRange
+            )
+            canvas.drawPath(approachPath, approachPaint)
+            if (hasChevrons) drawBatchedChevrons(canvas, scale)
         }
 
         // 4b. Paradas intermedias
@@ -450,22 +446,20 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             canvas.rotate(riderHead.toFloat())
         }
 
-        val arrowPath = Path().apply {
-            moveTo(0f, -18f * scale)
-            lineTo(13f * scale, 14f * scale)
-            lineTo(0f, 9f * scale)
-            lineTo(-13f * scale, 14f * scale)
-            close()
-        }
+        arrowPath.reset()
+        arrowPath.moveTo(0f, -18f * scale)
+        arrowPath.lineTo(13f * scale, 14f * scale)
+        arrowPath.lineTo(0f, 9f * scale)
+        arrowPath.lineTo(-13f * scale, 14f * scale)
+        arrowPath.close()
         canvas.drawPath(arrowPath, riderArrowPaint)
 
-        val corePath = Path().apply {
-            moveTo(0f, -10f * scale)
-            lineTo(6f * scale, 9f * scale)
-            lineTo(0f, 6f * scale)
-            lineTo(-6f * scale, 9f * scale)
-            close()
-        }
+        corePath.reset()
+        corePath.moveTo(0f, -10f * scale)
+        corePath.lineTo(6f * scale, 9f * scale)
+        corePath.lineTo(0f, 6f * scale)
+        corePath.lineTo(-6f * scale, 9f * scale)
+        corePath.close()
         canvas.drawPath(corePath, riderArrowCorePaint)
         canvas.restore()
 
@@ -603,15 +597,14 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         val textX = if (isCharging) {
             val bx = iconRight + 9f * scale
             val by = (battTop + battBottom) * 0.5f
-            val boltPath = Path().apply {
-                moveTo(bx + 4f * scale, by - 7f * scale)
-                lineTo(bx - 1f * scale, by + 1f * scale)
-                lineTo(bx + 3f * scale, by + 1f * scale)
-                lineTo(bx - 3f * scale, by + 8f * scale)
-                lineTo(bx + 1f * scale, by + 2f * scale)
-                lineTo(bx - 3f * scale, by + 2f * scale)
-                close()
-            }
+            boltPath.reset()
+            boltPath.moveTo(bx + 4f * scale, by - 7f * scale)
+            boltPath.lineTo(bx - 1f * scale, by + 1f * scale)
+            boltPath.lineTo(bx + 3f * scale, by + 1f * scale)
+            boltPath.lineTo(bx - 3f * scale, by + 8f * scale)
+            boltPath.lineTo(bx + 1f * scale, by + 2f * scale)
+            boltPath.lineTo(bx - 3f * scale, by + 2f * scale)
+            boltPath.close()
             canvas.drawPath(boltPath, batteryBoltPaint)
             iconRight + 19f * scale
         } else {
@@ -675,6 +668,165 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         canvas.drawRect(0f, 0f, w, edgePx, blackEdgePaint)
         canvas.drawRect(0f, h - edgePx, w, h, blackEdgePaint)
     }
+
+    private fun buildClippedRouteAndChevronsFromNorm(
+        outPath: Path,
+        nx: FloatArray,
+        ny: FloatArray,
+        worldN: Double,
+        centerFracX: Double,
+        centerFracY: Double,
+        tileSizePx: Float,
+        maxBound: Float,
+        spacingPx: Float,
+        arrowLenPx: Float,
+        maxArrowRange: Float
+    ): Boolean {
+        outPath.reset()
+        chevronPath.reset()
+        if (nx.size < 2) return false
+
+        var prevX = ((nx[0].toDouble() * worldN - centerFracX) * tileSizePx).toFloat()
+        var prevY = ((ny[0].toDouble() * worldN - centerFracY) * tileSizePx).toFloat()
+        var isPenDown = false
+        var hasChevrons = false
+        var accum = spacingPx * 0.55f
+        val wingAngleOffset = 2.42f
+        val lastIdx = nx.size - 1
+
+        for (i in 1..lastIdx) {
+            val bx = ((nx[i].toDouble() * worldN - centerFracX) * tileSizePx).toFloat()
+            val by = ((ny[i].toDouble() * worldN - centerFracY) * tileSizePx).toFloat()
+            val dx = bx - prevX
+            val dy = by - prevY
+            val segLen = hypot(dx, dy)
+            if (i < lastIdx && segLen < 1.5f) continue
+            if (segLen < 0.01f) continue
+
+            val overlaps = maxOf(prevX, bx) >= -maxBound && minOf(prevX, bx) <= maxBound &&
+                maxOf(prevY, by) >= -maxBound && minOf(prevY, by) <= maxBound
+            if (overlaps) {
+                if (!isPenDown) {
+                    outPath.moveTo(prevX, prevY)
+                    isPenDown = true
+                }
+                outPath.lineTo(bx, by)
+
+                var d = spacingPx - accum
+                if (d <= segLen) {
+                    val dirAngle = atan2(dy, dx)
+                    val cosDir = cos(dirAngle)
+                    val sinDir = sin(dirAngle)
+                    val cosL = cos(dirAngle + wingAngleOffset) * arrowLenPx
+                    val sinL = sin(dirAngle + wingAngleOffset) * arrowLenPx
+                    val cosR = cos(dirAngle - wingAngleOffset) * arrowLenPx
+                    val sinR = sin(dirAngle - wingAngleOffset) * arrowLenPx
+                    while (d <= segLen) {
+                        val t = d / segLen
+                        val px = prevX + dx * t
+                        val py = prevY + dy * t
+                        if (hypot(px, py) <= maxArrowRange) {
+                            val tipX = px + cosDir * arrowLenPx * 0.35f
+                            val tipY = py + sinDir * arrowLenPx * 0.35f
+                            chevronPath.moveTo(tipX + cosL, tipY + sinL)
+                            chevronPath.lineTo(tipX, tipY)
+                            chevronPath.lineTo(tipX + cosR, tipY + sinR)
+                            hasChevrons = true
+                        }
+                        d += spacingPx
+                    }
+                }
+            } else {
+                isPenDown = false
+            }
+            accum = (accum + segLen) % spacingPx
+            prevX = bx
+            prevY = by
+        }
+        return hasChevrons
+    }
+
+    private fun buildClippedRouteAndChevronsFromCoords(
+        outPath: Path,
+        coords: List<GeoCoord>,
+        geoToLocal: (GeoCoord) -> Pair<Float, Float>,
+        maxBound: Float,
+        spacingPx: Float,
+        arrowLenPx: Float,
+        maxArrowRange: Float
+    ): Boolean {
+        outPath.reset()
+        chevronPath.reset()
+        if (coords.size < 2) return false
+
+        val first = geoToLocal(coords[0])
+        var prevX = first.first
+        var prevY = first.second
+        var isPenDown = false
+        var hasChevrons = false
+        var accum = spacingPx * 0.55f
+        val wingAngleOffset = 2.42f
+        val lastIdx = coords.size - 1
+
+        for (i in 1..lastIdx) {
+            val p = geoToLocal(coords[i])
+            val bx = p.first
+            val by = p.second
+            val dx = bx - prevX
+            val dy = by - prevY
+            val segLen = hypot(dx, dy)
+            if (i < lastIdx && segLen < 1.5f) continue
+            if (segLen < 0.01f) continue
+
+            val overlaps = maxOf(prevX, bx) >= -maxBound && minOf(prevX, bx) <= maxBound &&
+                maxOf(prevY, by) >= -maxBound && minOf(prevY, by) <= maxBound
+            if (overlaps) {
+                if (!isPenDown) {
+                    outPath.moveTo(prevX, prevY)
+                    isPenDown = true
+                }
+                outPath.lineTo(bx, by)
+
+                var d = spacingPx - accum
+                if (d <= segLen) {
+                    val dirAngle = atan2(dy, dx)
+                    val cosDir = cos(dirAngle)
+                    val sinDir = sin(dirAngle)
+                    val cosL = cos(dirAngle + wingAngleOffset) * arrowLenPx
+                    val sinL = sin(dirAngle + wingAngleOffset) * arrowLenPx
+                    val cosR = cos(dirAngle - wingAngleOffset) * arrowLenPx
+                    val sinR = sin(dirAngle - wingAngleOffset) * arrowLenPx
+                    while (d <= segLen) {
+                        val t = d / segLen
+                        val px = prevX + dx * t
+                        val py = prevY + dy * t
+                        if (hypot(px, py) <= maxArrowRange) {
+                            val tipX = px + cosDir * arrowLenPx * 0.35f
+                            val tipY = py + sinDir * arrowLenPx * 0.35f
+                            chevronPath.moveTo(tipX + cosL, tipY + sinL)
+                            chevronPath.lineTo(tipX, tipY)
+                            chevronPath.lineTo(tipX + cosR, tipY + sinR)
+                            hasChevrons = true
+                        }
+                        d += spacingPx
+                    }
+                }
+            } else {
+                isPenDown = false
+            }
+            accum = (accum + segLen) % spacingPx
+            prevX = bx
+            prevY = by
+        }
+        return hasChevrons
+    }
+
+    private fun drawBatchedChevrons(canvas: Canvas, scale: Float) {
+        dirArrowHaloPaint.strokeWidth = (4.4f * scale).coerceAtLeast(2.5f)
+        dirArrowFillPaint.strokeWidth = (2.2f * scale).coerceAtLeast(1.4f)
+        canvas.drawPath(chevronPath, dirArrowHaloPaint)
+        canvas.drawPath(chevronPath, dirArrowFillPaint)
+    }
 }
 
 /**
@@ -689,6 +841,7 @@ internal object TftVectorText {
         strokeJoin = StrokeJoin.Round
         isAntiAlias = true
     }
+    private val glyphPath = Path()
 
     fun measureText(text: String, size: Float): Float {
         if (text.isEmpty()) return 0f
@@ -715,16 +868,16 @@ internal object TftVectorText {
         val gap = size * 0.16f
         val top = y - charH
         var curX = x
+        glyphPath.reset()
 
         for (rawCh in text) {
             val ch = normalizeChar(rawCh)
             if (ch != ' ') {
-                val path = Path()
-                buildGlyph(path, ch, curX, top, charW, charH)
-                canvas.drawPath(path, strokePaint)
+                buildGlyph(glyphPath, ch, curX, top, charW, charH)
             }
             curX += charW + gap
         }
+        canvas.drawPath(glyphPath, strokePaint)
     }
 
     private fun normalizeChar(c: Char): Char {

@@ -25,7 +25,9 @@ data class BikeQr(
             }
 
             val qIndex = trimmed.indexOf('?')
-            if (qIndex == -1) return null
+            if (qIndex == -1) {
+                return parseAccountOrSsidCode(trimmed)
+            }
             val query = trimmed.substring(qIndex + 1)
             if (query.isEmpty()) return null
 
@@ -56,6 +58,41 @@ data class BikeQr(
                 model = fields["modelid"] ?: "",
                 serial = fields["sn"] ?: ""
             )
+        }
+
+        private fun parseAccountOrSsidCode(input: String): BikeQr? {
+            val cleaned = input.trim().uppercase()
+            if (cleaned.startsWith("DIRECT-")) {
+                val displayName = cleaned.removePrefix("DIRECT-").ifEmpty { cleaned }
+                return BikeQr(
+                    name = displayName,
+                    ssid = cleaned,
+                    password = "12345678",
+                    model = "",
+                    serial = ""
+                )
+            }
+            val hjMatch = Regex("^HJ-(?:5G-)?([A-Z0-9]{4,12})$").matchEntire(cleaned)
+            if (hjMatch != null) {
+                val suffix = hjMatch.groupValues[1]
+                return BikeQr(
+                    name = "HJ-$suffix",
+                    ssid = "DIRECT-HJ-5G-$suffix",
+                    password = "12345678",
+                    model = "",
+                    serial = ""
+                )
+            }
+            if (Regex("^[0-9]{6}$").matches(cleaned)) {
+                return BikeQr(
+                    name = "HJ-$cleaned",
+                    ssid = "DIRECT-HJ-5G-$cleaned",
+                    password = "12345678",
+                    model = "",
+                    serial = ""
+                )
+            }
+            return null
         }
 
         private fun parseStandardWifiQr(input: String): BikeQr? {

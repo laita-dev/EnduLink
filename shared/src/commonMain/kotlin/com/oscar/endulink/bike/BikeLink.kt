@@ -71,6 +71,9 @@ class BikeLink(
     private var goneReported = false
 
     @Volatile
+    private var pxcGeneration = 0
+
+    @Volatile
     private var controlTurn = 0
 
     @Volatile
@@ -117,9 +120,9 @@ class BikeLink(
     /**
      * Llama al puerto 10930 (Knock) de la pantalla TFT de la moto para forzarla a conectarse.
      */
-    fun knock(bikeIP: String, interfaceName: String? = null, port: Int = 10930): Boolean {
+    fun knock(bikeIP: String, interfaceName: String? = null, port: Int = 10930, quiet: Boolean = false): Boolean {
         return try {
-            val sock = BikeSocketFactory.connectTCP(bikeIP, port, interfaceName, 2000)
+            val sock = BikeSocketFactory.connectTCP(bikeIP, port, interfaceName, 1600)
             try {
                 val helloObj = buildJsonObject {
                     put("phoneType", "Android")
@@ -141,7 +144,9 @@ class BikeLink(
                 sock.close()
             }
         } catch (e: Exception) {
-            events.log("Knock a $bikeIP falló: ${e.message}")
+            if (!quiet) {
+                events.log("Knock a $bikeIP falló: ${e.message}")
+            }
             false
         }
     }
@@ -222,14 +227,27 @@ class BikeLink(
     // MARK: - PXC Conversation (Port 10922)
 
     private fun handlePxc(socket: BikeSocket) {
+        var myGen = pxcGeneration
         try {
             val opening = Pxc.read(socket)
+            if (opening.command == Pxc.openBikeAsks) {
+                myGen = ++pxcGeneration
+                goneReported = false
+                val stale = socketsLock.withLock {
+                    val others = openSockets.filter { it !== socket }
+                    openSockets.retainAll { it === socket }
+                    others
+                }
+                stale.forEach { it.close() }
+            } else {
+                myGen = pxcGeneration
+            }
             Pxc.write(socket, opening.command + 1u)
 
             when (opening.command) {
                 Pxc.openBikeAsks -> {
                     events.log("La moto abre canal de sus preguntas")
-                    while (!isClosed) {
+                    while (!isClosed && pxcGeneration == myGen) {
                         socket.setReceiveTimeout(3 * bikeTimeoutMs)
                         val asked = Pxc.read(socket)
                         answerBike(asked, socket)
@@ -237,15 +255,15 @@ class BikeLink(
                 }
                 Pxc.openPhoneAsks -> {
                     events.log("La moto abre canal de nuestras preguntas")
-                    askBike(socket)
+                    askBike(socket, myGen)
                 }
                 else -> {
                     events.log("PXC: apertura desconocida 0x${opening.command.toString(16)}")
                 }
             }
         } catch (e: Exception) {
-            if (!isClosed) {
-                reportLost("PXC cerrado: ${e.message}")
+            if (!isClosed && pxcGeneration == myGen) {
+                reportLost("PXC cerrado: ${e.message}", myGen)
             }
         }
     }
@@ -268,6 +286,8 @@ class BikeLink(
                 if (period != null && period > 0) {
                     bikeTimeoutMs = minOf(period, MAX_BIKE_TIMEOUT_S) * 1000
                 }
+                goneReported = false
+                askLock.withLock { toAsk.clear() }
                 events.log("La moto se presenta: $text")
 
                 val greetData = buildGreetingJson(parsed)
@@ -308,7 +328,7 @@ class BikeLink(
         }
     }
 
-    private fun askBike(socket: BikeSocket) {
+    private fun askBike(socket: BikeSocket, myGen: Int) {
         socket.setReceiveTimeout(bikeTimeoutMs)
 
         val inFrontObj = buildJsonObject {
@@ -322,7 +342,7 @@ class BikeLink(
         val inFront = PxcMessage(Pxc.appInFront, inFrontObj.toString().encodeToByteArray())
 
         var next = inFront
-        while (!isClosed) {
+        while (!isClosed && pxcGeneration == myGen) {
             Pxc.write(socket, next.command, next.body)
             val answer = Pxc.read(socket)
             if (answer.command != next.command + 1u) {
@@ -411,7 +431,7 @@ class BikeLink(
                 currentRequest = null
                 picture.stop()
                 if (!isClosed) {
-                    events.state(BikeState.GREETED)
+                    events.state(if (goneReported) BikeState.LISTENING else BikeState.GREETED)
                 }
             }
         }
@@ -451,6 +471,7 @@ class BikeLink(
         var shown = false
         var sent = 0
         var sentBytes = 0L
+        val zeroPacket = ByteArray(4)
 
         while (!isClosed && dataTurn == turn) {
             val wanted = currentRequest ?: break
@@ -463,7 +484,7 @@ class BikeLink(
                 FRAME_WAIT_MS
             } else {
                 val clamped = minOf(maxOf(wanted.fps, 1), MAX_FPS)
-                1000 / clamped
+                maxOf((1000 / clamped) * 2 + 25, 160)
             }
 
             val chunk = picture.next(waitMs)
@@ -481,9 +502,7 @@ class BikeLink(
                     events.state(BikeState.SHOWING)
                 }
             } else {
-                val zero = ByteArrayOutput()
-                zero.writeInt32LE(0)
-                socket.writeAll(zero.toByteArray())
+                socket.writeAll(zeroPacket)
             }
         }
     }
@@ -546,12 +565,21 @@ class BikeLink(
         return payload.toString().encodeToByteArray()
     }
 
-    private fun reportLost(why: String) {
-        if (!isClosed && !goneReported) {
-            goneReported = true
-            events.log("Sesión con la moto perdida: $why")
-            events.gone(why)
+    private fun reportLost(why: String, gen: Int = pxcGeneration) {
+        if (isClosed || goneReported || gen != pxcGeneration) return
+        goneReported = true
+        currentRequest = null
+        currentDataSocket = null
+        picture.stop()
+        val staleSockets = socketsLock.withLock {
+            val copy = openSockets.toList()
+            openSockets.clear()
+            copy
         }
+        staleSockets.forEach { it.close() }
+        events.log("Sesión con la moto perdida: $why (esperando reconexión automática)")
+        events.state(BikeState.LISTENING)
+        events.gone(why)
     }
 
     private fun parseJson(text: String): JsonElement? {

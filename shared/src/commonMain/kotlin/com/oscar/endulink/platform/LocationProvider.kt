@@ -7,5 +7,6 @@ expect class LocationProvider() {
     val currentTelemetry: RiderTelemetry
     fun startTracking()
     fun stopTracking()
+    fun setHighPowerMode(enabled: Boolean)
 }
 

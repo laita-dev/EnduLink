@@ -31,13 +31,17 @@ object TileMath {
         return r * c
     }
 
-    fun latLonToFractionalTile(lat: Double, lon: Double, z: Int): Pair<Double, Double> {
+    fun lonToNormX(lon: Double): Double = (lon + 180.0) / 360.0
+
+    fun latToNormY(lat: Double): Double {
         val clampedLat = minOf(maxOf(lat, -85.05112878), 85.05112878)
-        val n = 2.0.pow(z.toDouble())
-        val x = ((lon + 180.0) / 360.0) * n
         val latRad = clampedLat * PI / 180.0
-        val y = (1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / PI) / 2.0 * n
-        return Pair(x, y)
+        return (1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / PI) / 2.0
+    }
+
+    fun latLonToFractionalTile(lat: Double, lon: Double, z: Int): Pair<Double, Double> {
+        val n = 2.0.pow(z.toDouble())
+        return Pair(lonToNormX(lon) * n, latToNormY(lat) * n)
     }
 
     fun latLonToTile(lat: Double, lon: Double, z: Int): Pair<Int, Int> {

@@ -1,6 +1,9 @@
 package com.oscar.endulink.trail
 
+import com.oscar.endulink.bike.BikeMapConfig
+import com.oscar.endulink.bike.BikeQr
 import com.oscar.endulink.tiles.TileMath
+import com.oscar.endulink.ui.PlaceSearchEngine
 import com.oscar.endulink.ui.findTappedRoute
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -179,6 +182,81 @@ class RouteNavigatorTest {
         assertEquals("", decodedLegacy.notes)
         assertEquals(TrackColor.ORANGE, decodedLegacy.color)
         assertTrue(decodedLegacy.isVisible)
+    }
+
+    @Test
+    fun testBikeQrRealUrlAndAccountCode() {
+        val realUrl = "http://www.carbit.com.cn/down6/645/644/_ylqxos?modelid=37512&sn=g2wy&action=9&ssid=DIRECT-HJ-5G-064441&pwd=12345678&auth=WPA-PSK&name=HJ-064441"
+        val parsed = BikeQr.parse(realUrl)
+        assertNotNull(parsed)
+        assertEquals("DIRECT-HJ-5G-064441", parsed.ssid)
+        assertEquals("12345678", parsed.password)
+        assertEquals("HJ-064441", parsed.name)
+        assertEquals("37512", parsed.model)
+
+        val accountParsed = BikeQr.parse("HJ-064441")
+        assertNotNull(accountParsed)
+        assertEquals("DIRECT-HJ-5G-064441", accountParsed.ssid)
+        assertEquals("12345678", accountParsed.password)
+
+        val numericParsed = BikeQr.parse("064441")
+        assertNotNull(numericParsed)
+        assertEquals("DIRECT-HJ-5G-064441", numericParsed.ssid)
+    }
+
+    @Test
+    fun testConfigurableTftAutoZoomAndLegacyConfig() {
+        val custom = BikeMapConfig(
+            zoom = 14,
+            autoZoomBySpeed = true,
+            autoZoomLowSpeedKmh = 20,
+            autoZoomMidSpeedKmh = 60,
+            autoZoomLowLevel = 18,
+            autoZoomMidLevel = 16,
+            autoZoomHighLevel = 13
+        )
+        assertEquals(18, custom.resolveEffectiveZoom(10.0))
+        assertEquals(16, custom.resolveEffectiveZoom(45.0))
+        assertEquals(13, custom.resolveEffectiveZoom(85.0))
+        assertEquals(14, custom.copy(autoZoomBySpeed = false).resolveEffectiveZoom(85.0))
+
+        val jsonCodec = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val legacyConfigJson = """{"zoom":15,"orientation":"heading","tileMagnification":1.45,"autoZoomBySpeed":true}"""
+        val decoded = jsonCodec.decodeFromString<BikeMapConfig>(legacyConfigJson)
+        assertEquals(30, decoded.autoZoomLowSpeedKmh)
+        assertEquals(17, decoded.autoZoomLowLevel)
+    }
+
+    @Test
+    fun testOfflineRouteBuilderAndLocalSearch() {
+        val origin = GeoCoord(39.150, -0.450)
+        val stop = GeoCoord(39.155, -0.445)
+        val dest = GeoCoord(39.162, -0.440)
+        val offline = RoadRouter.buildOfflineRoute(
+            stops = listOf(origin, stop, dest),
+            destinationName = "Inicio Track Prueba",
+            color = TrackColor.CYAN,
+            customSingleLabel = "Enlace"
+        )
+        assertNotNull(offline)
+        assertTrue(offline.isOfflineFallback)
+        assertTrue(offline.coordinates.size > 10)
+        assertTrue(offline.distanceKm > 1.0)
+        assertEquals(2, offline.steps.size)
+        assertTrue(offline.firstInstruction?.contains("Rumbo") == true)
+
+        val localWpt = GPXWaypoint(
+            id = "w1",
+            name = "Fuente Sierra Espadan",
+            latitude = 39.85,
+            longitude = -0.35
+        )
+        val offlineResults = PlaceSearchEngine.searchLocalCatalog(
+            query = "Espadan",
+            near = GeoCoord(39.5, -0.4),
+            waypoints = listOf(localWpt)
+        )
+        assertTrue(offlineResults.any { it.title.contains("Fuente Sierra Espadan") })
     }
 }
 

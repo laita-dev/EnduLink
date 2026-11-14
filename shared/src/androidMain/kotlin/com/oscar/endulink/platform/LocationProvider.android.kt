@@ -12,6 +12,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Surface
 import android.view.WindowManager
 import com.oscar.endulink.bike.AndroidBikeKeysStorage
@@ -19,6 +20,7 @@ import com.oscar.endulink.trail.GeoCoord
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 actual class LocationProvider actual constructor() : LocationListener, SensorEventListener {
@@ -41,6 +43,18 @@ actual class LocationProvider actual constructor() : LocationListener, SensorEve
     private var hasHeading: Boolean = false
     private var geomagneticField: GeomagneticField? = null
 
+    private var lastAcceptedLocation: Location? = null
+    private var lastAcceptedElapsedMs: Long = 0L
+    private var lastGpsFixMs: Long = 0L
+    private var lastOutlierLocation: Location? = null
+    private var consecutiveOutliers: Int = 0
+    private var lastHeadingEmitMs: Long = 0L
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    @kotlin.concurrent.Volatile
+    private var isTrackingActive: Boolean = false
+    @kotlin.concurrent.Volatile
+    private var highPowerMode: Boolean = false
+
     private fun getDisplayRotation(): Int {
         val ctx = context ?: return Surface.ROTATION_0
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -61,40 +75,130 @@ actual class LocationProvider actual constructor() : LocationListener, SensorEve
         val ctx = context ?: return
         locationManager = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
         sensorManager = ctx.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-
         rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-        rotationSensor?.let {
-            sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+        isTrackingActive = true
+        runOnMainLooper { applyTrackingConfiguration() }
+    }
+
+    actual fun setHighPowerMode(enabled: Boolean) {
+        if (highPowerMode == enabled) return
+        highPowerMode = enabled
+        if (isTrackingActive) {
+            runOnMainLooper {
+                if (isTrackingActive) {
+                    applyTrackingConfiguration()
+                }
+            }
         }
+    }
+
+    private fun runOnMainLooper(block: () -> Unit) {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            block()
+        } else {
+            mainHandler.post { block() }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun applyTrackingConfiguration() {
+        val mainLooper = android.os.Looper.getMainLooper()
+        try {
+            locationManager?.removeUpdates(this)
+            sensorManager?.unregisterListener(this)
+        } catch (_: Exception) {}
+
+        val sensorDelay = if (highPowerMode) SensorManager.SENSOR_DELAY_UI else SensorManager.SENSOR_DELAY_NORMAL
+        try {
+            rotationSensor?.let {
+                sensorManager?.registerListener(this, it, sensorDelay, mainHandler)
+            }
+        } catch (_: Exception) {}
+
+        val gpsIntervalMs = if (highPowerMode) 500L else 1500L
+        val gpsMinDistM = if (highPowerMode) 0.0f else 3.0f
+        val netIntervalMs = if (highPowerMode) 5000L else 8000L
+        val netMinDistM = if (highPowerMode) 15.0f else 25.0f
 
         try {
             if (locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true) {
                 locationManager?.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    500L,
-                    0.0f,
-                    this
+                    gpsIntervalMs,
+                    gpsMinDistM,
+                    this,
+                    mainLooper
                 )
             }
             if (locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) == true) {
                 locationManager?.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
-                    1000L,
-                    0.0f,
-                    this
+                    netIntervalMs,
+                    netMinDistM,
+                    this,
+                    mainLooper
                 )
             }
-        } catch (_: SecurityException) {}
-    }
-
-    actual fun stopTracking() {
-        try {
-            locationManager?.removeUpdates(this)
-            sensorManager?.unregisterListener(this)
         } catch (_: Exception) {}
     }
 
+    actual fun stopTracking() {
+        isTrackingActive = false
+        runOnMainLooper {
+            try {
+                locationManager?.removeUpdates(this)
+                sensorManager?.unregisterListener(this)
+            } catch (_: Exception) {}
+        }
+    }
+
     override fun onLocationChanged(location: Location) {
+        val nowMs = SystemClock.elapsedRealtime()
+        val isGps = location.provider == LocationManager.GPS_PROVIDER
+        val accuracy = if (location.hasAccuracy()) location.accuracy else 999f
+
+        // 1. Nunca permitir que lecturas imprecisas de antenas/Wi-Fi sobrescriban un fix satelital GPS reciente
+        if (!isGps) {
+            if (lastGpsFixMs > 0L && (nowMs - lastGpsFixMs) < 15_000L) return
+            if (lastAcceptedLocation != null && accuracy > 60f) return
+        }
+
+        // 2. Descartar lecturas muy degradadas si ya teníamos una posición precisa
+        val prev = lastAcceptedLocation
+        if (prev != null && (!prev.hasAccuracy() || prev.accuracy <= 45f) && accuracy > 110f) {
+            return
+        }
+
+        // 3. Filtro cinemático anti-saltos aleatorios (teletransporte > 160 m en pocos segundos)
+        if (prev != null && lastAcceptedElapsedMs > 0L) {
+            val dtSec = ((nowMs - lastAcceptedElapsedMs) / 1000.0).coerceAtLeast(0.1)
+            val jumpMeters = prev.distanceTo(location).toDouble()
+            val maxReasonableMeters = maxOf(160.0, dtSec * 65.0)
+            if (dtSec < 5.0 && jumpMeters > maxReasonableMeters) {
+                if (!isGps || accuracy > 25f) {
+                    return
+                }
+                val prevOutlier = lastOutlierLocation
+                if (prevOutlier != null && prevOutlier.distanceTo(location) <= 90f) {
+                    consecutiveOutliers++
+                } else {
+                    consecutiveOutliers = 1
+                }
+                lastOutlierLocation = location
+                if (consecutiveOutliers < 3) {
+                    return
+                }
+            }
+        }
+
+        if (isGps) {
+            lastGpsFixMs = nowMs
+        }
+        lastAcceptedLocation = location
+        lastAcceptedElapsedMs = nowMs
+        lastOutlierLocation = null
+        consecutiveOutliers = 0
+
         val coord = GeoCoord(location.latitude, location.longitude)
 
         try {
@@ -159,9 +263,12 @@ actual class LocationProvider actual constructor() : LocationListener, SensorEve
 
             currentHeading = smoothedHeading
 
-            // Si estamos en parado o velocidad lenta, actualizamos el rumbo del piloto
+            // Si estamos en parado o velocidad lenta, actualizamos con throttling para evitar recomposiciones continuas
             val current = _telemetryFlow.value
-            if (current.speedKmh <= 3.0) {
+            val nowMs = SystemClock.elapsedRealtime()
+            val angularDelta = abs(((currentHeading - current.headingDegrees + 540.0) % 360.0) - 180.0)
+            if (current.speedKmh <= 3.0 && (!current.hasValidHeading || (angularDelta >= 2.5 && nowMs - lastHeadingEmitMs >= 160L))) {
+                lastHeadingEmitMs = nowMs
                 _telemetryFlow.value = current.copy(
                     headingDegrees = currentHeading,
                     hasValidHeading = true

@@ -75,12 +75,13 @@ private fun probeLocalIpv4(interfaceName: String?, remoteHost: String): String? 
 }
 
 actual fun getWifiSnapshot(): WifiSnapshot? {
-    val ip = IosWifiBridgeHolder.bridge?.currentWifiIp()
-        ?: probeLocalIpv4("en0", "192.168.43.1")
-        ?: probeLocalIpv4("en0", "8.8.8.8")
-        ?: probeLocalIpv4("bridge100", "172.20.10.2")
-        ?: probeLocalIpv4(null, "192.168.43.1")
-        ?: return null
+    val bridge = IosWifiBridgeHolder.bridge
+    val ip = if (bridge != null) {
+        bridge.currentWifiIp()
+    } else {
+        probeLocalIpv4("en0", "192.168.43.1")
+            ?: probeLocalIpv4("bridge100", "172.20.10.2")
+    } ?: return null
 
     val parts = ip.split(".")
     if (parts.size == 4) {

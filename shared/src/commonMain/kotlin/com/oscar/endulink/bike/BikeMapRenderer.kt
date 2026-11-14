@@ -44,13 +44,50 @@ data class BikeMapConfig(
     val tileMagnification: Double = 1.45, // 1.10 = Peq, 1.45 = Med, 1.80 = Grd
     val autoZoomBySpeed: Boolean = true,
     val bitrateKbps: Int = 0, // 0 = Auto (2500 kbps), 2000, 3000, 5000
-    val mapLayerRaw: String? = null // null = misma capa que el móvil
-)
+    val mapLayerRaw: String? = null, // null = misma capa que el móvil
+    val autoZoomLowSpeedKmh: Int = 30,
+    val autoZoomMidSpeedKmh: Int = 75,
+    val autoZoomLowLevel: Int = 17,
+    val autoZoomMidLevel: Int = 15,
+    val autoZoomHighLevel: Int = 13
+) {
+    fun resolveEffectiveZoom(speedKmh: Double): Int {
+        if (!autoZoomBySpeed) return zoom.coerceIn(5, 18)
+        val lowSpd = autoZoomLowSpeedKmh.coerceIn(5, 120)
+        val midSpd = autoZoomMidSpeedKmh.coerceIn(lowSpd + 10, 180)
+        return when {
+            speedKmh < lowSpd -> autoZoomLowLevel
+            speedKmh < midSpd -> autoZoomMidLevel
+            else -> autoZoomHighLevel
+        }.coerceIn(10, 18)
+    }
+}
 
 data class WifiSnapshot(
     val phoneIP: String,
-    val gatewayCandidateIP: String
-)
+    val gatewayCandidateIP: String,
+    val ssid: String? = null
+) {
+    fun isLikelyBikeWifi(savedQr: BikeQr? = null): Boolean {
+        if (gatewayCandidateIP == "192.168.43.1" || gatewayCandidateIP == "192.168.49.1") {
+            return true
+        }
+        val cleanSsid = ssid?.trim()?.trim('"').orEmpty()
+        if (cleanSsid.isNotEmpty() && !cleanSsid.equals("<unknown ssid>", ignoreCase = true)) {
+            if (!savedQr?.ssid.isNullOrBlank() && cleanSsid.equals(savedQr!!.ssid.trim(), ignoreCase = true)) {
+                return true
+            }
+            if (cleanSsid.startsWith("DIRECT-", ignoreCase = true) ||
+                cleanSsid.startsWith("HJ-", ignoreCase = true) ||
+                cleanSsid.contains("CARBIT", ignoreCase = true) ||
+                cleanSsid.contains("RIEJU", ignoreCase = true)
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+}
 
 expect fun getWifiSnapshot(): WifiSnapshot?
 

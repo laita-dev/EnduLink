@@ -21,6 +21,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.oscar.endulink.trail.GPXRoute
+import com.oscar.endulink.trail.GPXWaypoint
 import com.oscar.endulink.trail.GeoCoord
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -30,6 +32,8 @@ import kotlin.math.roundToInt
 @Composable
 fun PlaceSearchSheet(
     riderCoord: GeoCoord?,
+    routes: List<GPXRoute> = emptyList(),
+    waypoints: List<GPXWaypoint> = emptyList(),
     title: String = "Buscar Destino",
     hasActiveRoute: Boolean = false,
     isSearchingForStop: Boolean = false,
@@ -69,7 +73,12 @@ fun PlaceSearchSheet(
             delay(200) // Debounce ágil para tecleo fluido
             isLoading = true
             errorMessage = null
-            val list = PlaceSearchEngine.autocomplete(q, near = riderCoord)
+            val list = PlaceSearchEngine.autocomplete(
+                query = q,
+                near = riderCoord,
+                routes = routes,
+                waypoints = waypoints
+            )
             isLoading = false
             results = list
             if (list.isEmpty()) {

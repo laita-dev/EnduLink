@@ -65,48 +65,62 @@ object RouteNavigator {
         val metersLat = METERS_PER_DEG_LAT
         val metersLon = metersPerDegLon(coord.latitude)
 
+        val segCount = pts.size - 1
         var bestSegIdx = 0
         var bestT = 0.0
         var bestDist = Double.MAX_VALUE
         var bestScore = Double.MAX_VALUE
 
-        val segCount = pts.size - 1
-        for (i in 0 until segCount) {
-            val a = pts[i]
-            val b = pts[i + 1]
+        fun scanRange(startSeg: Int, endSegInclusive: Int) {
+            for (i in startSeg..endSegInclusive) {
+                val a = pts[i]
+                val b = pts[i + 1]
 
-            val ax = (a.longitude - coord.longitude) * metersLon
-            val ay = (a.latitude - coord.latitude) * metersLat
-            val bx = (b.longitude - coord.longitude) * metersLon
-            val by = (b.latitude - coord.latitude) * metersLat
+                val ax = (a.longitude - coord.longitude) * metersLon
+                val ay = (a.latitude - coord.latitude) * metersLat
+                val bx = (b.longitude - coord.longitude) * metersLon
+                val by = (b.latitude - coord.latitude) * metersLat
 
-            val dx = bx - ax
-            val dy = by - ay
-            val lenSq = dx * dx + dy * dy
-            val t = if (lenSq > 0.0001) {
-                min(max((-ax * dx - ay * dy) / lenSq, 0.0), 1.0)
-            } else {
-                0.0
-            }
+                val dx = bx - ax
+                val dy = by - ay
+                val lenSq = dx * dx + dy * dy
+                val t = if (lenSq > 0.0001) {
+                    min(max((-ax * dx - ay * dy) / lenSq, 0.0), 1.0)
+                } else {
+                    0.0
+                }
 
-            val projX = ax + t * dx
-            val projY = ay + t * dy
-            val dist = hypot(projX, projY)
+                val projX = ax + t * dx
+                val projY = ay + t * dy
+                val dist = hypot(projX, projY)
 
-            // Preferencia de continuidad hacia delante en cruces o bucles sobre la misma traza
-            var score = dist
-            if (lastSegmentIndex != null && dist < 55.0) {
-                if (i in max(0, lastSegmentIndex - 1)..(lastSegmentIndex + 35)) {
-                    score -= 12.0
+                // Preferencia de continuidad hacia delante en cruces o bucles sobre la misma traza
+                var score = dist
+                if (lastSegmentIndex != null && dist < 55.0) {
+                    if (i in max(0, lastSegmentIndex - 1)..(lastSegmentIndex + 35)) {
+                        score -= 12.0
+                    }
+                }
+
+                if (score < bestScore) {
+                    bestScore = score
+                    bestDist = dist
+                    bestSegIdx = i
+                    bestT = t
                 }
             }
+        }
 
-            if (score < bestScore) {
-                bestScore = score
-                bestDist = dist
-                bestSegIdx = i
-                bestT = t
+        if (lastSegmentIndex != null && segCount > 160) {
+            val winStart = max(0, lastSegmentIndex - 25)
+            val winEnd = min(segCount - 1, lastSegmentIndex + 100)
+            scanRange(winStart, winEnd)
+            if (bestDist > 35.0) {
+                if (winStart > 0) scanRange(0, winStart - 1)
+                if (winEnd < segCount - 1) scanRange(winEnd + 1, segCount - 1)
             }
+        } else {
+            scanRange(0, segCount - 1)
         }
 
         val segA = pts[bestSegIdx]

@@ -1,8 +1,17 @@
 package com.oscar.endulink.bike
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.wifi.WifiManager
+import android.net.wifi.WifiNetworkSpecifier
+import android.net.wifi.WifiNetworkSuggestion
+import android.os.Build
 import android.provider.Settings
 import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -54,8 +63,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
+import com.google.zxing.LuminanceSource
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.ReaderException
+import com.google.zxing.common.GlobalHistogramBinarizer
 import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeReader
 import com.oscar.endulink.platform.AndroidAppContext
@@ -129,6 +140,152 @@ actual fun openPlatformWifiSettings() {
         }
         ctx.startActivity(intent)
     } catch (_: Exception) {}
+}
+
+private object AndroidBikeWifiConnector {
+    var passiveMonitorRegistered = false
+
+    fun ensurePassiveWifiMonitor(cm: ConnectivityManager) {
+        if (passiveMonitorRegistered) return
+        try {
+            val req = NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .build()
+            cm.registerNetworkCallback(req, object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    AndroidSocketBinder.wifiNetwork = network
+                }
+
+                override fun onLost(network: Network) {
+                    if (AndroidSocketBinder.wifiNetwork == network) {
+                        AndroidSocketBinder.wifiNetwork = null
+                    }
+                }
+            })
+            passiveMonitorRegistered = true
+        } catch (_: Exception) {}
+    }
+}
+
+@Suppress("DEPRECATION")
+actual fun connectToBikeWifi(
+    ssid: String,
+    password: String,
+    onResult: (success: Boolean, message: String) -> Unit
+) {
+    val cleanSsid = ssid.trim()
+    if (cleanSsid.isEmpty()) {
+        onResult(false, "SSID de la moto vacío")
+        return
+    }
+    val ctx = AndroidAppContext.appContext ?: AndroidBikeKeysStorage.appContext
+    if (ctx == null) {
+        onResult(false, "Contexto Android no disponible")
+        return
+    }
+
+    val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    val wifiManager = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+    if (cm == null || wifiManager == null) {
+        onResult(false, "Servicio Wi-Fi de Android no disponible")
+        return
+    }
+
+    AndroidBikeWifiConnector.ensurePassiveWifiMonitor(cm)
+
+    if (password.isNotEmpty()) {
+        try {
+            val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+            clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Clave Wi-Fi Moto", password))
+        } catch (_: Exception) {}
+    }
+
+    // Si ya estamos conectados a ese SSID o al rango IP de la moto, solo enlazamos sockets sin abrir diálogos.
+    try {
+        val currentSsid = wifiManager.connectionInfo?.ssid?.trim('"').orEmpty()
+        val activeWifi = cm.allNetworks.firstOrNull { net ->
+            cm.getNetworkCapabilities(net)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        }
+        if (activeWifi != null) {
+            AndroidSocketBinder.wifiNetwork = activeWifi
+        }
+        if (currentSsid.equals(cleanSsid, ignoreCase = true)) {
+            onResult(true, "Ya conectado al Wi-Fi de la moto ($cleanSsid)")
+            return
+        }
+    } catch (_: Exception) {}
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // Registrar sugerencia Wi-Fi del sistema en segundo plano (sin usar WifiNetworkSpecifier,
+        // que abre el selector «elegir un dispositivo» y corta el Wi-Fi actual).
+        var suggestion: WifiNetworkSuggestion? = null
+        try {
+            val suggestionBuilder = WifiNetworkSuggestion.Builder()
+                .setSsid(cleanSsid)
+            if (password.isNotEmpty()) {
+                suggestionBuilder.setWpa2Passphrase(password)
+            }
+            val built = suggestionBuilder.build()
+            suggestion = built
+            wifiManager.addNetworkSuggestions(listOf(built))
+        } catch (_: Exception) {}
+
+        // En Android 11+ (API 30+), ofrecer guardar la red directamente en los Ajustes Wi-Fi del sistema
+        // para que el móvil se conecte siempre automáticamente al encender la moto.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && suggestion != null) {
+            try {
+                val addIntent = Intent(Settings.ACTION_WIFI_ADD_NETWORKS).apply {
+                    putParcelableArrayListExtra(
+                        Settings.EXTRA_WIFI_NETWORK_LIST,
+                        arrayListOf(suggestion)
+                    )
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(addIntent)
+                onResult(
+                    true,
+                    "Guarda «$cleanSsid» en el aviso de Android para que el móvil se conecte solo al encender la moto"
+                )
+                return
+            } catch (_: Exception) {}
+        }
+
+        openPlatformWifiSettings()
+        onResult(
+            true,
+            "Red «$cleanSsid» registrada (clave $password copiada). Conéctate en Ajustes Wi-Fi la primera vez y la pantalla saldrá sola."
+        )
+    } else {
+        // Android 8/9: WifiConfiguration clásico
+        try {
+            if (!wifiManager.isWifiEnabled) {
+                wifiManager.isWifiEnabled = true
+            }
+            val conf = android.net.wifi.WifiConfiguration().apply {
+                SSID = "\"$cleanSsid\""
+                if (password.isEmpty()) {
+                    allowedKeyManagement.set(android.net.wifi.WifiConfiguration.KeyMgmt.NONE)
+                } else {
+                    preSharedKey = "\"$password\""
+                }
+            }
+            val existing = wifiManager.configuredNetworks?.firstOrNull {
+                it.SSID?.trim('"').equals(cleanSsid, ignoreCase = true)
+            }
+            val netId = existing?.networkId ?: wifiManager.addNetwork(conf)
+            if (netId == -1) {
+                openPlatformWifiSettings()
+                onResult(true, "Clave copiada ($password). Selecciona $cleanSsid en Ajustes Wi-Fi.")
+                return
+            }
+            wifiManager.enableNetwork(netId, true)
+            wifiManager.reconnect()
+            onResult(true, "Conectando a $cleanSsid…")
+        } catch (e: Exception) {
+            openPlatformWifiSettings()
+            onResult(true, "Clave copiada ($password). Selecciona $cleanSsid en Ajustes Wi-Fi.")
+        }
+    }
 }
 
 @Composable
@@ -473,9 +630,60 @@ private class ZxingQrDecoder {
             height,
             false
         )
-        // Alternar normal e invertido para cubrir tanto QR oscuro/claro como pantallas TFT modo noche
-        val source = if ((frameCounter++ and 1) == 0) baseSource else baseSource.invert()
-        val bitmap = BinaryBitmap(HybridBinarizer(source))
+        val invertThisFrame = (frameCounter++ and 1) == 1
+        val fullSource: LuminanceSource = if (invertThisFrame) baseSource.invert() else baseSource
+        tryDecodeSource(fullSource, useGlobal = false)?.let { return it }
+        tryDecodeSource(baseSource, useGlobal = true)?.let { return it }
+
+        // Segundo paso específico para pantallas TFT (borde blanco de solo 1 módulo y brillo LCD):
+        // recortamos el visor central y añadimos quiet zone blanco artificial de 24 px + umbralizado.
+        val boxSide = (minOf(width, height) * 0.64f).toInt().coerceIn(120, minOf(width, height))
+        val pad = 24
+        val paddedSide = boxSide + pad * 2
+        val startX = (width - boxSide) / 2
+        val startY = (height - boxSide) / 2
+        val rawCropped = ByteArray(paddedSide * paddedSide) { 0xFF.toByte() }
+        val threshHigh = ByteArray(paddedSide * paddedSide) { 0xFF.toByte() }
+
+        for (r in 0 until boxSide) {
+            val srcRow = (startY + r) * width + startX
+            val dstRow = (r + pad) * paddedSide + pad
+            for (c in 0 until boxSide) {
+                val lum = yBuffer[srcRow + c].toInt() and 0xFF
+                rawCropped[dstRow + c] = lum.toByte()
+                threshHigh[dstRow + c] = if (lum >= 158) 0xFF.toByte() else 0x00.toByte()
+            }
+        }
+
+        val paddedSource = PlanarYUVLuminanceSource(
+            rawCropped,
+            paddedSide,
+            paddedSide,
+            0,
+            0,
+            paddedSide,
+            paddedSide,
+            false
+        )
+        tryDecodeSource(paddedSource, useGlobal = false)?.let { return it }
+        tryDecodeSource(paddedSource, useGlobal = true)?.let { return it }
+
+        val threshSource = PlanarYUVLuminanceSource(
+            threshHigh,
+            paddedSide,
+            paddedSide,
+            0,
+            0,
+            paddedSide,
+            paddedSide,
+            false
+        )
+        return tryDecodeSource(threshSource, useGlobal = false)
+    }
+
+    private fun tryDecodeSource(source: LuminanceSource, useGlobal: Boolean): String? {
+        val binarizer = if (useGlobal) GlobalHistogramBinarizer(source) else HybridBinarizer(source)
+        val bitmap = BinaryBitmap(binarizer)
         return try {
             reader.decode(bitmap, hints).text?.trim()?.takeIf { it.isNotEmpty() }
         } catch (_: ReaderException) {

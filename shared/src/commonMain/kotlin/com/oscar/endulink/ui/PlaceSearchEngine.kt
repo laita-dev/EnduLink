@@ -2,6 +2,9 @@ package com.oscar.endulink.ui
 
 import com.oscar.endulink.platform.SynchronizedLock
 import com.oscar.endulink.platform.withLock
+import com.oscar.endulink.tiles.OfflineRegionPreset
+import com.oscar.endulink.trail.GPXRoute
+import com.oscar.endulink.trail.GPXWaypoint
 import com.oscar.endulink.trail.GeoCoord
 import io.ktor.client.*
 import io.ktor.client.request.*
@@ -39,26 +42,34 @@ object PlaceSearchEngine {
     private val cacheLock = SynchronizedLock()
     private val queryCache = mutableMapOf<String, List<SearchResultItem>>()
 
-    suspend fun autocomplete(query: String, near: GeoCoord?): List<SearchResultItem> = withContext(Dispatchers.Default) {
+    suspend fun autocomplete(
+        query: String,
+        near: GeoCoord?,
+        routes: List<GPXRoute> = emptyList(),
+        waypoints: List<GPXWaypoint> = emptyList()
+    ): List<SearchResultItem> = withContext(Dispatchers.Default) {
         val raw = query.trim()
         if (raw.length < 2) return@withContext emptyList()
 
         parseCoordinateInput(raw)?.let { return@withContext listOf(it) }
 
         val q = normalizeQuery(raw)
+        val localMatches = searchLocalCatalog(raw, near, routes, waypoints)
         val cacheKey = "$q|${near?.latitude?.let { (it * 100).roundToInt() }}|${near?.longitude?.let { (it * 100).roundToInt() }}"
 
-        cacheLock.withLock { queryCache[cacheKey] }?.let { return@withContext it }
+        cacheLock.withLock { queryCache[cacheKey] }?.let { cached ->
+            return@withContext rankByProximity(localMatches + cached, q, near)
+        }
 
         // Consultas concurrentes en paralelo con límite de tiempo para respuesta inmediata
         val photonDeferred = async {
-            withTimeoutOrNull(2600L) {
+            withTimeoutOrNull(2400L) {
                 runCatching { photon(q, near) }.getOrNull()
             }.orEmpty()
         }
 
         val nominatimDeferred = async {
-            withTimeoutOrNull(2600L) {
+            withTimeoutOrNull(2400L) {
                 runCatching { nominatim(q, near) }.getOrNull()
             }.orEmpty()
         }
@@ -66,19 +77,101 @@ object PlaceSearchEngine {
         val photonResults = photonDeferred.await()
         val nominatimResults = nominatimDeferred.await()
 
-        val merged = nominatimResults + photonResults
-        val ranked = rankByProximity(merged, q, near)
-
+        val onlineMerged = nominatimResults + photonResults
         cacheLock.withLock {
             if (queryCache.size > 120) {
                 queryCache.clear()
             }
-            if (ranked.isNotEmpty()) {
-                queryCache[cacheKey] = ranked
+            if (onlineMerged.isNotEmpty()) {
+                queryCache[cacheKey] = onlineMerged
             }
         }
 
-        ranked
+        val merged = localMatches + onlineMerged
+        rankByProximity(merged, q, near)
+    }
+
+    /**
+     * Búsqueda 100% offline sobre waypoints guardados, puntos de inicio/fin de tracks GPX y catálogo regional.
+     */
+    fun searchLocalCatalog(
+        query: String,
+        near: GeoCoord?,
+        routes: List<GPXRoute> = emptyList(),
+        waypoints: List<GPXWaypoint> = emptyList()
+    ): List<SearchResultItem> {
+        val q = query.trim().lowercase()
+        if (q.length < 2) return emptyList()
+        val out = mutableListOf<SearchResultItem>()
+
+        for (wpt in waypoints) {
+            if (wpt.name.lowercase().contains(q) || (wpt.symbol?.lowercase()?.contains(q) == true)) {
+                out.add(
+                    SearchResultItem(
+                        title = wpt.name,
+                        subtitle = "Waypoint guardado (Offline)",
+                        coordinate = wpt.coordinate,
+                        distanceKm = near?.let { it.distanceTo(wpt.coordinate) / 1000.0 }
+                    )
+                )
+            }
+        }
+
+        for (route in routes) {
+            for (wpt in route.waypoints) {
+                if (wpt.name.lowercase().contains(q)) {
+                    out.add(
+                        SearchResultItem(
+                            title = wpt.name,
+                            subtitle = "Waypoint · ${route.name}",
+                            coordinate = wpt.coordinate,
+                            distanceKm = near?.let { it.distanceTo(wpt.coordinate) / 1000.0 }
+                        )
+                    )
+                }
+            }
+            if (route.points.isNotEmpty()) {
+                val routeMatches = route.name.lowercase().contains(q) || "inicio".contains(q) || "fin".contains(q)
+                if (routeMatches) {
+                    val startCoord = route.points.first().coordinate
+                    out.add(
+                        SearchResultItem(
+                            title = "Inicio · ${route.name}",
+                            subtitle = "Track GPX local (Offline)",
+                            coordinate = startCoord,
+                            distanceKm = near?.let { it.distanceTo(startCoord) / 1000.0 }
+                        )
+                    )
+                    val endCoord = route.points.last().coordinate
+                    if (endCoord.distanceTo(startCoord) > 150.0) {
+                        out.add(
+                            SearchResultItem(
+                                title = "Final · ${route.name}",
+                                subtitle = "Track GPX local (Offline)",
+                                coordinate = endCoord,
+                                distanceKm = near?.let { it.distanceTo(endCoord) / 1000.0 }
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        for (preset in OfflineRegionPreset.catalog) {
+            if (preset.name.lowercase().contains(q) || preset.subtitle.lowercase().contains(q)) {
+                val center = GeoCoord((preset.minLat + preset.maxLat) / 2.0, (preset.minLon + preset.maxLon) / 2.0)
+                out.add(
+                    SearchResultItem(
+                        title = preset.name,
+                        subtitle = "${preset.category} (Offline)",
+                        coordinate = center,
+                        distanceKm = near?.let { it.distanceTo(center) / 1000.0 }
+                    )
+                )
+            }
+        }
+
+        return out
     }
 
     /**
@@ -272,12 +365,14 @@ object PlaceSearchEngine {
         )
         try {
             val url = "https://nominatim.openstreetmap.org/reverse?lat=${coord.latitude}&lon=${coord.longitude}&format=json&zoom=18&addressdetails=1"
-            val resp = client.get(url) {
-                headers {
-                    append(HttpHeaders.UserAgent, "EnduLink/0.1.0 (Mobile Trail Navigation; laitaodev@gmail.com)")
-                    append(HttpHeaders.Accept, "application/json")
+            val resp = withTimeoutOrNull(2200L) {
+                client.get(url) {
+                    headers {
+                        append(HttpHeaders.UserAgent, "EnduLink/0.1.0 (Mobile Trail Navigation; laitaodev@gmail.com)")
+                        append(HttpHeaders.Accept, "application/json")
+                    }
                 }
-            }
+            } ?: return@withContext defaultItem
             if (resp.status == HttpStatusCode.OK) {
                 val json = Json.parseToJsonElement(resp.bodyAsText()).jsonObject
                 val address = json["address"]?.jsonObject

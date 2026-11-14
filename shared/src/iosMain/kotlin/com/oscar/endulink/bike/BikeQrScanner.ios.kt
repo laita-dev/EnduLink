@@ -10,9 +10,14 @@ interface IosQrScannerCallback {
     fun onError(message: String)
 }
 
+interface IosWifiConnectCallback {
+    fun onWifiConnectResult(success: Boolean, message: String)
+}
+
 interface IosQrScannerBridge {
     fun startQrScan(callback: IosQrScannerCallback)
     fun openSettings()
+    fun connectToWifi(ssid: String, password: String, callback: IosWifiConnectCallback)
 }
 
 object IosQrScannerBridgeHolder {
@@ -55,4 +60,26 @@ actual fun rememberBikeQrScanner(
 
 actual fun openPlatformWifiSettings() {
     IosQrScannerBridgeHolder.bridge?.openSettings()
+}
+
+actual fun connectToBikeWifi(
+    ssid: String,
+    password: String,
+    onResult: (success: Boolean, message: String) -> Unit
+) {
+    val cleanSsid = ssid.trim()
+    if (cleanSsid.isEmpty()) {
+        onResult(false, "SSID de la moto vacío")
+        return
+    }
+    val bridge = IosQrScannerBridgeHolder.bridge
+    if (bridge == null) {
+        onResult(false, "Conector Wi-Fi iOS no inicializado. Únete manualmente a $cleanSsid en Ajustes > Wi-Fi.")
+        return
+    }
+    bridge.connectToWifi(cleanSsid, password, object : IosWifiConnectCallback {
+        override fun onWifiConnectResult(success: Boolean, message: String) {
+            onResult(success, message)
+        }
+    })
 }

@@ -13,18 +13,48 @@ import com.oscar.endulink.tiles.TileStore
 import com.oscar.endulink.trail.GPXRoute
 import com.oscar.endulink.trail.GPXWaypoint
 import com.oscar.endulink.trail.GeoCoord
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.nio.ByteBuffer
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.atan2
+import kotlin.math.ceil
+import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.hypot
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
+@Suppress("DEPRECATION")
 actual fun getWifiSnapshot(): WifiSnapshot? {
+    var currentSsid: String? = null
+    try {
+        val ctx = com.oscar.endulink.platform.AndroidAppContext.appContext ?: AndroidBikeKeysStorage.appContext
+        if (ctx != null) {
+            val wifiManager = ctx.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+            val rawSsid = wifiManager?.connectionInfo?.ssid?.trim()?.trim('"')
+            if (!rawSsid.isNullOrEmpty() && !rawSsid.equals("<unknown ssid>", ignoreCase = true)) {
+                currentSsid = rawSsid
+            }
+            val cm = ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            val activeWifi = cm?.allNetworks?.firstOrNull { net ->
+                cm.getNetworkCapabilities(net)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
+            }
+            if (activeWifi != null) {
+                AndroidSocketBinder.wifiNetwork = activeWifi
+            }
+        }
+    } catch (_: Exception) {}
+
     try {
         val interfaces = java.net.NetworkInterface.getNetworkInterfaces() ?: return null
         for (iface in interfaces) {
             if (!iface.isUp || iface.isLoopback) continue
             val name = iface.name.lowercase()
             if (name.startsWith("wlan") || name.startsWith("wifi") || name.startsWith("ap") ||
-                name.startsWith("swlan") || name.startsWith("mlan")
+                name.startsWith("swlan") || name.startsWith("mlan") || name.startsWith("p2p")
             ) {
                 for (addr in iface.inetAddresses) {
                     if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
@@ -32,7 +62,7 @@ actual fun getWifiSnapshot(): WifiSnapshot? {
                         val parts = host.split(".")
                         if (parts.size == 4) {
                             val gateway = "${parts[0]}.${parts[1]}.${parts[2]}.1"
-                            return WifiSnapshot(phoneIP = host, gatewayCandidateIP = gateway)
+                            return WifiSnapshot(phoneIP = host, gatewayCandidateIP = gateway, ssid = currentSsid)
                         }
                     }
                 }
@@ -50,6 +80,45 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
 
     // Caché LRU en memoria de bitmaps de teselas decodificadas para evitar decodificar PNG/JPG en cada frame a 15 FPS
     private val decodedTileCache = android.util.LruCache<TileCoord, Bitmap>(128)
+    private val decodeScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val loadingTiles = ConcurrentHashMap.newKeySet<TileCoord>()
+    private val tileMissUntilMs = ConcurrentHashMap<TileCoord, Long>()
+
+    private val routePath = Path()
+    private val approachPath = Path()
+    private val chevronPath = Path()
+    private val arrowPath = Path()
+    private val corePath = Path()
+    private val boltPath = Path()
+    private val tileSrcRect = Rect()
+    private val tileDstRect = RectF()
+    private val tmpTagRect = RectF()
+
+    private fun getOrQueueTileBitmap(coord: TileCoord, allowAsyncFetch: Boolean): Bitmap? {
+        decodedTileCache.get(coord)?.let { return it }
+        val now = System.currentTimeMillis()
+        val retryAfter = tileMissUntilMs[coord]
+        if (retryAfter != null && now < retryAfter) return null
+        if (loadingTiles.add(coord)) {
+            decodeScope.launch {
+                try {
+                    val bytes = tileStore.getTileBytes(coord, allowAsyncFetch = allowAsyncFetch)
+                    if (bytes != null && bytes.size > 100) {
+                        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (bmp != null) {
+                            decodedTileCache.put(coord, bmp)
+                            tileMissUntilMs.remove(coord)
+                            return@launch
+                        }
+                    }
+                    tileMissUntilMs[coord] = System.currentTimeMillis() + if (allowAsyncFetch) 2500L else 5000L
+                } finally {
+                    loadingTiles.remove(coord)
+                }
+            }
+        }
+        return null
+    }
 
     // Paints preconfigurados para alto rendimiento (cero allocations por frame)
     private val bgPaint = Paint().apply { color = android.graphics.Color.rgb(20, 23, 28) }
@@ -144,6 +213,20 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         color = android.graphics.Color.WHITE
         textSize = 11.5f
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        isAntiAlias = true
+    }
+    private val dirArrowHaloPaint = Paint().apply {
+        color = android.graphics.Color.rgb(14, 17, 23)
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        isAntiAlias = true
+    }
+    private val dirArrowFillPaint = Paint().apply {
+        color = android.graphics.Color.WHITE
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
         isAntiAlias = true
     }
 
@@ -269,16 +352,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             ?: activeRoute?.points?.firstOrNull()?.coordinate
             ?: GeoCoord(40.4168, -3.7038)
 
-        // Auto-zoom dinámico según velocidad (1:1 con MotIOS: Z17 en parado, Z15 crucero, Z13 autovía)
-        val zoom = if (config.autoZoomBySpeed) {
-            when {
-                rider.speedKmh < 25.0 -> 17
-                rider.speedKmh < 75.0 -> 15
-                else -> 13
-            }
-        } else {
-            config.zoom
-        }
+        // Auto-zoom dinámico configurable según velocidad
+        val zoom = config.resolveEffectiveZoom(rider.speedKmh)
 
         // Orientación: "north" (Norte arriba) o "heading" (Rumbo hacia arriba)
         val heading = if (config.orientation == "north") {
@@ -309,80 +384,89 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         val centerTileX = floor(centerFracX).toInt()
         val centerTileY = floor(centerFracY).toInt()
         val maxTileIndex = if (zoom in 0..30) (1 shl zoom) - 1 else 0
+        val maxRadius = ceil(hypot(w * 0.5, h * 0.68) / tileSizePx).toInt().coerceIn(1, 3)
 
-        // Dibujar teselas 5x5 alrededor del centro
-        for (dx in -3..3) {
+        // Dibujar teselas visibles sin bloqueo de disco ni decodificación en el hilo de renderizado
+        for (dx in -maxRadius..maxRadius) {
             val tx = centerTileX + dx
             if (tx < 0 || tx > maxTileIndex) continue
-            for (dy in -3..3) {
+            for (dy in -maxRadius..maxRadius) {
                 val ty = centerTileY + dy
                 if (ty < 0 || ty > maxTileIndex) continue
 
                 val posX = ((tx - centerFracX) * tileSizePx).toFloat()
                 val posY = ((ty - centerFracY) * tileSizePx).toFloat()
+                tileDstRect.set(posX - 0.6f, posY - 0.6f, posX + tileSizePx + 0.6f, posY + tileSizePx + 0.6f)
 
                 val tileCoord = TileCoord(layer, zoom, tx, ty)
-                var drewTile = false
-                var tileBmp = decodedTileCache.get(tileCoord)
-                if (tileBmp == null) {
-                    val bytes = tileStore.getTileBytes(tileCoord, allowAsyncFetch = true)
-                    if (bytes != null && bytes.size > 100) {
-                        tileBmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                        if (tileBmp != null) {
-                            decodedTileCache.put(tileCoord, tileBmp)
-                        }
-                    }
-                }
+                val tileBmp = getOrQueueTileBitmap(tileCoord, allowAsyncFetch = true)
                 if (tileBmp != null) {
-                    val dst = RectF(posX - 0.6f, posY - 0.6f, posX + tileSizePx + 0.6f, posY + tileSizePx + 0.6f)
-                    canvas.drawBitmap(tileBmp, null, dst, tileFilterPaint)
-                    drewTile = true
-                }
-
-                if (!drewTile) {
-                    val oz = tileStore.getOverzoomedParent(tileCoord)
-                    if (oz != null && oz.parentTileBytes.size > 100) {
-                        val parentCoord = TileCoord(layer, oz.parentZ, oz.parentX, oz.parentY)
-                        var parentBmp = decodedTileCache.get(parentCoord)
-                        if (parentBmp == null) {
-                            parentBmp = BitmapFactory.decodeByteArray(oz.parentTileBytes, 0, oz.parentTileBytes.size)
-                            if (parentBmp != null) {
-                                decodedTileCache.put(parentCoord, parentBmp)
-                            }
-                        }
+                    canvas.drawBitmap(tileBmp, null, tileDstRect, tileFilterPaint)
+                } else {
+                    for (delta in 1..4) {
+                        val pZ = zoom - delta
+                        if (pZ < 1) break
+                        val pX = tx shr delta
+                        val pY = ty shr delta
+                        val parentCoord = TileCoord(layer, pZ, pX, pY)
+                        val parentBmp = getOrQueueTileBitmap(parentCoord, allowAsyncFetch = false)
                         if (parentBmp != null) {
-                            val subW = parentBmp.width / oz.scale
-                            val subH = parentBmp.height / oz.scale
-                            val src = Rect(oz.subX * subW, oz.subY * subH, (oz.subX + 1) * subW, (oz.subY + 1) * subH)
-                            val dst = RectF(posX - 0.6f, posY - 0.6f, posX + tileSizePx + 0.6f, posY + tileSizePx + 0.6f)
-                            canvas.drawBitmap(parentBmp, src, dst, tileFilterPaint)
+                            val ozScale = 1 shl delta
+                            val subX = tx and (ozScale - 1)
+                            val subY = ty and (ozScale - 1)
+                            val srcX0 = (subX * parentBmp.width) / ozScale
+                            val srcY0 = (subY * parentBmp.height) / ozScale
+                            val srcX1 = ((subX + 1) * parentBmp.width) / ozScale
+                            val srcY1 = ((subY + 1) * parentBmp.height) / ozScale
+                            tileSrcRect.set(srcX0, srcY0, srcX1.coerceAtLeast(srcX0 + 1), srcY1.coerceAtLeast(srcY0 + 1))
+                            canvas.drawBitmap(parentBmp, tileSrcRect, tileDstRect, tileFilterPaint)
+                            break
                         }
                     }
                 }
             }
         }
 
-        // 4. Polilíneas de rutas
+        // 4. Polilíneas de rutas y flechas de sentido (cero asignaciones por frame)
+        val scale = (w / 592f).coerceIn(0.45f, 1.5f)
+        val maxBound = hypot(w, h) * 0.85f
+        val maxArrowRange = hypot(w, h) * 0.78f
+        val worldN = (1 shl zoom).toDouble()
+
         if (activeRoute != null && activeRoute.isVisible && activeRoute.points.size >= 2) {
-            val path = Path()
-            val first = geoToLocal(activeRoute.points[0].coordinate)
-            path.moveTo(first.first, first.second)
-            for (i in 1 until activeRoute.points.size) {
-                val p = geoToLocal(activeRoute.points[i].coordinate)
-                path.lineTo(p.first, p.second)
+            val nx = activeRoute.normMercatorX
+            val ny = activeRoute.normMercatorY
+            if (nx.size >= 2 && ny.size == nx.size) {
+                val hasChevrons = buildClippedRouteAndChevronsFromNorm(
+                    outPath = routePath,
+                    nx = nx,
+                    ny = ny,
+                    worldN = worldN,
+                    centerFracX = centerFracX,
+                    centerFracY = centerFracY,
+                    tileSizePx = tileSizePx,
+                    maxBound = maxBound,
+                    spacingPx = 88f * scale,
+                    arrowLenPx = 8.5f * scale,
+                    maxArrowRange = maxArrowRange
+                )
+                canvas.drawPath(routePath, routePaint)
+                if (hasChevrons) drawBatchedChevrons(canvas, scale)
             }
-            canvas.drawPath(path, routePaint)
         }
 
         if (roadRouteCoordinates != null && roadRouteCoordinates.size >= 2) {
-            val path = Path()
-            val first = geoToLocal(roadRouteCoordinates[0])
-            path.moveTo(first.first, first.second)
-            for (i in 1 until roadRouteCoordinates.size) {
-                val p = geoToLocal(roadRouteCoordinates[i])
-                path.lineTo(p.first, p.second)
-            }
-            canvas.drawPath(path, approachPaint)
+            val hasChevrons = buildClippedRouteAndChevronsFromCoords(
+                outPath = approachPath,
+                coords = roadRouteCoordinates,
+                geoToLocal = ::geoToLocal,
+                maxBound = maxBound,
+                spacingPx = 88f * scale,
+                arrowLenPx = 8.0f * scale,
+                maxArrowRange = maxArrowRange
+            )
+            canvas.drawPath(approachPath, approachPaint)
+            if (hasChevrons) drawBatchedChevrons(canvas, scale)
         }
 
         // 4b. Paradas intermedias en el cuadro TFT
@@ -428,8 +512,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                     canvas.rotate(heading.toFloat())
                     val label = if (wpt.name.length > 16) wpt.name.take(15) + "…" else wpt.name
                     val tw = waypointLabelPaint.measureText(label)
-                    val tagRect = RectF(-tw / 2f - 6f, -26f, tw / 2f + 6f, -11f)
-                    canvas.drawRoundRect(tagRect, 5f, 5f, hudCardPaint)
+                    tmpTagRect.set(-tw / 2f - 6f, -26f, tw / 2f + 6f, -11f)
+                    canvas.drawRoundRect(tmpTagRect, 5f, 5f, hudCardPaint)
                     canvas.drawText(label, -tw / 2f, -15f, waypointLabelPaint)
                     canvas.restore()
                 }
@@ -446,22 +530,20 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             canvas.rotate(riderHead.toFloat())
         }
 
-        val arrowPath = Path().apply {
-            moveTo(0f, -18f)
-            lineTo(13f, 14f)
-            lineTo(0f, 9f)
-            lineTo(-13f, 14f)
-            close()
-        }
+        arrowPath.reset()
+        arrowPath.moveTo(0f, -18f)
+        arrowPath.lineTo(13f, 14f)
+        arrowPath.lineTo(0f, 9f)
+        arrowPath.lineTo(-13f, 14f)
+        arrowPath.close()
         canvas.drawPath(arrowPath, riderArrowPaint)
 
-        val corePath = Path().apply {
-            moveTo(0f, -10f)
-            lineTo(6f, 9f)
-            lineTo(0f, 6f)
-            lineTo(-6f, 9f)
-            close()
-        }
+        corePath.reset()
+        corePath.moveTo(0f, -10f)
+        corePath.lineTo(6f, 9f)
+        corePath.lineTo(0f, 6f)
+        corePath.lineTo(-6f, 9f)
+        corePath.close()
         canvas.drawPath(corePath, riderArrowCorePaint)
         canvas.restore()
 
@@ -552,15 +634,14 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             // Dibujar pequeño rayo vector ⚡
             val bx = iconRight + 9f
             val by = battBox.centerY()
-            val boltPath = Path().apply {
-                moveTo(bx + 4f, by - 7f)
-                lineTo(bx - 1f, by + 1f)
-                lineTo(bx + 3f, by + 1f)
-                lineTo(bx - 3f, by + 8f)
-                lineTo(bx + 1f, by + 2f)
-                lineTo(bx - 3f, by + 2f)
-                close()
-            }
+            boltPath.reset()
+            boltPath.moveTo(bx + 4f, by - 7f)
+            boltPath.lineTo(bx - 1f, by + 1f)
+            boltPath.lineTo(bx + 3f, by + 1f)
+            boltPath.lineTo(bx - 3f, by + 8f)
+            boltPath.lineTo(bx + 1f, by + 2f)
+            boltPath.lineTo(bx - 3f, by + 2f)
+            boltPath.close()
             canvas.drawPath(boltPath, batteryBoltPaint)
             iconRight + 20f
         } else {
@@ -608,5 +689,164 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         cachedCanvas = Canvas(newBmp)
         rgbaBuffer = ByteArray(width * height * 4)
         return newBmp
+    }
+
+    private fun buildClippedRouteAndChevronsFromNorm(
+        outPath: Path,
+        nx: FloatArray,
+        ny: FloatArray,
+        worldN: Double,
+        centerFracX: Double,
+        centerFracY: Double,
+        tileSizePx: Float,
+        maxBound: Float,
+        spacingPx: Float,
+        arrowLenPx: Float,
+        maxArrowRange: Float
+    ): Boolean {
+        outPath.reset()
+        chevronPath.reset()
+        if (nx.size < 2) return false
+
+        var prevX = ((nx[0].toDouble() * worldN - centerFracX) * tileSizePx).toFloat()
+        var prevY = ((ny[0].toDouble() * worldN - centerFracY) * tileSizePx).toFloat()
+        var isPenDown = false
+        var hasChevrons = false
+        var accum = spacingPx * 0.55f
+        val wingAngleOffset = 2.42f
+        val lastIdx = nx.size - 1
+
+        for (i in 1..lastIdx) {
+            val bx = ((nx[i].toDouble() * worldN - centerFracX) * tileSizePx).toFloat()
+            val by = ((ny[i].toDouble() * worldN - centerFracY) * tileSizePx).toFloat()
+            val dx = bx - prevX
+            val dy = by - prevY
+            val segLen = hypot(dx, dy)
+            if (i < lastIdx && segLen < 1.5f) continue
+            if (segLen < 0.01f) continue
+
+            val overlaps = maxOf(prevX, bx) >= -maxBound && minOf(prevX, bx) <= maxBound &&
+                maxOf(prevY, by) >= -maxBound && minOf(prevY, by) <= maxBound
+            if (overlaps) {
+                if (!isPenDown) {
+                    outPath.moveTo(prevX, prevY)
+                    isPenDown = true
+                }
+                outPath.lineTo(bx, by)
+
+                var d = spacingPx - accum
+                if (d <= segLen) {
+                    val dirAngle = atan2(dy, dx)
+                    val cosDir = cos(dirAngle)
+                    val sinDir = sin(dirAngle)
+                    val cosL = cos(dirAngle + wingAngleOffset) * arrowLenPx
+                    val sinL = sin(dirAngle + wingAngleOffset) * arrowLenPx
+                    val cosR = cos(dirAngle - wingAngleOffset) * arrowLenPx
+                    val sinR = sin(dirAngle - wingAngleOffset) * arrowLenPx
+                    while (d <= segLen) {
+                        val t = d / segLen
+                        val px = prevX + dx * t
+                        val py = prevY + dy * t
+                        if (hypot(px, py) <= maxArrowRange) {
+                            val tipX = px + cosDir * arrowLenPx * 0.35f
+                            val tipY = py + sinDir * arrowLenPx * 0.35f
+                            chevronPath.moveTo(tipX + cosL, tipY + sinL)
+                            chevronPath.lineTo(tipX, tipY)
+                            chevronPath.lineTo(tipX + cosR, tipY + sinR)
+                            hasChevrons = true
+                        }
+                        d += spacingPx
+                    }
+                }
+            } else {
+                isPenDown = false
+            }
+            accum = (accum + segLen) % spacingPx
+            prevX = bx
+            prevY = by
+        }
+        return hasChevrons
+    }
+
+    private fun buildClippedRouteAndChevronsFromCoords(
+        outPath: Path,
+        coords: List<GeoCoord>,
+        geoToLocal: (GeoCoord) -> Pair<Float, Float>,
+        maxBound: Float,
+        spacingPx: Float,
+        arrowLenPx: Float,
+        maxArrowRange: Float
+    ): Boolean {
+        outPath.reset()
+        chevronPath.reset()
+        if (coords.size < 2) return false
+
+        val first = geoToLocal(coords[0])
+        var prevX = first.first
+        var prevY = first.second
+        var isPenDown = false
+        var hasChevrons = false
+        var accum = spacingPx * 0.55f
+        val wingAngleOffset = 2.42f
+        val lastIdx = coords.size - 1
+
+        for (i in 1..lastIdx) {
+            val p = geoToLocal(coords[i])
+            val bx = p.first
+            val by = p.second
+            val dx = bx - prevX
+            val dy = by - prevY
+            val segLen = hypot(dx, dy)
+            if (i < lastIdx && segLen < 1.5f) continue
+            if (segLen < 0.01f) continue
+
+            val overlaps = maxOf(prevX, bx) >= -maxBound && minOf(prevX, bx) <= maxBound &&
+                maxOf(prevY, by) >= -maxBound && minOf(prevY, by) <= maxBound
+            if (overlaps) {
+                if (!isPenDown) {
+                    outPath.moveTo(prevX, prevY)
+                    isPenDown = true
+                }
+                outPath.lineTo(bx, by)
+
+                var d = spacingPx - accum
+                if (d <= segLen) {
+                    val dirAngle = atan2(dy, dx)
+                    val cosDir = cos(dirAngle)
+                    val sinDir = sin(dirAngle)
+                    val cosL = cos(dirAngle + wingAngleOffset) * arrowLenPx
+                    val sinL = sin(dirAngle + wingAngleOffset) * arrowLenPx
+                    val cosR = cos(dirAngle - wingAngleOffset) * arrowLenPx
+                    val sinR = sin(dirAngle - wingAngleOffset) * arrowLenPx
+                    while (d <= segLen) {
+                        val t = d / segLen
+                        val px = prevX + dx * t
+                        val py = prevY + dy * t
+                        if (hypot(px, py) <= maxArrowRange) {
+                            val tipX = px + cosDir * arrowLenPx * 0.35f
+                            val tipY = py + sinDir * arrowLenPx * 0.35f
+                            chevronPath.moveTo(tipX + cosL, tipY + sinL)
+                            chevronPath.lineTo(tipX, tipY)
+                            chevronPath.lineTo(tipX + cosR, tipY + sinR)
+                            hasChevrons = true
+                        }
+                        d += spacingPx
+                    }
+                }
+            } else {
+                isPenDown = false
+            }
+            accum = (accum + segLen) % spacingPx
+            prevX = bx
+            prevY = by
+        }
+        return hasChevrons
+    }
+
+    private fun drawBatchedChevrons(canvas: Canvas, scale: Float) {
+        dirArrowHaloPaint.strokeWidth = (4.4f * scale).coerceAtLeast(2.5f)
+        dirArrowFillPaint.strokeWidth = (2.2f * scale).coerceAtLeast(1.4f)
+        canvas.drawPath(chevronPath, dirArrowHaloPaint)
+        canvas.drawPath(chevronPath, dirArrowFillPaint)
     }
 }

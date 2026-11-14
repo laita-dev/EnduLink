@@ -1,6 +1,8 @@
 package com.oscar.endulink.trail
 
+import com.oscar.endulink.tiles.TileMath
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlin.math.*
 
 @Serializable
@@ -80,6 +82,59 @@ data class GPXRoute(
     var isInverted: Boolean = false,
     var notes: String = ""
 ) {
+    @Transient
+    private var _cachedPointsRef: List<GPXPoint>? = null
+    @Transient
+    private var _cachedPointsSize: Int = -1
+    @Transient
+    private var _cachedCoords: List<GeoCoord>? = null
+    @Transient
+    private var _cachedNormX: FloatArray? = null
+    @Transient
+    private var _cachedNormY: FloatArray? = null
+
+    private fun ensureProjectionCache() {
+        val cur = points
+        if (_cachedPointsRef === cur && _cachedPointsSize == cur.size &&
+            _cachedCoords != null && _cachedNormX != null && _cachedNormY != null
+        ) {
+            return
+        }
+        val n = cur.size
+        val coords = ArrayList<GeoCoord>(n)
+        val nx = FloatArray(n)
+        val ny = FloatArray(n)
+        for (i in 0 until n) {
+            val pt = cur[i]
+            coords.add(pt.coordinate)
+            nx[i] = TileMath.lonToNormX(pt.longitude).toFloat()
+            ny[i] = TileMath.latToNormY(pt.latitude).toFloat()
+        }
+        _cachedCoords = coords
+        _cachedNormX = nx
+        _cachedNormY = ny
+        _cachedPointsRef = cur
+        _cachedPointsSize = n
+    }
+
+    val cachedCoordinates: List<GeoCoord>
+        get() {
+            ensureProjectionCache()
+            return _cachedCoords ?: emptyList()
+        }
+
+    val normMercatorX: FloatArray
+        get() {
+            ensureProjectionCache()
+            return _cachedNormX ?: FloatArray(0)
+        }
+
+    val normMercatorY: FloatArray
+        get() {
+            ensureProjectionCache()
+            return _cachedNormY ?: FloatArray(0)
+        }
+
     fun reversedRoute(): GPXRoute {
         val revPoints = points.reversed().map {
             GPXPoint(it.latitude, it.longitude, it.elevation, cumulativeKm = 0.0)

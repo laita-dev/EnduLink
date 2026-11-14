@@ -100,7 +100,7 @@ actual class PlatformH264Encoder actual constructor(
             }
             if (item != null) return item
             if (Clock.System.now().toEpochMilliseconds() >= deadline) break
-            platformSleep(6)
+            platformSleep(2)
         }
         return null
     }
@@ -124,12 +124,12 @@ actual class PlatformH264Encoder actual constructor(
         val frameIntervalMs = (1000L / fps.coerceAtLeast(5)).coerceAtLeast(16L)
         var frameIndex = 0L
         var windowStartMs = Clock.System.now().toEpochMilliseconds()
+        var nextTargetMs = windowStartMs
         var bytesEncodedWindow = 0L
         var framesEncodedWindow = 0
         var loggedFirstFrame = false
 
         while (isRunning && currentCoroutineContext().isActive) {
-            val startTime = Clock.System.now().toEpochMilliseconds()
             try {
                 val rgba = renderFrameRgba(width, height)
 
@@ -182,8 +182,11 @@ actual class PlatformH264Encoder actual constructor(
                 framesEncodedWindow = 0
             }
 
-            val elapsed = Clock.System.now().toEpochMilliseconds() - startTime
-            val sleepTime = frameIntervalMs - elapsed
+            nextTargetMs += frameIntervalMs
+            if (now > nextTargetMs + frameIntervalMs) {
+                nextTargetMs = now + frameIntervalMs
+            }
+            val sleepTime = nextTargetMs - now
             if (sleepTime > 0) {
                 delay(sleepTime)
             }

@@ -17,3 +17,12 @@ expect fun rememberBikeQrScanner(
  */
 expect fun openPlatformWifiSettings()
 
+/**
+ * Conecta automáticamente al punto de acceso Wi-Fi de la moto usando el SSID y contraseña del QR.
+ */
+expect fun connectToBikeWifi(
+    ssid: String,
+    password: String,
+    onResult: (success: Boolean, message: String) -> Unit
+)
+

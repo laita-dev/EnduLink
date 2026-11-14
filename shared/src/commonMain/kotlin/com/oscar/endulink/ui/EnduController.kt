@@ -176,14 +176,28 @@ class EnduController {
     private val _wifiSnapshot = MutableStateFlow<WifiSnapshot?>(null)
     val wifiSnapshot: StateFlow<WifiSnapshot?> = _wifiSnapshot.asStateFlow()
 
+    private val _bikeSearchRemainingSeconds = MutableStateFlow<Int?>(null)
+    val bikeSearchRemainingSeconds: StateFlow<Int?> = _bikeSearchRemainingSeconds.asStateFlow()
+
+    private val _isBikeSheetOpen = MutableStateFlow(false)
+
     private val rejectedIpsLock = SynchronizedLock()
     private val rejectedIps = mutableSetOf<String>()
 
     private var previewDecimator = 0
     private val previewSeqLock = SynchronizedLock()
     private var previewRequestSeq = 0L
+    private val tileNotifyLock = SynchronizedLock()
+    private var tileNotifyScheduled = false
     private var routeCalcJob: Job? = null
     private var approachCalcJob: Job? = null
+    private var bikeSupervisorJob: Job? = null
+    @kotlin.concurrent.Volatile
+    private var bikeSearchResetAtMs: Long = 0L
+    @kotlin.concurrent.Volatile
+    private var forceImmediateKnock: Boolean = false
+    @kotlin.concurrent.Volatile
+    private var manuallyStoppedOnCurrentBikeWifi: Boolean = false
     private var lastApproachTarget = ApproachTarget.NEAREST
 
     // Compatibilidad para búsqueda
@@ -195,23 +209,49 @@ class EnduController {
         _selectedLayer.value = MapLayer.fromRaw(savedSettings.selectedLayerRaw)
         _bikeMapConfig.value = savedSettings.bikeMapConfig
         _bikeQr.value = savedSettings.bikeQr
-        _allowLocalLanTesting.value = savedSettings.allowLocalLanTesting
+        _allowLocalLanTesting.value = true
         _quickMarkers.value = WaypointStore.loadWaypoints()
         _routes.value = RouteStore.loadRoutes()
-        if (!savedSettings.lanTestingDefaultApplied) {
+        if (!savedSettings.lanTestingDefaultApplied || !savedSettings.allowLocalLanTesting) {
             persistSettings()
         }
 
         tileStore.onTileLoaded = {
-            _tileRevision.value++
+            val shouldSchedule = tileNotifyLock.withLock {
+                if (tileNotifyScheduled) {
+                    false
+                } else {
+                    tileNotifyScheduled = true
+                    true
+                }
+            }
+            if (shouldSchedule) {
+                scope.launch {
+                    delay(32L)
+                    tileNotifyLock.withLock { tileNotifyScheduled = false }
+                    _tileRevision.value = _tileRevision.value + 1
+                }
+            }
         }
 
-        // Monitor periódico de la red Wi-Fi de la pantalla y cronómetro REC en vivo
+        // Monitor automático de Wi-Fi de la moto (activa la pantalla TFT en cuanto el móvil se conecta al Wi-Fi de la moto) y cronómetro REC
         scope.launch {
             var tick = 0
+            var wasOnBikeWifi = false
             while (isActive) {
                 if (tick % 2 == 0) {
-                    _wifiSnapshot.value = getWifiSnapshot()
+                    val snap = getWifiSnapshot()
+                    _wifiSnapshot.value = snap
+                    val onBikeWifi = snap?.isLikelyBikeWifi(_bikeQr.value) == true
+                    if (onBikeWifi && (!wasOnBikeWifi || _bikeState.value == BikeState.CLOSED)) {
+                        if (!manuallyStoppedOnCurrentBikeWifi) {
+                            logBike("Wi-Fi de la moto detectado (${snap?.ssid ?: snap?.gatewayCandidateIP}) · Activando pantalla TFT automáticamente...")
+                            startBikeStream()
+                        }
+                    } else if (!onBikeWifi && wasOnBikeWifi) {
+                        manuallyStoppedOnCurrentBikeWifi = false
+                    }
+                    wasOnBikeWifi = onBikeWifi
                 }
                 if (_isRecording.value) {
                     _recordingStats.value = getRecordingStats()
@@ -225,11 +265,14 @@ class EnduController {
         scope.launch {
             locationProvider.telemetryFlow.collect { telemetry ->
                 telemetry.coordinate?.let { pos ->
-                    if (_followMode.value != MapFollowMode.FREE) {
+                    if (_followMode.value != MapFollowMode.FREE && _mapCenter.value.distanceTo(pos) >= 0.6) {
                         _mapCenter.value = pos
                     }
                     if (_followMode.value == MapFollowMode.FOLLOW_HEADING && telemetry.hasValidHeading) {
-                        _mapHeading.value = telemetry.headingDegrees
+                        val headingDelta = kotlin.math.abs(((telemetry.headingDegrees - _mapHeading.value + 540.0) % 360.0) - 180.0)
+                        if (headingDelta >= 1.0) {
+                            _mapHeading.value = telemetry.headingDegrees
+                        }
                     }
 
                     // Grabación REC
@@ -245,8 +288,16 @@ class EnduController {
                     val gpxRoute = selectedRoute
                     if (_isNavigating.value && currentApproach != null && gpxRoute != null) {
                         val distToApproachEnd = pos.distanceTo(currentApproach.destinationCoordinate)
-                        val distToTrack = gpxRoute.points.minOfOrNull { it.coordinate.distanceTo(pos) } ?: Double.MAX_VALUE
-                        if (distToApproachEnd <= 60.0 || distToTrack <= 45.0) {
+                        val mLat = RouteNavigator.METERS_PER_DEG_LAT
+                        val mLon = RouteNavigator.metersPerDegLon(pos.latitude)
+                        var minDistSq = Double.MAX_VALUE
+                        for (pt in gpxRoute.points) {
+                            val dy = (pt.latitude - pos.latitude) * mLat
+                            val dx = (pt.longitude - pos.longitude) * mLon
+                            val dSq = dx * dx + dy * dy
+                            if (dSq < minDistSq) minDistSq = dSq
+                        }
+                        if (distToApproachEnd <= 60.0 || minDistSq <= 45.0 * 45.0) {
                             _approachRoadRoute.value = null
                             _trackProgress.value = null
                             _statusBannerMessage.value = "Enlace completado · Siguiendo track ${gpxRoute.name}"
@@ -282,12 +333,18 @@ class EnduController {
 
     fun start() {
         locationProvider.startTracking()
+        startBikeStream()
         updateBackgroundKeepAlive()
     }
 
     private fun updateBackgroundKeepAlive() {
-        val isBikeActive = _bikeState.value == BikeState.SHOWING || _bikeState.value == BikeState.GREETED
-        val shouldKeepAlive = _isNavigating.value || _isRecording.value || isBikeActive
+        val isBikeActiveOrSearching = _bikeState.value == BikeState.SHOWING ||
+            _bikeState.value == BikeState.GREETED ||
+            (_bikeState.value == BikeState.LISTENING && _bikeSearchRemainingSeconds.value != null)
+        val shouldKeepAlive = _isNavigating.value || _isRecording.value || isBikeActiveOrSearching
+        val shouldHighPowerGps = _isNavigating.value || _isRecording.value ||
+            _bikeState.value == BikeState.SHOWING || _bikeState.value == BikeState.GREETED
+        locationProvider.setHighPowerMode(shouldHighPowerGps)
         if (shouldKeepAlive) {
             BackgroundServiceController.startKeepAlive()
         } else {
@@ -522,7 +579,8 @@ class EnduController {
                 if (first != null) {
                     fitCoordinates(first.coordinates)
                     val stopsMsg = if (waypoints.isNotEmpty()) " (${waypoints.size} parada${if (waypoints.size > 1) "s" else ""})" else ""
-                    _statusBannerMessage.value = "Ruta a ${dest.title}$stopsMsg: ${(first.distanceKm * 10.0).roundToInt() / 10.0} km (~${first.expectedMinutes} min)"
+                    val offlineNote = if (first.isOfflineFallback) " · Sin cobertura (Enlace directo offline)" else ""
+                    _statusBannerMessage.value = "Ruta a ${dest.title}$stopsMsg: ${(first.distanceKm * 10.0).roundToInt() / 10.0} km (~${first.expectedMinutes} min)$offlineNote"
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -630,14 +688,19 @@ class EnduController {
                     color = TrackColor.CYAN,
                     customSingleLabel = "Enlace"
                 )
-                _approachRoadRoute.value = routes.firstOrNull()
+                val firstApproach = routes.firstOrNull()
+                _approachRoadRoute.value = firstApproach
                 _trackProgress.value = null
                 _isCalculatingApproach.value = false
+
+                if (firstApproach?.isOfflineFallback == true) {
+                    _statusBannerMessage.value = "Sin cobertura: enlace directo offline activado (${(firstApproach.distanceKm * 10.0).roundToInt() / 10.0} km)"
+                }
 
                 if (autoStart) {
                     startNavigation()
                 } else {
-                    val allCoords = (routes.firstOrNull()?.coordinates ?: emptyList()) + route.points.map { it.coordinate }
+                    val allCoords = (firstApproach?.coordinates ?: emptyList()) + route.points.map { it.coordinate }
                     fitCoordinates(allCoords)
                 }
             } catch (e: CancellationException) {
@@ -979,8 +1042,42 @@ class EnduController {
 
     // --- Pantalla Moto (Streaming H.264 / EasyConn) ---
 
+    fun setBikeSheetOpen(open: Boolean) {
+        _isBikeSheetOpen.value = open
+        if (open) {
+            _wifiSnapshot.value = getWifiSnapshot()
+            refreshStaticPreview()
+        }
+    }
+
+    fun connectToSavedBikeWifi() {
+        val qr = _bikeQr.value ?: return
+        manuallyStoppedOnCurrentBikeWifi = false
+        startBikeStream()
+        logBike("Guardando / conectando al Wi-Fi de la moto: ${qr.ssid}...")
+        connectToBikeWifi(qr.ssid, qr.password) { ok, message ->
+            logBike(message)
+            if (ok) {
+                _wifiSnapshot.value = getWifiSnapshot()
+                startBikeStream()
+            } else {
+                _statusBannerMessage.value = message
+            }
+            showPlatformToast(message)
+        }
+    }
+
     fun startBikeStream() {
-        if (bikeLink?.isOpen == true) return
+        manuallyStoppedOnCurrentBikeWifi = false
+        val nowInitMs = Clock.System.now().toEpochMilliseconds()
+        bikeSearchResetAtMs = nowInitMs
+        forceImmediateKnock = true
+
+        if (bikeLink?.isOpen == true) {
+            _bikeSearchRemainingSeconds.value = 180
+            updateBackgroundKeepAlive()
+            return
+        }
 
         val card = PhoneCard(
             uuid = bikeCrypto.uuid,
@@ -1006,10 +1103,15 @@ class EnduController {
             override fun log(line: String) = logBike(line)
             override fun state(state: BikeState) {
                 _bikeState.value = state
+                if (state == BikeState.SHOWING || state == BikeState.GREETED || state == BikeState.CLOSED) {
+                    _bikeSearchRemainingSeconds.value = null
+                }
                 updateBackgroundKeepAlive()
             }
             override fun gone(why: String) {
-                logBike("Sesión finalizada: $why")
+                bikeSearchResetAtMs = Clock.System.now().toEpochMilliseconds()
+                forceImmediateKnock = true
+                logBike("Sesión interrumpida ($why) · Esperando reconexión automática...")
                 updateBackgroundKeepAlive()
             }
         }
@@ -1025,44 +1127,90 @@ class EnduController {
         link.open()
         refreshStaticPreview()
 
-        scope.launch {
-            val snap = getWifiSnapshot()
-            if (snap != null) {
-                _wifiSnapshot.value = snap
-            }
-            val knockCandidates = listOfNotNull(
-                snap?.gatewayCandidateIP,
-                "192.168.43.1",
-                "192.168.49.1"
-            ).distinct()
+        bikeSupervisorJob?.cancel()
+        bikeSupervisorJob = scope.launch {
+            val idleTimeoutMs = 180_000L // 3 minutos de búsqueda activa -> pasa a escucha pasiva sin gasto de batería
+            var lastKnockMs = 0L
+            var pausedLogged = false
 
-            for (candidateIp in knockCandidates) {
-                if (!link.isOpen || _bikeState.value != BikeState.LISTENING) break
-                logBike("Llamando a pantalla TFT (knock) en $candidateIp:10930...")
-                if (link.knock(candidateIp)) break
+            while (isActive && link.isOpen) {
+                val curState = _bikeState.value
+                val nowMs = Clock.System.now().toEpochMilliseconds()
+
+                if (curState == BikeState.SHOWING || curState == BikeState.GREETED) {
+                    bikeSearchResetAtMs = nowMs
+                    _bikeSearchRemainingSeconds.value = null
+                    lastKnockMs = 0L
+                    pausedLogged = false
+                } else {
+                    val snap = getWifiSnapshot()
+                    if (snap != null) {
+                        _wifiSnapshot.value = snap
+                    }
+                    val onBikeWifi = snap?.isLikelyBikeWifi(_bikeQr.value) == true
+                    if (onBikeWifi) {
+                        // Mientras estemos conectados al Wi-Fi de la moto, mantener activo el intento de llamada
+                        bikeSearchResetAtMs = nowMs
+                        pausedLogged = false
+                    }
+
+                    val elapsedMs = (nowMs - bikeSearchResetAtMs).coerceAtLeast(0L)
+                    if (!onBikeWifi && elapsedMs >= idleTimeoutMs) {
+                        if (_bikeSearchRemainingSeconds.value != null) {
+                            _bikeSearchRemainingSeconds.value = null
+                            updateBackgroundKeepAlive()
+                        }
+                        if (!pausedLogged) {
+                            pausedLogged = true
+                            logBike("Búsqueda activa en pausa por ahorro de batería (puertos 10920-10922 siguen abiertos esperando conexión Wi-Fi)")
+                        }
+                    } else {
+                        pausedLogged = false
+                        _bikeSearchRemainingSeconds.value = ((idleTimeoutMs - elapsedMs) / 1000L).toInt().coerceAtLeast(1)
+
+                        if (forceImmediateKnock || nowMs - lastKnockMs >= 4000L) {
+                            val isFirstAttempt = (lastKnockMs == 0L || forceImmediateKnock)
+                            forceImmediateKnock = false
+                            lastKnockMs = nowMs
+                            val knockCandidates = listOfNotNull(
+                                snap?.gatewayCandidateIP,
+                                "192.168.43.1",
+                                "192.168.49.1"
+                            ).distinct()
+
+                            for (candidateIp in knockCandidates) {
+                                if (!link.isOpen || _bikeState.value != BikeState.LISTENING) break
+                                if (isFirstAttempt) {
+                                    logBike("Llamando a pantalla TFT (knock) en $candidateIp:10930...")
+                                }
+                                if (link.knock(candidateIp, quiet = !isFirstAttempt)) break
+                            }
+                        }
+                    }
+                }
+                delay(1000)
             }
         }
     }
 
     private fun isAllowedBikeConnection(fromIp: String): Boolean {
         if (_allowLocalLanTesting.value) return true
+        val cleanIp = fromIp.removePrefix("::ffff:")
         val expectedGateway = _wifiSnapshot.value?.gatewayCandidateIP
-        val allowed = (!expectedGateway.isNullOrEmpty() && fromIp == expectedGateway) ||
-            fromIp == "127.0.0.1" ||
-            fromIp == "::1" ||
-            fromIp.endsWith(".1") ||
-            fromIp.startsWith("192.168.43.") ||
-            fromIp.startsWith("192.168.49.") ||
-            fromIp.startsWith("192.168.5.") ||
-            fromIp.startsWith("192.168.8.") ||
-            fromIp.startsWith("192.168.10.") ||
-            fromIp.startsWith("192.168.100.") ||
-            fromIp.startsWith("192.168.137.") ||
-            fromIp.startsWith("172.20.10.")
+        val allowed = cleanIp.isEmpty() ||
+            (!expectedGateway.isNullOrEmpty() && cleanIp == expectedGateway) ||
+            cleanIp == "127.0.0.1" ||
+            cleanIp == "::1" ||
+            cleanIp.endsWith(".1") ||
+            cleanIp.startsWith("192.168.") ||
+            cleanIp.startsWith("10.") ||
+            cleanIp.startsWith("172.") ||
+            cleanIp.startsWith("169.254.") ||
+            cleanIp.startsWith("fe80:")
         if (!allowed) {
-            val isNew = rejectedIpsLock.withLock { rejectedIps.add(fromIp) }
+            val isNew = rejectedIpsLock.withLock { rejectedIps.add(cleanIp) }
             if (isNew) {
-                val msg = "Conexión bloqueada ($fromIp): activa «Aceptar conexión de simulador en red local»"
+                val msg = "Conexión bloqueada ($cleanIp): activa «Aceptar conexión de simulador en red local»"
                 _statusBannerMessage.value = msg
                 showPlatformToast(msg)
             }
@@ -1070,7 +1218,13 @@ class EnduController {
         return allowed
     }
 
-    fun stopBikeStream() {
+    fun stopBikeStream(reason: String? = null) {
+        if (reason == null) {
+            manuallyStoppedOnCurrentBikeWifi = true
+        }
+        bikeSupervisorJob?.cancel()
+        bikeSupervisorJob = null
+        _bikeSearchRemainingSeconds.value = null
         rejectedIpsLock.withLock { rejectedIps.clear() }
         bikeLink?.close()
         bikeLink = null
@@ -1078,6 +1232,10 @@ class EnduController {
         encoder = null
         _bikeState.value = BikeState.CLOSED
         updateBackgroundKeepAlive()
+        if (!reason.isNullOrBlank()) {
+            _statusBannerMessage.value = reason
+            showPlatformToast(reason)
+        }
     }
 
     fun saveScannedQr(text: String): Boolean {
@@ -1086,8 +1244,17 @@ class EnduController {
             _bikeQr.value = parsed
             persistSettings()
             logBike("QR reconocido: ${parsed.name} (SSID: ${parsed.ssid})")
-            _statusBannerMessage.value = "QR reconocido: Red «${parsed.ssid}»"
-            showPlatformToast("QR guardado: ${parsed.ssid}")
+            _statusBannerMessage.value = "QR reconocido: Conectando a «${parsed.ssid}»..."
+            connectToBikeWifi(parsed.ssid, parsed.password) { ok, message ->
+                logBike(message)
+                if (ok) {
+                    _wifiSnapshot.value = getWifiSnapshot()
+                } else {
+                    _statusBannerMessage.value = message
+                }
+                showPlatformToast(message)
+            }
+            startBikeStream()
             return true
         }
         return false
@@ -1141,36 +1308,7 @@ class EnduController {
         val snap = buildTftRouteHudSnapshot()
         val bikeLayer = effectiveBikeLayer
 
-        // Actualizar preview en directo periódicamente (~1.5 veces por segundo)
-        if (++previewDecimator % 10 == 0) {
-            val seq = previewSeqLock.withLock { ++previewRequestSeq }
-            scope.launch(Dispatchers.Default) {
-                val preview = bikeMapRenderer.renderPreview(
-                    width = 296,
-                    height = 408,
-                    config = _bikeMapConfig.value,
-                    rider = riderTelemetry.value,
-                    layer = bikeLayer,
-                    activeRoute = selectedRoute,
-                    roadRouteCoordinates = snap.roadRouteCoordinates,
-                    isNavigating = _isNavigating.value,
-                    remainingKm = snap.remainingKm,
-                    nextInstruction = snap.nextInstruction,
-                    waypoints = snap.waypoints,
-                    intermediateStops = snap.intermediateStops,
-                    remainingMinutes = snap.remainingMinutes,
-                    routeTypeLabel = snap.routeTypeLabel
-                )
-                if (preview != null) {
-                    val shouldPublish = previewSeqLock.withLock { seq == previewRequestSeq }
-                    if (shouldPublish) {
-                        _livePreviewBitmap.value = preview
-                    }
-                }
-            }
-        }
-
-        return bikeMapRenderer.renderRgba(
+        val rgba = bikeMapRenderer.renderRgba(
             width = width,
             height = height,
             config = _bikeMapConfig.value,
@@ -1186,6 +1324,32 @@ class EnduController {
             remainingMinutes = snap.remainingMinutes,
             routeTypeLabel = snap.routeTypeLabel
         )
+
+        // Actualizar preview periódicamente en el mismo hilo tras renderRgba para evitar contención de lock
+        if (_isBikeSheetOpen.value && ++previewDecimator % 15 == 0) {
+            val preview = bikeMapRenderer.renderPreview(
+                width = 296,
+                height = 408,
+                config = _bikeMapConfig.value,
+                rider = riderTelemetry.value,
+                layer = bikeLayer,
+                activeRoute = selectedRoute,
+                roadRouteCoordinates = snap.roadRouteCoordinates,
+                isNavigating = _isNavigating.value,
+                remainingKm = snap.remainingKm,
+                nextInstruction = snap.nextInstruction,
+                waypoints = snap.waypoints,
+                intermediateStops = snap.intermediateStops,
+                remainingMinutes = snap.remainingMinutes,
+                routeTypeLabel = snap.routeTypeLabel
+            )
+            if (preview != null) {
+                previewSeqLock.withLock { ++previewRequestSeq }
+                _livePreviewBitmap.value = preview
+            }
+        }
+
+        return rgba
     }
 
     fun setBikeZoom(zoom: Int) {
@@ -1208,6 +1372,26 @@ class EnduController {
 
     fun setBikeAutoZoomBySpeed(enabled: Boolean) {
         _bikeMapConfig.value = _bikeMapConfig.value.copy(autoZoomBySpeed = enabled)
+        persistSettings()
+        refreshStaticPreview()
+    }
+
+    fun setBikeAutoZoomConfig(
+        lowSpeedKmh: Int,
+        midSpeedKmh: Int,
+        lowZoom: Int,
+        midZoom: Int,
+        highZoom: Int
+    ) {
+        val clampedLowSpd = lowSpeedKmh.coerceIn(5, 120)
+        val clampedMidSpd = midSpeedKmh.coerceIn(clampedLowSpd + 10, 180)
+        _bikeMapConfig.value = _bikeMapConfig.value.copy(
+            autoZoomLowSpeedKmh = clampedLowSpd,
+            autoZoomMidSpeedKmh = clampedMidSpd,
+            autoZoomLowLevel = lowZoom.coerceIn(10, 18),
+            autoZoomMidLevel = midZoom.coerceIn(10, 18),
+            autoZoomHighLevel = highZoom.coerceIn(10, 18)
+        )
         persistSettings()
         refreshStaticPreview()
     }

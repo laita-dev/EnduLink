@@ -5,6 +5,7 @@ import VideoToolbox
 import CoreMedia
 import CoreVideo
 import AVFoundation
+import NetworkExtension
 import QuartzCore
 import UIKit
 
@@ -286,18 +287,32 @@ final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
 
         CVPixelBufferLockBaseAddress(pixelBuffer, [])
         if let dstRaw = CVPixelBufferGetBaseAddress(pixelBuffer) {
-            let dstBase = dstRaw.assumingMemoryBound(to: UInt8.self)
             let dstStride = CVPixelBufferGetBytesPerRow(pixelBuffer)
             let srcStride = w * 4
-            for row in 0..<h {
-                let srcRow = srcBase.advanced(by: row * srcStride)
-                let dstRow = dstBase.advanced(by: row * dstStride)
-                for col in 0..<w {
-                    let px = col * 4
-                    dstRow[px]     = srcRow[px + 2] // B
-                    dstRow[px + 1] = srcRow[px + 1] // G
-                    dstRow[px + 2] = srcRow[px]     // R
-                    dstRow[px + 3] = 255            // A
+            if ((Int(bitPattern: srcBase) & 3) == 0 && (Int(bitPattern: dstRaw) & 3) == 0 && (dstStride & 3) == 0) {
+                let srcWords = UnsafeRawPointer(srcBase).assumingMemoryBound(to: UInt32.self)
+                let dstWords = dstRaw.assumingMemoryBound(to: UInt32.self)
+                let dstWordStride = dstStride >> 2
+                for row in 0..<h {
+                    let srcRow = srcWords.advanced(by: row * w)
+                    let dstRow = dstWords.advanced(by: row * dstWordStride)
+                    for col in 0..<w {
+                        let px = srcRow[col]
+                        dstRow[col] = ((px & 0x00FF0000) >> 16) | ((px & 0x000000FF) << 16) | (px & 0x0000FF00) | 0xFF000000
+                    }
+                }
+            } else {
+                let dstBase = dstRaw.assumingMemoryBound(to: UInt8.self)
+                for row in 0..<h {
+                    let srcRow = srcBase.advanced(by: row * srcStride)
+                    let dstRow = dstBase.advanced(by: row * dstStride)
+                    for col in 0..<w {
+                        let px = col * 4
+                        dstRow[px]     = srcRow[px + 2] // B
+                        dstRow[px + 1] = srcRow[px + 1] // G
+                        dstRow[px + 2] = srcRow[px]     // R
+                        dstRow[px + 3] = 255            // A
+                    }
                 }
             }
         }
@@ -898,6 +913,51 @@ final class IosQrScannerBridgeImpl: NSObject, IosQrScannerBridge {
         DispatchQueue.main.async {
             guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
             UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        }
+    }
+
+    func connectToWifi(ssid: String, password: String, callback: IosWifiConnectCallback) {
+        let cleanSsid = ssid.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !password.isEmpty {
+            DispatchQueue.main.async {
+                UIPasteboard.general.string = password
+            }
+        }
+        guard !cleanSsid.isEmpty else {
+            DispatchQueue.main.async {
+                callback.onWifiConnectResult(success: false, message: "SSID vacío")
+            }
+            return
+        }
+
+        let config = password.isEmpty
+            ? NEHotspotConfiguration(ssid: cleanSsid)
+            : NEHotspotConfiguration(ssid: cleanSsid, passphrase: password, isWEP: false)
+        config.joinOnce = false
+
+        NEHotspotConfigurationManager.shared.apply(config) { error in
+            DispatchQueue.main.async {
+                if let err = error as NSError? {
+                    if err.domain == NEHotspotConfigurationErrorDomain &&
+                        err.code == NEHotspotConfigurationError.alreadyAssociated.rawValue {
+                        callback.onWifiConnectResult(
+                            success: true,
+                            message: "Ya conectado al Wi-Fi de la moto (\(cleanSsid))"
+                        )
+                    } else {
+                        let passHint = password.isEmpty ? "" : " (clave '\(password)' copiada)"
+                        callback.onWifiConnectResult(
+                            success: false,
+                            message: "Únete a \(cleanSsid) en Ajustes > Wi-Fi\(passHint)"
+                        )
+                    }
+                } else {
+                    callback.onWifiConnectResult(
+                        success: true,
+                        message: "Conectado automáticamente al Wi-Fi de la moto (\(cleanSsid))"
+                    )
+                }
+            }
         }
     }
 

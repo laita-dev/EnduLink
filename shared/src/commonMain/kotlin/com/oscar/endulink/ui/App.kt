@@ -77,6 +77,7 @@ fun App() {
     val livePreviewBitmap by controller.livePreviewBitmap.collectAsState()
     val allowLocalLanTesting by controller.allowLocalLanTesting.collectAsState()
     val wifiSnapshot by controller.wifiSnapshot.collectAsState()
+    val bikeSearchRemainingSeconds by controller.bikeSearchRemainingSeconds.collectAsState()
     val offlineProgress by controller.offlineProgress.collectAsState()
     val downloadedPackages by controller.tileStore.downloadedPackages.collectAsState()
     val tileRevision by controller.tileRevision.collectAsState()
@@ -401,6 +402,8 @@ fun App() {
                 if (showSearchSheet) {
                     PlaceSearchSheet(
                         riderCoord = rider.coordinate ?: center,
+                        routes = routes,
+                        waypoints = quickMarkers,
                         title = if (isSearchingForStop) "Añadir Parada Intermedia" else "Buscar Destino",
                         hasActiveRoute = (searchPin != null || activeRoute != null),
                         isSearchingForStop = isSearchingForStop,
@@ -522,6 +525,10 @@ fun App() {
                     )
                 }
 
+                LaunchedEffect(showBikeSheet) {
+                    controller.setBikeSheetOpen(showBikeSheet)
+                }
+
                 if (showBikeSheet) {
                     LaunchedEffect(layer, bikeMapConfig, activeRoute, quickMarkers, intermediateWaypoints) {
                         while (true) {
@@ -549,11 +556,16 @@ fun App() {
                         onSetOrientation = { controller.setBikeOrientation(it) },
                         onSetTileMagnification = { controller.setBikeTileMagnification(it) },
                         onSetAutoZoomBySpeed = { controller.setBikeAutoZoomBySpeed(it) },
+                        onSetAutoZoomConfig = { lowSpd, midSpd, lowZ, midZ, highZ ->
+                            controller.setBikeAutoZoomConfig(lowSpd, midSpd, lowZ, midZ, highZ)
+                        },
                         onSetBitrate = { controller.setBikeBitrate(it) },
                         onSetBikeMapLayer = { controller.setBikeMapLayer(it) },
                         onSetAllowLocalLanTesting = { controller.setAllowLocalLanTesting(it) },
                         onSaveQr = { controller.saveScannedQr(it) },
                         onClearQr = { controller.clearScannedQr() },
+                        onConnectBikeWifi = { controller.connectToSavedBikeWifi() },
+                        searchRemainingSeconds = bikeSearchRemainingSeconds,
                         onStartStream = { controller.startBikeStream() },
                         onStopStream = { controller.stopBikeStream() },
                         onClearLogs = { controller.clearBikeLogs() },
