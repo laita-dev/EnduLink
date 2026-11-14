@@ -98,7 +98,7 @@ actual class LocationProvider actual constructor() : NSObject(), CLLocationManag
         val nowMs = Clock.System.now().toEpochMilliseconds()
         if (prevCoord != null && lastLocationMs > 0L) {
             val dtSec = ((nowMs - lastLocationMs) / 1000.0).coerceAtLeast(0.1)
-            val jumpMeters = prevCoord.distanceToMeters(coord)
+            val jumpMeters = prevCoord.distanceTo(coord)
             if (dtSec < 5.0 && jumpMeters > maxOf(160.0, dtSec * 65.0) && acc > 25.0) {
                 return
             }
