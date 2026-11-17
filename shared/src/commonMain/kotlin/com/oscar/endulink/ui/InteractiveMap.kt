@@ -76,7 +76,6 @@ fun InteractiveMap(
     val labelLayoutCache = remember { HashMap<String, TextLayoutResult>() }
     val routeDrawPath = remember { Path() }
     val chevronDrawPath = remember { Path() }
-    val recordedDrawPath = remember { Path() }
     val currentOnSelectWaypoint by rememberUpdatedState(onSelectWaypoint)
     val currentOnSelectRoute by rememberUpdatedState(onSelectRoute)
     val currentIsPickingOnMap by rememberUpdatedState(isPickingOnMap)
@@ -310,20 +309,27 @@ fun InteractiveMap(
 
             // 3. Traza grabada en directo (REC)
             if (recordedCoords.size >= 2) {
-                recordedDrawPath.reset()
-                val first = geoToScreen(recordedCoords[0])
-                recordedDrawPath.moveTo(first.x, first.y)
-                var prevX = first.x
-                var prevY = first.y
-                val lastRecIdx = recordedCoords.size - 1
-                for (i in 1..lastRecIdx) {
-                    val p = geoToScreen(recordedCoords[i])
-                    if (i < lastRecIdx && hypot(p.x - prevX, p.y - prevY) < 1.5f) continue
-                    recordedDrawPath.lineTo(p.x, p.y)
-                    prevX = p.x
-                    prevY = p.y
-                }
-                drawPath(recordedDrawPath, color = EnduPalette.Danger, style = Stroke(width = 6f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawRoutePolyline(
+                    coords = recordedCoords,
+                    normX = null,
+                    normY = null,
+                    worldN = worldN,
+                    centerFracX = centerFracX,
+                    centerFracY = centerFracY,
+                    tileSizePx = tileSizePx,
+                    screenCenter = screenCenter,
+                    viewMinX = viewMinX,
+                    viewMaxX = viewMaxX,
+                    viewMinY = viewMinY,
+                    viewMaxY = viewMaxY,
+                    routePath = routeDrawPath,
+                    chevronPath = chevronDrawPath,
+                    baseColor = EnduPalette.Danger,
+                    geoToScreen = ::geoToScreen,
+                    isSecondary = false,
+                    showArrows = false,
+                    drawEndpoints = false
+                )
             }
 
             // 4. Rutas alternativas por carretera OSRM (en gris/azul tenue si hay varias)
@@ -332,8 +338,8 @@ fun InteractiveMap(
                     if (idx != selectedOptionIdx) {
                         drawRoutePolyline(
                             coords = opt.coordinates,
-                            normX = null,
-                            normY = null,
+                            normX = opt.asGPXRoute.normMercatorX,
+                            normY = opt.asGPXRoute.normMercatorY,
                             worldN = worldN,
                             centerFracX = centerFracX,
                             centerFracY = centerFracY,
@@ -358,8 +364,8 @@ fun InteractiveMap(
             if (activeRoad != null) {
                 drawRoutePolyline(
                     coords = activeRoad.coordinates,
-                    normX = null,
-                    normY = null,
+                    normX = activeRoad.asGPXRoute.normMercatorX,
+                    normY = activeRoad.asGPXRoute.normMercatorY,
                     worldN = worldN,
                     centerFracX = centerFracX,
                     centerFracY = centerFracY,
@@ -378,11 +384,12 @@ fun InteractiveMap(
             }
 
             // 6. Enlace activo por carretera al track GPX
-            if (approachRoad != null) {
+            val curApproachRoad = approachRoad
+            if (curApproachRoad != null) {
                 drawRoutePolyline(
-                    coords = approachRoad!!.coordinates,
-                    normX = null,
-                    normY = null,
+                    coords = curApproachRoad.coordinates,
+                    normX = curApproachRoad.asGPXRoute.normMercatorX,
+                    normY = curApproachRoad.asGPXRoute.normMercatorY,
                     worldN = worldN,
                     centerFracX = centerFracX,
                     centerFracY = centerFracY,
@@ -617,7 +624,8 @@ private fun DrawScope.drawRoutePolyline(
     baseColor: Color,
     geoToScreen: (GeoCoord) -> Offset,
     isSecondary: Boolean,
-    showArrows: Boolean = !isSecondary
+    showArrows: Boolean = !isSecondary,
+    drawEndpoints: Boolean = !isSecondary
 ) {
     val hasNorm = normX != null && normY != null && normX.size == coords.size && normY.size == coords.size
     val count = coords.size
@@ -757,14 +765,16 @@ private fun DrawScope.drawRoutePolyline(
             )
         }
 
-        // Inicio (Verde) y Fin (Rojo)
-        val startPos = Offset(startX, startY)
-        drawCircle(color = Color.Black, radius = 6.5.dp.toPx(), center = startPos)
-        drawCircle(color = EnduPalette.Success, radius = 5.dp.toPx(), center = startPos)
+        if (drawEndpoints) {
+            // Inicio (Verde) y Fin (Rojo)
+            val startPos = Offset(startX, startY)
+            drawCircle(color = Color.Black, radius = 6.5.dp.toPx(), center = startPos)
+            drawCircle(color = EnduPalette.Success, radius = 5.dp.toPx(), center = startPos)
 
-        val endPos = Offset(endX, endY)
-        drawCircle(color = Color.Black, radius = 6.5.dp.toPx(), center = endPos)
-        drawCircle(color = EnduPalette.Danger, radius = 5.dp.toPx(), center = endPos)
+            val endPos = Offset(endX, endY)
+            drawCircle(color = Color.Black, radius = 6.5.dp.toPx(), center = endPos)
+            drawCircle(color = EnduPalette.Danger, radius = 5.dp.toPx(), center = endPos)
+        }
     }
 }
 

@@ -69,7 +69,11 @@ data class WifiSnapshot(
     val ssid: String? = null
 ) {
     fun isLikelyBikeWifi(savedQr: BikeQr? = null): Boolean {
-        if (gatewayCandidateIP == "192.168.43.1" || gatewayCandidateIP == "192.168.49.1") {
+        if (gatewayCandidateIP == "192.168.43.1" ||
+            gatewayCandidateIP == "192.168.49.1" ||
+            gatewayCandidateIP == "192.168.169.1" ||
+            gatewayCandidateIP == "192.168.10.1"
+        ) {
             return true
         }
         val cleanSsid = ssid?.trim()?.trim('"').orEmpty()

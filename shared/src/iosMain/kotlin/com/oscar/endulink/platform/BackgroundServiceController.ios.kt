@@ -12,6 +12,7 @@ actual object BackgroundServiceController {
     private var isKeepAliveActive = false
 
     actual fun startKeepAlive() {
+        IosH264BridgeHolder.bridge?.setKeepAlive(true)
         if (isKeepAliveActive) return
         try {
             val session = AVAudioSession.sharedInstance()
@@ -26,6 +27,7 @@ actual object BackgroundServiceController {
     }
 
     actual fun stopKeepAlive() {
+        IosH264BridgeHolder.bridge?.setKeepAlive(false)
         if (!isKeepAliveActive) return
         try {
             val session = AVAudioSession.sharedInstance()

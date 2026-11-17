@@ -14,6 +14,7 @@ import platform.posix.*
 
 interface IosWifiBridge {
     fun currentWifiIp(): String?
+    fun currentWifiSsid(): String?
 }
 
 object IosWifiBridgeHolder {
@@ -86,7 +87,11 @@ actual fun getWifiSnapshot(): WifiSnapshot? {
     val parts = ip.split(".")
     if (parts.size == 4) {
         val gateway = "${parts[0]}.${parts[1]}.${parts[2]}.1"
-        return WifiSnapshot(phoneIP = ip, gatewayCandidateIP = gateway)
+        return WifiSnapshot(
+            phoneIP = ip,
+            gatewayCandidateIP = gateway,
+            ssid = bridge?.currentWifiSsid()
+        )
     }
     return null
 }

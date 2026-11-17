@@ -129,6 +129,22 @@ class BikeWireTest {
         assertEquals("HJ-5G-RIEJU307", wifiQr.name)
         assertEquals("clave;123", wifiQr.password)
 
+        val noPwdCarbit = BikeQr.parse("http://www.carbit.com.cn/down6/index.html?name=HJ-064441&modelid=37512")
+        assertNotNull(noPwdCarbit)
+        assertEquals("HJ-064441", noPwdCarbit.name)
+        assertEquals("DIRECT-HJ-5G-064441", noPwdCarbit.ssid)
+        assertEquals("12345678", noPwdCarbit.password)
+
+        val accountQr = BikeQr.parse("HJ-064441")
+        assertNotNull(accountQr)
+        assertEquals("DIRECT-HJ-5G-064441", accountQr.ssid)
+        assertEquals("12345678", accountQr.password)
+
+        val stdWifi = BikeQr.parse("WIFI:S:DIRECT-HJ-5G-064441;T:WPA;P:12345678;;")
+        assertNotNull(stdWifi)
+        assertEquals("DIRECT-HJ-5G-064441", stdWifi.ssid)
+        assertEquals("12345678", stdWifi.password)
+
         assertNull(BikeQr.parse("texto cualquiera sin formato"))
     }
 

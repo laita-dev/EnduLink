@@ -25,10 +25,16 @@ data class BikeQr(
             }
 
             val qIndex = trimmed.indexOf('?')
-            if (qIndex == -1) {
+            val hashIndex = trimmed.indexOf('#')
+            val queryStart = when {
+                qIndex != -1 -> qIndex + 1
+                hashIndex != -1 && trimmed.indexOf('=', hashIndex) != -1 -> hashIndex + 1
+                else -> -1
+            }
+            if (queryStart == -1) {
                 return parseAccountOrSsidCode(trimmed)
             }
-            val query = trimmed.substring(qIndex + 1)
+            val query = trimmed.substring(queryStart)
             if (query.isEmpty()) return null
 
             val fields = mutableMapOf<String, String>()
@@ -40,21 +46,35 @@ data class BikeQr(
                 fields[parts[0].lowercase()] = decoded
             }
 
-            val ssidRaw = fields["ssid"] ?: ""
-            val nameRaw = fields["name"] ?: ""
+            val ssidRaw = fields["ssid"]?.trim().orEmpty()
+            val nameRaw = fields["name"]?.trim().orEmpty()
             val resolvedName = when {
                 nameRaw.isNotEmpty() -> nameRaw
-                ssidRaw.startsWith("DIRECT-") -> ssidRaw.removePrefix("DIRECT-")
+                ssidRaw.startsWith("DIRECT-", ignoreCase = true) -> ssidRaw.substring(7)
                 else -> ssidRaw
             }
 
             if (resolvedName.isEmpty()) return null
-            val resolvedSsid = if (ssidRaw.isEmpty()) "DIRECT-$resolvedName" else ssidRaw
+            val resolvedSsid = when {
+                ssidRaw.isNotEmpty() -> ssidRaw
+                resolvedName.startsWith("HJ-", ignoreCase = true) &&
+                    !resolvedName.startsWith("HJ-5G-", ignoreCase = true) ->
+                    "DIRECT-HJ-5G-${resolvedName.substring(3)}"
+                else -> "DIRECT-$resolvedName"
+            }
+
+            val rawPassword = (fields["pwd"] ?: fields["password"] ?: fields["pw"]).orEmpty()
+            val authMode = fields["auth"]?.trim()?.uppercase().orEmpty()
+            val resolvedPassword = if (rawPassword.isEmpty() && authMode != "OPEN" && authMode != "NONE") {
+                "12345678"
+            } else {
+                rawPassword
+            }
 
             return BikeQr(
                 name = resolvedName,
                 ssid = resolvedSsid,
-                password = fields["pwd"] ?: fields["password"] ?: fields["pw"] ?: "",
+                password = resolvedPassword,
                 model = fields["modelid"] ?: "",
                 serial = fields["sn"] ?: ""
             )

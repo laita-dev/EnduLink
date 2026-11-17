@@ -239,7 +239,8 @@ class EnduController {
             var tick = 0
             var wasOnBikeWifi = false
             while (isActive) {
-                if (tick % 2 == 0) {
+                val pollIntervalTicks = if (_bikeState.value == BikeState.SHOWING) 6 else 2
+                if (tick % pollIntervalTicks == 0) {
                     val snap = getWifiSnapshot()
                     _wifiSnapshot.value = snap
                     val onBikeWifi = snap?.isLikelyBikeWifi(_bikeQr.value) == true
@@ -1175,7 +1176,8 @@ class EnduController {
                             val knockCandidates = listOfNotNull(
                                 snap?.gatewayCandidateIP,
                                 "192.168.43.1",
-                                "192.168.49.1"
+                                "192.168.49.1",
+                                "192.168.169.1"
                             ).distinct()
 
                             for (candidateIp in knockCandidates) {

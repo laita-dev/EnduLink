@@ -20,6 +20,7 @@ interface IosH264HardwareBridge {
     fun startSession(width: Int, height: Int, fps: Int, bitrateBps: Int): Boolean
     fun encodeRgbaPtr(rgbaPtr: Long, width: Int, height: Int, ptsMs: Long, forceKeyFrame: Boolean): String?
     fun stopSession()
+    fun setKeepAlive(active: Boolean)
 }
 
 object IosH264BridgeHolder {

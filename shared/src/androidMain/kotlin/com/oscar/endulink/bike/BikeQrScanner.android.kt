@@ -222,12 +222,19 @@ actual fun connectToBikeWifi(
         try {
             val suggestionBuilder = WifiNetworkSuggestion.Builder()
                 .setSsid(cleanSsid)
+                .setIsAppInteractionRequired(false)
             if (password.isNotEmpty()) {
                 suggestionBuilder.setWpa2Passphrase(password)
             }
             val built = suggestionBuilder.build()
             suggestion = built
+            try {
+                wifiManager.removeNetworkSuggestions(listOf(built))
+            } catch (_: Exception) {}
             wifiManager.addNetworkSuggestions(listOf(built))
+            try {
+                wifiManager.startScan()
+            } catch (_: Exception) {}
         } catch (_: Exception) {}
 
         // En Android 11+ (API 30+), ofrecer guardar la red directamente en los Ajustes Wi-Fi del sistema

@@ -373,6 +373,14 @@ final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
         return pb
     }
 
+    func setKeepAlive(active: Bool) {
+        if active {
+            BackgroundKeepAlive.shared.start()
+        } else {
+            BackgroundKeepAlive.shared.stop()
+        }
+    }
+
     func stopSession() {
         lock.lock()
         defer { lock.unlock() }
@@ -477,6 +485,26 @@ final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
 }
 
 final class IosWifiBridgeImpl: NSObject, IosWifiBridge {
+    private static let ssidLock = NSLock()
+    private static var lastAssociatedBikeSsid: String? = nil
+
+    static func recordAssociatedBikeSsid(_ ssid: String?) {
+        ssidLock.lock()
+        lastAssociatedBikeSsid = ssid
+        ssidLock.unlock()
+    }
+
+    func currentWifiSsid() -> String? {
+        guard currentWifiIp() != nil else {
+            Self.recordAssociatedBikeSsid(nil)
+            return nil
+        }
+        Self.ssidLock.lock()
+        let ssid = Self.lastAssociatedBikeSsid
+        Self.ssidLock.unlock()
+        return ssid
+    }
+
     func currentWifiIp() -> String? {
         var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
         guard Darwin.getifaddrs(&ifaddrPtr) == 0, let first = ifaddrPtr else {
@@ -940,6 +968,7 @@ final class IosQrScannerBridgeImpl: NSObject, IosQrScannerBridge {
                 if let err = error as NSError? {
                     if err.domain == NEHotspotConfigurationErrorDomain &&
                         err.code == NEHotspotConfigurationError.alreadyAssociated.rawValue {
+                        IosWifiBridgeImpl.recordAssociatedBikeSsid(cleanSsid)
                         callback.onWifiConnectResult(
                             success: true,
                             message: "Ya conectado al Wi-Fi de la moto (\(cleanSsid))"
@@ -952,6 +981,7 @@ final class IosQrScannerBridgeImpl: NSObject, IosQrScannerBridge {
                         )
                     }
                 } else {
+                    IosWifiBridgeImpl.recordAssociatedBikeSsid(cleanSsid)
                     callback.onWifiConnectResult(
                         success: true,
                         message: "Conectado automáticamente al Wi-Fi de la moto (\(cleanSsid))"
