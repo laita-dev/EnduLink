@@ -62,5 +62,43 @@ class TileMathTest {
         assertEquals(1, subX)
         assertEquals(0, subY)
     }
+
+    @Test
+    fun testLazyBoundingBoxSequenceExceedsLegacyLimitWithoutTruncation() {
+        // Región cuyo volumen de teselas supera con creces el antiguo tope de 60_000
+        val largeBbox = MapBoundingBox(
+            minLat = 39.50,
+            maxLat = 41.20,
+            minLon = -2.00,
+            maxLon = 0.50
+        )
+        val seq = BoundingBoxTileSequence(
+            bbox = largeBbox,
+            layer = MapLayer.OSMAND,
+            minZ = 10,
+            maxZ = 15
+        )
+        assertTrue(seq.totalTiles > 60_000)
+
+        val smallBbox = MapBoundingBox(
+            minLat = 40.70,
+            maxLat = 40.75,
+            minLon = -4.05,
+            maxLon = -4.00
+        )
+        val smallSeq = BoundingBoxTileSequence(
+            bbox = smallBbox,
+            layer = MapLayer.TRAIL_OSM,
+            minZ = 11,
+            maxZ = 14
+        )
+        var yielded = 0
+        while (true) {
+            val tile = smallSeq.nextTile() ?: break
+            assertTrue(TileMath.isTileInBoundingBox(tile, smallBbox, 11, 14))
+            yielded++
+        }
+        assertEquals(smallSeq.totalTiles, yielded)
+    }
 }
 

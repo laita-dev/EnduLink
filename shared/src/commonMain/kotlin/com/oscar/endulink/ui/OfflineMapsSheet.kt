@@ -32,8 +32,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
-private const val MAX_TILES_PER_DOWNLOAD = 60_000L
-
 private enum class OfflineSheetTab {
     DOWNLOAD,
     MANAGE
@@ -363,7 +361,7 @@ fun OfflineMapsSheet(
                     )
                 }
                 Spacer(modifier = Modifier.height(5.dp))
-                val zoomOptions = remember { listOf<Int?>(null, 11, 12, 13, 14, 15) }
+                val zoomOptions = remember { listOf<Int?>(null, 11, 12, 13, 14, 15, 16) }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
@@ -520,7 +518,6 @@ fun OfflineMapsSheet(
                             }
                             val estTiles = estimate.first
                             val estBytes = estimate.second
-                            val exceedsLimit = estTiles > MAX_TILES_PER_DOWNLOAD
 
                             Row(
                                 modifier = Modifier
@@ -556,17 +553,11 @@ fun OfflineMapsSheet(
                                     }
                                     Text(
                                         text = "Z${preset.minZoom}–Z$effMaxZ · ~${formatTileCountCompact(estTiles)} teselas · ~${formatBytesCompact(estBytes)}",
-                                        color = if (exceedsLimit) EnduPalette.Warning else EnduPalette.AccentBlue,
+                                        color = EnduPalette.AccentBlue,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium
                                     )
-                                    if (exceedsLimit) {
-                                        Text(
-                                            text = "Supera ${formatTileCountCompact(MAX_TILES_PER_DOWNLOAD)} teselas; elige un zoom menor.",
-                                            color = EnduPalette.Warning,
-                                            fontSize = 10.sp
-                                        )
-                                    } else if (existingEntry != null) {
+                                    if (existingEntry != null) {
                                         Text(
                                             text = "Guardado hasta Z${existingEntry.second.maxZoom} · ${preset.category}",
                                             color = EnduPalette.TextMuted,
@@ -589,10 +580,8 @@ fun OfflineMapsSheet(
                                 ) {
                                     Button(
                                         onClick = { onDownloadRegion(preset, offlineTargetLayer, effMaxZ) },
-                                        enabled = !exceedsLimit,
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isDownloaded) EnduPalette.SurfaceHigh else EnduPalette.Accent,
-                                            disabledContainerColor = EnduPalette.SurfaceHigh.copy(alpha = 0.45f)
+                                            containerColor = if (isDownloaded) EnduPalette.SurfaceHigh else EnduPalette.Accent
                                         ),
                                         shape = RoundedCornerShape(8.dp),
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -606,17 +595,13 @@ fun OfflineMapsSheet(
                                                 RefreshArrowsIcon(color = EnduPalette.TextPrimary, size = 12.dp)
                                             } else {
                                                 DownloadTrayIcon(
-                                                    color = if (exceedsLimit) EnduPalette.TextMuted else Color.White,
+                                                    color = Color.White,
                                                     size = 12.dp
                                                 )
                                             }
                                             Text(
                                                 text = if (isDownloaded) "Actualizar" else "Descargar",
-                                                color = when {
-                                                    exceedsLimit -> EnduPalette.TextMuted
-                                                    isDownloaded -> EnduPalette.TextPrimary
-                                                    else -> Color.White
-                                                },
+                                                color = if (isDownloaded) EnduPalette.TextPrimary else Color.White,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold
                                             )

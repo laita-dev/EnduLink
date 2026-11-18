@@ -153,22 +153,28 @@ class TileStore(
 
         val spec = MapLayer.parseOfflinePackageSpec(packageKey) ?: return
         scope.launch(Dispatchers.Default) {
-            val coveredByRemaining = updated
+            val remainingSameLayer = updated
                 .mapNotNull { MapLayer.parseOfflinePackageSpec(it) }
                 .filter { it.layer == spec.layer }
-                .flatMapTo(HashSet()) { other ->
-                    val otherBbox = MapBoundingBox(other.preset.minLat, other.preset.maxLat, other.preset.minLon, other.preset.maxLon)
-                    TileMath.enumerateBoundingBoxTiles(otherBbox, spec.layer, other.preset.minZoom, other.maxZoom)
+                .map { other ->
+                    Triple(
+                        MapBoundingBox(other.preset.minLat, other.preset.maxLat, other.preset.minLon, other.preset.maxLon),
+                        other.preset.minZoom,
+                        other.maxZoom
+                    )
                 }
 
             val bbox = MapBoundingBox(spec.preset.minLat, spec.preset.maxLat, spec.preset.minLon, spec.preset.maxLon)
-            val tiles = TileMath.enumerateBoundingBoxTiles(bbox, spec.layer, spec.preset.minZoom, spec.maxZoom)
-            for (coord in tiles) {
-                if (coord !in coveredByRemaining) {
+            TileMath.forEachBoundingBoxTile(bbox, spec.layer, spec.preset.minZoom, spec.maxZoom) { coord ->
+                val isCovered = remainingSameLayer.any { (otherBbox, otherMinZ, otherMaxZ) ->
+                    TileMath.isTileInBoundingBox(coord, otherBbox, otherMinZ, otherMaxZ)
+                }
+                if (!isCovered) {
                     memoryCacheLock.withLock { memoryCache.remove(coord) }
                     bitmapCacheLock.withLock { bitmapCache.remove(coord) }
                     TileDiskStorage.deleteDirectory(diskPath(coord))
                 }
+                true
             }
         }
     }
@@ -492,8 +498,8 @@ class TileStore(
         isCancelled = false
         downloadJob = scope.launch(Dispatchers.Default) {
             onProgress(OfflineDownloadProgress(isDownloading = true, label = label, completed = 0, total = 0, failed = 0))
-            val tiles = TileMath.enumerateBoundingBoxTiles(bbox, layer, minZ, maxZ, maxTiles = 60_000)
-            runTileDownloadWorkers(tiles, label, packageKey, onProgress)
+            val sequence = BoundingBoxTileSequence(bbox, layer, minZ, maxZ)
+            runBoundingBoxDownloadWorkers(sequence, label, packageKey, onProgress)
         }
     }
 
@@ -512,24 +518,48 @@ class TileStore(
         downloadJob?.cancel()
         isCancelled = false
         downloadJob = scope.launch(Dispatchers.Default) {
-            runTileDownloadWorkers(tiles, label, packageKey, onProgress)
+            var nextIndex = 0
+            runDownloadWorkers(
+                total = tiles.size,
+                layer = tiles.firstOrNull()?.layer,
+                nextTile = { if (nextIndex < tiles.size) tiles[nextIndex++] else null },
+                label = label,
+                packageKey = packageKey,
+                onProgress = onProgress
+            )
         }
     }
 
-    private suspend fun runTileDownloadWorkers(
-        tiles: List<TileCoord>,
+    private suspend fun runBoundingBoxDownloadWorkers(
+        sequence: BoundingBoxTileSequence,
         label: String,
         packageKey: String?,
         onProgress: (OfflineDownloadProgress) -> Unit
     ) {
-        if (tiles.isEmpty()) {
+        runDownloadWorkers(
+            total = sequence.totalTiles,
+            layer = sequence.layer,
+            nextTile = { sequence.nextTile() },
+            label = label,
+            packageKey = packageKey,
+            onProgress = onProgress
+        )
+    }
+
+    private suspend fun runDownloadWorkers(
+        total: Int,
+        layer: MapLayer?,
+        nextTile: () -> TileCoord?,
+        label: String,
+        packageKey: String?,
+        onProgress: (OfflineDownloadProgress) -> Unit
+    ) {
+        if (total <= 0) {
             onProgress(OfflineDownloadProgress(isDownloading = false, label = label, completed = 0, total = 0, failed = 0))
             return
         }
 
-        val total = tiles.size
-        val workerCount = (tiles.firstOrNull()?.layer?.recommendedConcurrency ?: 4).coerceIn(1, 6)
-        var nextIndex = 0
+        val workerCount = (layer?.recommendedConcurrency ?: 4).coerceIn(1, 6)
         var completed = 0
         var failed = 0
         var lastEmitMs = 0L
@@ -540,12 +570,7 @@ class TileStore(
             val workers = (0 until workerCount).map {
                 launch {
                     while (!isCancelled) {
-                        val idx = progressLock.withLock {
-                            if (nextIndex < total) nextIndex++ else -1
-                        }
-                        if (idx < 0) break
-
-                        val coord = tiles[idx]
+                        val coord = progressLock.withLock { nextTile() } ?: break
                         val path = diskPath(coord)
                         var success = false
 

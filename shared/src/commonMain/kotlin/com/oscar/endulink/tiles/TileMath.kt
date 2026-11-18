@@ -20,6 +20,55 @@ data class MapBoundingBox(
     val maxLon: Double
 )
 
+/**
+ * Generador perezoso de teselas dentro de un BoundingBox sin alojar listas masivas en RAM.
+ * Permite descargar paquetes de cientos de miles o millones de teselas (>1 GB) en O(1) de memoria.
+ */
+class BoundingBoxTileSequence(
+    private val bbox: MapBoundingBox,
+    val layer: MapLayer,
+    private val minZ: Int,
+    maxZ: Int
+) {
+    private val hiZ: Int = minOf(maxZ, layer.maxNativeZoom)
+    val totalTiles: Int = TileMath.countBoundingBoxTiles(bbox, minZ, hiZ, layer.maxNativeZoom)
+
+    private var curZ: Int = minZ - 1
+    private var curX: Int = 0
+    private var curY: Int = 0
+    private var xStart: Int = 0
+    private var xEnd: Int = -1
+    private var yStart: Int = 0
+    private var yEnd: Int = -1
+
+    fun nextTile(): TileCoord? {
+        while (true) {
+            if (curZ in minZ..hiZ && curX <= xEnd && curY <= yEnd) {
+                val coord = TileCoord(layer, curZ, curX, curY)
+                if (curY < yEnd) {
+                    curY++
+                } else {
+                    curY = yStart
+                    curX++
+                }
+                return coord
+            }
+            curZ++
+            if (curZ > hiZ) return null
+            val n = if (curZ in 0..30) 1 shl curZ else 0
+            if (n <= 0) continue
+            val (tx1, ty1) = TileMath.latLonToTile(bbox.maxLat, bbox.minLon, curZ)
+            val (tx2, ty2) = TileMath.latLonToTile(bbox.minLat, bbox.maxLon, curZ)
+            xStart = maxOf(0, minOf(tx1, tx2))
+            xEnd = minOf(n - 1, maxOf(tx1, tx2))
+            yStart = maxOf(0, minOf(ty1, ty2))
+            yEnd = minOf(n - 1, maxOf(ty1, ty2))
+            curX = xStart
+            curY = yStart
+        }
+    }
+}
+
 object TileMath {
 
     fun haversineMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -83,33 +132,46 @@ object TileMath {
         return total
     }
 
+    fun isTileInBoundingBox(coord: TileCoord, bbox: MapBoundingBox, minZ: Int, maxZ: Int): Boolean {
+        val hiZ = minOf(maxZ, coord.layer.maxNativeZoom)
+        if (coord.z < minZ || coord.z > hiZ || coord.z !in 0..30) return false
+        val n = 1 shl coord.z
+        val (tx1, ty1) = latLonToTile(bbox.maxLat, bbox.minLon, coord.z)
+        val (tx2, ty2) = latLonToTile(bbox.minLat, bbox.maxLon, coord.z)
+        val xStart = maxOf(0, minOf(tx1, tx2))
+        val xEnd = minOf(n - 1, maxOf(tx1, tx2))
+        val yStart = maxOf(0, minOf(ty1, ty2))
+        val yEnd = minOf(n - 1, maxOf(ty1, ty2))
+        return coord.x in xStart..xEnd && coord.y in yStart..yEnd
+    }
+
+    fun forEachBoundingBoxTile(
+        bbox: MapBoundingBox,
+        layer: MapLayer,
+        minZ: Int,
+        maxZ: Int,
+        action: (TileCoord) -> Boolean
+    ) {
+        val seq = BoundingBoxTileSequence(bbox, layer, minZ, maxZ)
+        while (true) {
+            val coord = seq.nextTile() ?: break
+            if (!action(coord)) break
+        }
+    }
+
     fun enumerateBoundingBoxTiles(
         bbox: MapBoundingBox,
         layer: MapLayer,
         minZ: Int,
         maxZ: Int,
-        maxTiles: Int = 60_000
+        maxTiles: Int = Int.MAX_VALUE
     ): List<TileCoord> {
         val hiZ = minOf(maxZ, layer.maxNativeZoom)
-        if (minZ > hiZ) return emptyList()
+        if (minZ > hiZ || maxTiles <= 0) return emptyList()
         val list = mutableListOf<TileCoord>()
-
-        for (z in minZ..hiZ) {
-            val n = 1 shl z
-            val (tx1, ty1) = latLonToTile(bbox.maxLat, bbox.minLon, z)
-            val (tx2, ty2) = latLonToTile(bbox.minLat, bbox.maxLon, z)
-            val xStart = maxOf(0, minOf(tx1, tx2))
-            val xEnd = minOf(n - 1, maxOf(tx1, tx2))
-            val yStart = maxOf(0, minOf(ty1, ty2))
-            val yEnd = minOf(n - 1, maxOf(ty1, ty2))
-            if (xStart > xEnd || yStart > yEnd) continue
-
-            for (x in xStart..xEnd) {
-                for (y in yStart..yEnd) {
-                    list.add(TileCoord(layer, z, x, y))
-                    if (list.size >= maxTiles) return list
-                }
-            }
+        forEachBoundingBoxTile(bbox, layer, minZ, hiZ) { coord ->
+            list.add(coord)
+            list.size < maxTiles
         }
         return list
     }
@@ -118,7 +180,7 @@ object TileMath {
         points: List<GPXPoint>,
         layer: MapLayer,
         zooms: List<Int> = listOf(10, 11, 12, 13, 14, 15, 16),
-        maxTiles: Int = 4500
+        maxTiles: Int = 500_000
     ): List<TileCoord> {
         val set = mutableSetOf<TileCoord>()
         if (points.isEmpty()) return emptyList()
