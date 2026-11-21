@@ -27,6 +27,18 @@ private fun ipv4UIntToString(ipHostOrNetOrder: UInt): String {
     return "$b1.$b2.$b3.$b4"
 }
 
+private fun parseIpv4NetOrder(ip: String): UInt? {
+    val parts = ip.trim().split('.')
+    if (parts.size != 4) return null
+    var acc = 0u
+    for (i in 0 until 4) {
+        val octet = parts[i].toUIntOrNull() ?: return null
+        if (octet > 255u) return null
+        acc = acc or (octet shl (i * 8))
+    }
+    return acc
+}
+
 @OptIn(ExperimentalForeignApi::class)
 actual class LocalLanUdpSocket actual constructor() {
     @Volatile
@@ -72,20 +84,20 @@ actual class LocalLanUdpSocket actual constructor() {
             memScoped {
                 val addr = alloc<sockaddr_in>()
                 for (ip in targets) {
+                    val netIp = parseIpv4NetOrder(ip) ?: continue
                     addr.sin_len = sizeOf<sockaddr_in>().toUByte()
                     addr.sin_family = AF_INET.toUByte()
                     addr.sin_port = htonsUdp(port.toUShort())
-                    if (inet_pton(AF_INET, ip, addr.sin_addr.ptr) == 1) {
-                        val n = sendto(
-                            currentFd,
-                            bufPtr,
-                            data.size.toULong(),
-                            0,
-                            addr.ptr.reinterpret(),
-                            sizeOf<sockaddr_in>().toUInt()
-                        )
-                        if (n > 0) sentAny = true
-                    }
+                    addr.sin_addr.s_addr = netIp
+                    val n = sendto(
+                        currentFd,
+                        bufPtr,
+                        data.size.toULong(),
+                        0,
+                        addr.ptr.reinterpret(),
+                        sizeOf<sockaddr_in>().toUInt()
+                    )
+                    if (n > 0) sentAny = true
                 }
             }
         }
