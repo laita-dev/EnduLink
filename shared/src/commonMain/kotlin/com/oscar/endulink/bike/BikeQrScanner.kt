@@ -9,7 +9,10 @@ import androidx.compose.runtime.Composable
 expect fun rememberBikeQrScanner(
     onQrScanned: (String) -> Unit,
     onManualInputRequested: () -> Unit,
-    onScannerError: (String) -> Unit
+    onScannerError: (String) -> Unit,
+    title: String = "Escanear QR Moto",
+    hint: String = "Apunta la cámara al código QR de la pantalla TFT de tu moto",
+    manualButtonLabel: String = "Introducir o pegar QR manualmente"
 ): () -> Unit
 
 /**

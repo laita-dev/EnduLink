@@ -1,6 +1,7 @@
 package com.oscar.endulink.bike
 
 import androidx.compose.ui.graphics.ImageBitmap
+import com.oscar.endulink.group.GroupMember
 import com.oscar.endulink.platform.RiderTelemetry
 import com.oscar.endulink.tiles.MapLayer
 import com.oscar.endulink.tiles.TileStore
@@ -114,7 +115,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         waypoints: List<GPXWaypoint>,
         intermediateStops: List<GeoCoord>,
         remainingMinutes: Int?,
-        routeTypeLabel: String?
+        routeTypeLabel: String?,
+        groupMembers: List<GroupMember>,
+        groupActiveCount: Int
     ): ByteArray? {
         return scene.renderRgba(
             width = width,
@@ -130,7 +133,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             waypoints = waypoints,
             intermediateStops = intermediateStops,
             remainingMinutes = remainingMinutes,
-            routeTypeLabel = routeTypeLabel
+            routeTypeLabel = routeTypeLabel,
+            groupMembers = groupMembers,
+            groupActiveCount = groupActiveCount
         )
     }
 
@@ -148,7 +153,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         waypoints: List<GPXWaypoint>,
         intermediateStops: List<GeoCoord>,
         remainingMinutes: Int?,
-        routeTypeLabel: String?
+        routeTypeLabel: String?,
+        groupMembers: List<GroupMember>,
+        groupActiveCount: Int
     ): ImageBitmap? {
         return scene.renderPreview(
             width = width,
@@ -164,7 +171,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             waypoints = waypoints,
             intermediateStops = intermediateStops,
             remainingMinutes = remainingMinutes,
-            routeTypeLabel = routeTypeLabel
+            routeTypeLabel = routeTypeLabel,
+            groupMembers = groupMembers,
+            groupActiveCount = groupActiveCount
         )
     }
 }

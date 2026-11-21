@@ -3,6 +3,11 @@ package com.oscar.endulink.bike
 import android.graphics.*
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import com.oscar.endulink.group.GroupMember
+import com.oscar.endulink.group.GroupTftLayout
+import com.oscar.endulink.group.RiderStatus
+import com.oscar.endulink.group.TftEdgeIndicator
+import com.oscar.endulink.group.TftProjectedMember
 import com.oscar.endulink.platform.BatteryStatus
 import com.oscar.endulink.platform.RiderTelemetry
 import com.oscar.endulink.platform.getPlatformBatteryStatus
@@ -93,6 +98,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
     private val tileSrcRect = Rect()
     private val tileDstRect = RectF()
     private val tmpTagRect = RectF()
+    private val groupArrowPath = Path()
+    private val groupRect = RectF()
 
     private fun getOrQueueTileBitmap(coord: TileCoord, allowAsyncFetch: Boolean): Bitmap? {
         decodedTileCache.get(coord)?.let { return it }
@@ -229,6 +236,24 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         strokeJoin = Paint.Join.ROUND
         isAntiAlias = true
     }
+    private val groupFillPaint = Paint().apply {
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val groupStrokePaint = Paint().apply {
+        style = Paint.Style.STROKE
+        isAntiAlias = true
+    }
+    private val groupAlertBgPaint = Paint().apply {
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val groupTextPaint = Paint().apply {
+        color = android.graphics.Color.WHITE
+        textSize = 11.5f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        isAntiAlias = true
+    }
 
     private var lastBatteryCheckMs: Long = 0L
     private var cachedBatteryStatus: BatteryStatus = BatteryStatus()
@@ -257,7 +282,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         waypoints: List<GPXWaypoint>,
         intermediateStops: List<GeoCoord>,
         remainingMinutes: Int?,
-        routeTypeLabel: String?
+        routeTypeLabel: String?,
+        groupMembers: List<GroupMember>,
+        groupActiveCount: Int
     ): ByteArray? {
         val bmp = getOrCreateBitmap(width, height)
         val canvas = cachedCanvas ?: Canvas(bmp).also { cachedCanvas = it }
@@ -278,7 +305,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             waypoints = waypoints,
             intermediateStops = intermediateStops,
             remainingMinutes = remainingMinutes,
-            routeTypeLabel = routeTypeLabel
+            routeTypeLabel = routeTypeLabel,
+            groupMembers = groupMembers,
+            groupActiveCount = groupActiveCount
         )
 
         bmp.copyPixelsToBuffer(ByteBuffer.wrap(buffer))
@@ -300,7 +329,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         waypoints: List<GPXWaypoint>,
         intermediateStops: List<GeoCoord>,
         remainingMinutes: Int?,
-        routeTypeLabel: String?
+        routeTypeLabel: String?,
+        groupMembers: List<GroupMember>,
+        groupActiveCount: Int
     ): ImageBitmap? {
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
@@ -319,7 +350,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             waypoints = waypoints,
             intermediateStops = intermediateStops,
             remainingMinutes = remainingMinutes,
-            routeTypeLabel = routeTypeLabel
+            routeTypeLabel = routeTypeLabel,
+            groupMembers = groupMembers,
+            groupActiveCount = groupActiveCount
         )
         return bmp.asImageBitmap()
     }
@@ -339,7 +372,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         waypoints: List<GPXWaypoint>,
         intermediateStops: List<GeoCoord>,
         remainingMinutes: Int?,
-        routeTypeLabel: String?
+        routeTypeLabel: String?,
+        groupMembers: List<GroupMember>,
+        groupActiveCount: Int
     ) {
         val w = width
         val h = height
@@ -522,6 +557,38 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
 
         canvas.restore()
 
+        val hudScale = (w / 592f).coerceIn(0.45f, 1.5f)
+
+        // 4d. Compañeros de grupo en tiempo real (en pantalla y radar de bordes configurables)
+        val groupPlan = if (groupMembers.isNotEmpty() && (config.showGroupMembersOnTft || config.showGroupAlertsOnTft)) {
+            GroupTftLayout.compute(
+                members = groupMembers,
+                mapCenter = center,
+                zoom = zoom,
+                tileSizePx = tileSizePx,
+                mapHeadingDeg = heading,
+                anchorX = anchorX,
+                anchorY = anchorY,
+                width = w,
+                height = h,
+                scale = hudScale,
+                nowMs = System.currentTimeMillis()
+            )
+        } else {
+            null
+        }
+
+        if (config.showGroupMembersOnTft && groupPlan != null) {
+            for (proj in groupPlan.inViewMembers) {
+                drawGroupMemberPin(canvas, proj, config.showGroupNamesOnTft, hudScale)
+            }
+            if (config.showGroupEdgeRadarOnTft) {
+                for (ind in groupPlan.edgeIndicators) {
+                    drawGroupEdgeIndicator(canvas, ind, anchorX, anchorY, w, h, hudScale)
+                }
+            }
+        }
+
         // 5. Marcador de la Moto (flecha en anchorX, anchorY)
         canvas.save()
         canvas.translate(anchorX, anchorY)
@@ -549,7 +616,6 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
 
         // Escalar HUD proporcionalmente a 592px de referencia para que tanto la preview (296x408)
         // como la pantalla TFT real (592x816) mantengan proporciones exactas sin solapamientos
-        val hudScale = (w / 592f).coerceIn(0.45f, 1.5f)
         val vw = w / hudScale
         val vh = h / hudScale
         canvas.save()
@@ -672,11 +738,173 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             }
         }
 
+        // 9b. Contador discreto de grupo en HUD (debajo de hora/batería)
+        val grpBox = RectF(vw - 86f - 14f, 56f, vw - 14f, 82f)
+        if (groupActiveCount > 0 && config.showGroupHudBadgeOnTft) {
+            canvas.drawRoundRect(grpBox, 8f, 8f, hudCardPaint)
+            canvas.drawRoundRect(grpBox, 8f, 8f, hudBorderPaint)
+            val hasAnyAlert = groupMembers.any { it.status.isAlert }
+            groupFillPaint.color = if (hasAnyAlert) {
+                android.graphics.Color.rgb(255, 59, 48)
+            } else {
+                android.graphics.Color.rgb(48, 209, 88)
+            }
+            canvas.drawCircle(grpBox.left + 12f, grpBox.centerY(), 4f, groupFillPaint)
+            groupTextPaint.textSize = 12f
+            canvas.drawText("GRP $groupActiveCount", grpBox.left + 21f, grpBox.bottom - 8f, groupTextPaint)
+        }
+
+        // 9c. Banner destacado de alerta rápida (SOS / Avería / Esperadme)
+        val alertBanner = if (config.showGroupAlertsOnTft) groupPlan?.alertBanner else null
+        if (alertBanner != null) {
+            val maxAlertRight = if (groupActiveCount > 0 && config.showGroupHudBadgeOnTft) {
+                grpBox.left - 8f
+            } else {
+                vw - 14f
+            }
+            val alertRight = minOf(maxAlertRight, 14f + 286f)
+            if (alertRight > 54f) {
+                groupRect.set(14f, 62f, alertRight, 90f)
+                groupAlertBgPaint.color = when (alertBanner.status) {
+                    RiderStatus.SOS -> android.graphics.Color.argb(240, 215, 38, 38)
+                    RiderStatus.MECHANICAL -> android.graphics.Color.argb(240, 225, 105, 0)
+                    else -> android.graphics.Color.argb(240, 195, 145, 0)
+                }
+                groupStrokePaint.color = android.graphics.Color.WHITE
+                groupStrokePaint.strokeWidth = 1.6f
+                canvas.drawRoundRect(groupRect, 8f, 8f, groupAlertBgPaint)
+                canvas.drawRoundRect(groupRect, 8f, 8f, groupStrokePaint)
+                groupTextPaint.textSize = 13f
+                canvas.drawText(alertBanner.text, groupRect.left + 10f, groupRect.bottom - 8f, groupTextPaint)
+            }
+        }
+
         canvas.restore()
 
         // 10. BlackEdges (Márgenes negros de 4px arriba y abajo requeridos por el escalador Carbit EasyConn)
         canvas.drawRect(0f, 0f, w, 4f, blackEdgePaint)
         canvas.drawRect(0f, h - 4f, w, h, blackEdgePaint)
+    }
+
+    private fun drawGroupMemberPin(
+        canvas: Canvas,
+        proj: TftProjectedMember,
+        showNames: Boolean,
+        scale: Float
+    ) {
+        val sx = proj.screenX
+        val sy = proj.screenY
+        val baseArgb = proj.member.color.argb.toInt()
+        val fillColor = if (proj.isStale) (baseArgb and 0x00FFFFFF) or (140 shl 24) else baseArgb
+
+        if (proj.member.status.isAlert) {
+            val alertRgb = when (proj.member.status) {
+                RiderStatus.SOS -> android.graphics.Color.rgb(255, 59, 48)
+                RiderStatus.MECHANICAL -> android.graphics.Color.rgb(255, 107, 0)
+                else -> android.graphics.Color.rgb(255, 204, 0)
+            }
+            groupAlertBgPaint.color = (alertRgb and 0x00FFFFFF) or (90 shl 24)
+            canvas.drawCircle(sx, sy, 18f * scale, groupAlertBgPaint)
+            groupStrokePaint.color = alertRgb
+            groupStrokePaint.strokeWidth = 2.2f * scale
+            canvas.drawCircle(sx, sy, 16f * scale, groupStrokePaint)
+        }
+
+        groupFillPaint.color = android.graphics.Color.BLACK
+        canvas.drawCircle(sx, sy, 11.5f * scale, groupFillPaint)
+        groupFillPaint.color = fillColor
+        canvas.drawCircle(sx, sy, 9.2f * scale, groupFillPaint)
+
+        if (proj.member.speedKmh >= 3.0) {
+            canvas.save()
+            canvas.translate(sx, sy)
+            canvas.rotate(proj.relativeHeadingDeg)
+            groupArrowPath.reset()
+            groupArrowPath.moveTo(0f, -6.2f * scale)
+            groupArrowPath.lineTo(4.4f * scale, 4.5f * scale)
+            groupArrowPath.lineTo(0f, 2.2f * scale)
+            groupArrowPath.lineTo(-4.4f * scale, 4.5f * scale)
+            groupArrowPath.close()
+            groupFillPaint.color = android.graphics.Color.WHITE
+            canvas.drawPath(groupArrowPath, groupFillPaint)
+            canvas.restore()
+        } else {
+            groupFillPaint.color = android.graphics.Color.WHITE
+            canvas.drawCircle(sx, sy, 3.3f * scale, groupFillPaint)
+        }
+
+        if (showNames) {
+            val shortName = GroupTftLayout.formatShortName(proj.member.name)
+            groupTextPaint.textSize = 11f * scale
+            val tw = groupTextPaint.measureText(shortName)
+            val padX = 5.5f * scale
+            val pillH = 16f * scale
+            val bottom = sy - 14f * scale
+            val top = bottom - pillH
+            groupRect.set(sx - tw * 0.5f - padX, top, sx + tw * 0.5f + padX, bottom)
+            canvas.drawRoundRect(groupRect, 4f * scale, 4f * scale, hudCardPaint)
+            groupStrokePaint.color = fillColor
+            groupStrokePaint.strokeWidth = 1.2f * scale
+            canvas.drawRoundRect(groupRect, 4f * scale, 4f * scale, groupStrokePaint)
+            canvas.drawText(shortName, sx - tw * 0.5f, bottom - 4f * scale, groupTextPaint)
+        }
+    }
+
+    private fun drawGroupEdgeIndicator(
+        canvas: Canvas,
+        ind: TftEdgeIndicator,
+        anchorX: Float,
+        anchorY: Float,
+        w: Float,
+        h: Float,
+        scale: Float
+    ) {
+        val baseRgb = when (ind.member.status) {
+            RiderStatus.SOS -> android.graphics.Color.rgb(255, 59, 48)
+            RiderStatus.MECHANICAL -> android.graphics.Color.rgb(255, 107, 0)
+            RiderStatus.STOPPED_WAIT -> android.graphics.Color.rgb(255, 204, 0)
+            else -> ind.member.color.argb.toInt()
+        }
+        val color = if (ind.isStale) (baseRgb and 0x00FFFFFF) or (155 shl 24) else baseRgb
+
+        val deg = Math.toDegrees(ind.angleRad.toDouble()).toFloat() + 90f
+        canvas.save()
+        canvas.translate(ind.edgeX, ind.edgeY)
+        canvas.rotate(deg)
+        groupArrowPath.reset()
+        groupArrowPath.moveTo(0f, -9f * scale)
+        groupArrowPath.lineTo(6.5f * scale, 6f * scale)
+        groupArrowPath.lineTo(0f, 3f * scale)
+        groupArrowPath.lineTo(-6.5f * scale, 6f * scale)
+        groupArrowPath.close()
+        groupFillPaint.color = android.graphics.Color.BLACK
+        canvas.drawPath(groupArrowPath, groupFillPaint)
+        groupStrokePaint.color = android.graphics.Color.BLACK
+        groupStrokePaint.strokeWidth = 2.5f * scale
+        canvas.drawPath(groupArrowPath, groupStrokePaint)
+        groupFillPaint.color = color
+        canvas.drawPath(groupArrowPath, groupFillPaint)
+        canvas.restore()
+
+        groupTextPaint.textSize = 11f * scale
+        val tw = groupTextPaint.measureText(ind.label)
+        val padX = 5.5f * scale
+        val pillW = tw + padX * 2f
+        val pillH = 17f * scale
+        val inDx = anchorX - ind.edgeX
+        val inDy = anchorY - ind.edgeY
+        val inLen = hypot(inDx, inDy).coerceAtLeast(1f)
+        val cx = ind.edgeX + (inDx / inLen) * 20f * scale
+        val cy = ind.edgeY + (inDy / inLen) * 16f * scale
+
+        val left = (cx - pillW * 0.5f).coerceIn(8f * scale, (w - pillW - 8f * scale).coerceAtLeast(8f * scale))
+        val top = (cy - pillH * 0.5f).coerceIn(60f * scale, (h - pillH - 22f * scale).coerceAtLeast(60f * scale))
+        groupRect.set(left, top, left + pillW, top + pillH)
+        canvas.drawRoundRect(groupRect, 5f * scale, 5f * scale, hudCardPaint)
+        groupStrokePaint.color = color
+        groupStrokePaint.strokeWidth = 1.4f * scale
+        canvas.drawRoundRect(groupRect, 5f * scale, 5f * scale, groupStrokePaint)
+        canvas.drawText(ind.label, left + padX, groupRect.bottom - 4.5f * scale, groupTextPaint)
     }
 
     private fun getOrCreateBitmap(width: Int, height: Int): Bitmap {

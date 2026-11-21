@@ -539,10 +539,77 @@ final class IosWifiBridgeImpl: NSObject, IosWifiBridge {
     }
 }
 
+final class IosLanNetworkBridgeImpl: NSObject, IosLanNetworkBridge {
+    func localLanIpsCsv() -> String {
+        var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
+        guard Darwin.getifaddrs(&ifaddrPtr) == 0, let first = ifaddrPtr else {
+            return ""
+        }
+        defer { Darwin.freeifaddrs(ifaddrPtr) }
+
+        var ips: [String] = []
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        while let ifa = cursor?.pointee {
+            defer { cursor = ifa.ifa_next }
+            guard let addr = ifa.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let flags = Int32(ifa.ifa_flags)
+            guard (flags & IFF_UP) != 0, (flags & IFF_LOOPBACK) == 0 else { continue }
+            var sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+            var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+            guard Darwin.inet_ntop(AF_INET, &sin.sin_addr, &buf, socklen_t(INET_ADDRSTRLEN)) != nil else { continue }
+            let ip = String(cString: buf)
+            if !ip.hasPrefix("127.") && !ips.contains(ip) {
+                ips.append(ip)
+            }
+        }
+        return ips.joined(separator: ",")
+    }
+
+    func broadcastIpsCsv() -> String {
+        var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
+        guard Darwin.getifaddrs(&ifaddrPtr) == 0, let first = ifaddrPtr else {
+            return "255.255.255.255"
+        }
+        defer { Darwin.freeifaddrs(ifaddrPtr) }
+
+        var targets: [String] = []
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        while let ifa = cursor?.pointee {
+            defer { cursor = ifa.ifa_next }
+            guard let addr = ifa.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let flags = Int32(ifa.ifa_flags)
+            guard (flags & IFF_UP) != 0, (flags & IFF_LOOPBACK) == 0 else { continue }
+            let name = String(cString: ifa.ifa_name)
+            guard name.hasPrefix("en") || name.hasPrefix("bridge") || name.hasPrefix("ap") else { continue }
+
+            let sin = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+            if let maskAddr = ifa.ifa_netmask, maskAddr.pointee.sa_family == UInt8(AF_INET) {
+                let maskSin = maskAddr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+                let bcastVal = (sin.sin_addr.s_addr & maskSin.sin_addr.s_addr) | (~maskSin.sin_addr.s_addr)
+                var bcastAddr = in_addr(s_addr: bcastVal)
+                var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                if Darwin.inet_ntop(AF_INET, &bcastAddr, &buf, socklen_t(INET_ADDRSTRLEN)) != nil {
+                    let bcastIp = String(cString: buf)
+                    if !bcastIp.hasPrefix("169.254.") && !bcastIp.hasPrefix("127.") && !targets.contains(bcastIp) {
+                        targets.append(bcastIp)
+                    }
+                }
+            }
+        }
+        if targets.isEmpty {
+            targets.append("255.255.255.255")
+        }
+        return targets.joined(separator: ",")
+    }
+}
+
 final class QrScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
     var onScanned: ((String) -> Void)?
     var onManualFallback: (() -> Void)?
     var onError: ((String) -> Void)?
+    var scannerTitle: String = "Escanear QR Moto"
+    var scannerHint: String = "Apunta la cámara al código QR de la pantalla TFT de tu moto"
+    var manualButtonTitle: String = "Introducir o pegar QR manualmente"
 
     private let captureSession = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "com.oscar.endulink.qrscanner.session")
@@ -678,7 +745,7 @@ final class QrScannerViewController: UIViewController, AVCaptureMetadataOutputOb
 
         let titleLabel = UILabel()
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.text = "Escanear QR Moto"
+        titleLabel.text = scannerTitle
         titleLabel.textColor = .white
         titleLabel.font = UIFont.boldSystemFont(ofSize: 16)
         titleLabel.textAlignment = .center
@@ -698,7 +765,7 @@ final class QrScannerViewController: UIViewController, AVCaptureMetadataOutputOb
 
         let hintLabel = UILabel()
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
-        hintLabel.text = "Apunta la cámara al código QR de la pantalla TFT de tu moto"
+        hintLabel.text = scannerHint
         hintLabel.textColor = .white
         hintLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
         hintLabel.textAlignment = .center
@@ -706,7 +773,7 @@ final class QrScannerViewController: UIViewController, AVCaptureMetadataOutputOb
 
         let manualButton = UIButton(
             configuration: makePillConfiguration(
-                title: "Introducir o pegar QR manualmente",
+                title: manualButtonTitle,
                 foregroundColor: UIColor(red: 1.0, green: 0.42, blue: 0.0, alpha: 1.0),
                 backgroundColor: UIColor.black.withAlphaComponent(0.72),
                 borderColor: UIColor.white.withAlphaComponent(0.25),
@@ -897,7 +964,7 @@ final class QrScannerViewController: UIViewController, AVCaptureMetadataOutputOb
 }
 
 final class IosQrScannerBridgeImpl: NSObject, IosQrScannerBridge {
-    func startQrScan(callback: IosQrScannerCallback) {
+    func startQrScan(title: String, hint: String, manualButtonLabel: String, callback: IosQrScannerCallback) {
         DispatchQueue.main.async {
             guard let presenter = Self.topViewController() else {
                 callback.onError(message: "No se pudo abrir el visor de cámara.")
@@ -908,7 +975,7 @@ final class IosQrScannerBridgeImpl: NSObject, IosQrScannerBridge {
                 return
             }
             guard AVCaptureDevice.default(for: .video) != nil else {
-                callback.onError(message: "Cámara no disponible en este dispositivo. Puedes introducir el QR manualmente.")
+                callback.onError(message: "Cámara no disponible en este dispositivo. Puedes introducir el código manualmente.")
                 callback.onManualFallback()
                 return
             }
@@ -916,13 +983,25 @@ final class IosQrScannerBridgeImpl: NSObject, IosQrScannerBridge {
             let status = AVCaptureDevice.authorizationStatus(for: .video)
             switch status {
             case .authorized:
-                Self.presentScanner(from: presenter, callback: callback)
+                Self.presentScanner(
+                    from: presenter,
+                    title: title,
+                    hint: hint,
+                    manualButtonLabel: manualButtonLabel,
+                    callback: callback
+                )
             case .notDetermined:
                 AVCaptureDevice.requestAccess(for: .video) { granted in
                     DispatchQueue.main.async {
                         let currentPresenter = Self.topViewController() ?? presenter
                         if granted {
-                            Self.presentScanner(from: currentPresenter, callback: callback)
+                            Self.presentScanner(
+                                from: currentPresenter,
+                                title: title,
+                                hint: hint,
+                                manualButtonLabel: manualButtonLabel,
+                                callback: callback
+                            )
                         } else {
                             Self.presentPermissionAlert(from: currentPresenter, callback: callback)
                         }
@@ -991,8 +1070,17 @@ final class IosQrScannerBridgeImpl: NSObject, IosQrScannerBridge {
         }
     }
 
-    private static func presentScanner(from presenter: UIViewController, callback: IosQrScannerCallback) {
+    private static func presentScanner(
+        from presenter: UIViewController,
+        title: String,
+        hint: String,
+        manualButtonLabel: String,
+        callback: IosQrScannerCallback
+    ) {
         let vc = QrScannerViewController()
+        vc.scannerTitle = title
+        vc.scannerHint = hint
+        vc.manualButtonTitle = manualButtonLabel
         vc.modalPresentationStyle = .fullScreen
         vc.onScanned = { rawText in
             DispatchQueue.main.async {
@@ -1060,6 +1148,7 @@ struct iOSApp: App {
         IosH264BridgeHolder.shared.bridge = VideoToolboxBridge()
         IosWifiBridgeHolder.shared.bridge = IosWifiBridgeImpl()
         IosQrScannerBridgeHolder.shared.bridge = IosQrScannerBridgeImpl()
+        IosLanNetworkBridgeHolder.shared.bridge = IosLanNetworkBridgeImpl()
     }
 
     var body: some Scene {
@@ -1067,7 +1156,11 @@ struct iOSApp: App {
             ComposeView()
                 .ignoresSafeArea(.all)
                 .onOpenURL { url in
-                    Self.handleIncomingGpxURL(url)
+                    if url.scheme?.lowercased() == "endulink" {
+                        MainViewControllerKt.handleIncomingGroupLink(url: url.absoluteString)
+                    } else {
+                        Self.handleIncomingGpxURL(url)
+                    }
                 }
         }
     }

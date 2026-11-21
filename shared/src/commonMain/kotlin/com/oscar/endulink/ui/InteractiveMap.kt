@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.oscar.endulink.group.GroupMember
+import com.oscar.endulink.group.RiderStatus
 import com.oscar.endulink.platform.RiderTelemetry
 import com.oscar.endulink.tiles.*
 import com.oscar.endulink.trail.*
@@ -57,9 +59,11 @@ fun InteractiveMap(
     recordedCoords: List<GeoCoord>,
     quickMarkers: List<GPXWaypoint>,
     trackProgress: TrackProgress?,
+    groupMembers: List<GroupMember> = emptyList(),
     isPickingOnMap: Boolean = false,
     onSelectWaypoint: (GPXWaypoint) -> Unit = {},
     onSelectRoute: (GPXRoute) -> Unit = {},
+    onSelectGroupMember: (GroupMember) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Escuchar revisiones de teselas descargadas para repintado reactivo inmediato
@@ -78,6 +82,7 @@ fun InteractiveMap(
     val chevronDrawPath = remember { Path() }
     val currentOnSelectWaypoint by rememberUpdatedState(onSelectWaypoint)
     val currentOnSelectRoute by rememberUpdatedState(onSelectRoute)
+    val currentOnSelectGroupMember by rememberUpdatedState(onSelectGroupMember)
     val currentIsPickingOnMap by rememberUpdatedState(isPickingOnMap)
     val currentLayer by rememberUpdatedState(layer)
     val useNativeBackdrop = isNativeAppleMapsSupported() && layer == MapLayer.CARRETERAS
@@ -122,44 +127,60 @@ fun InteractiveMap(
                         val pinOffsetPx = 14.dp.toPx().toDouble()
                         val hitRadiusPx = 28.dp.toPx().toDouble()
 
-                        // Comprobar si se ha pulsado sobre algún waypoint (área táctil adaptada a densidad de pantalla)
-                        val tappedWpt = curMarkers.lastOrNull { wpt ->
-                            val (ptFracX, ptFracY) = TileMath.latLonToFractionalTile(wpt.latitude, wpt.longitude, zInt)
+                        // Comprobar si se ha pulsado sobre algún compañero del grupo
+                        val tappedMember = controller.groupMembers.value.lastOrNull { member ->
+                            val (ptFracX, ptFracY) = TileMath.latLonToFractionalTile(member.latitude, member.longitude, zInt)
                             val unrotX = (ptFracX - centerFracX) * tileSizePx
                             val unrotY = (ptFracY - centerFracY) * tileSizePx
                             val screenX = screenCenterX + (unrotX * cos(rad) - unrotY * sin(rad))
                             val screenY = screenCenterY + (unrotX * sin(rad) + unrotY * cos(rad))
-                            val pinHeadY = screenY - pinOffsetPx
                             val dx = tapOffset.x - screenX
-                            val dy = tapOffset.y - pinHeadY
+                            val dy = tapOffset.y - screenY
                             sqrt(dx * dx + dy * dy) <= hitRadiusPx
                         }
 
-                        if (tappedWpt != null) {
-                            currentOnSelectWaypoint(tappedWpt)
+                        if (tappedMember != null) {
+                            currentOnSelectGroupMember(tappedMember)
                         } else {
-                            val activeRoadActive = controller.destinationRouteOptions.value
-                                .getOrNull(controller.selectedDestinationOptionIndex.value) != null
-                            val visibleTracks = controller.routes.value.filter {
-                                it.isVisible && it.points.isNotEmpty() && (!activeRoadActive || it.id != controller.activeRoute.value?.id)
+                            // Comprobar si se ha pulsado sobre algún waypoint (área táctil adaptada a densidad de pantalla)
+                            val tappedWpt = curMarkers.lastOrNull { wpt ->
+                                val (ptFracX, ptFracY) = TileMath.latLonToFractionalTile(wpt.latitude, wpt.longitude, zInt)
+                                val unrotX = (ptFracX - centerFracX) * tileSizePx
+                                val unrotY = (ptFracY - centerFracY) * tileSizePx
+                                val screenX = screenCenterX + (unrotX * cos(rad) - unrotY * sin(rad))
+                                val screenY = screenCenterY + (unrotX * sin(rad) + unrotY * cos(rad))
+                                val pinHeadY = screenY - pinOffsetPx
+                                val dx = tapOffset.x - screenX
+                                val dy = tapOffset.y - pinHeadY
+                                sqrt(dx * dx + dy * dy) <= hitRadiusPx
                             }
-                            val tappedRoute = findTappedRoute(
-                                routes = visibleTracks,
-                                activeRouteId = controller.activeRoute.value?.id,
-                                tapScreenX = tapOffset.x.toDouble(),
-                                tapScreenY = tapOffset.y.toDouble(),
-                                viewportWidthPx = size.width.toDouble(),
-                                viewportHeightPx = size.height.toDouble(),
-                                center = curCenter,
-                                zoom = curZoom,
-                                headingDeg = curHeading,
-                                baseTilePx = baseTilePx,
-                                hitRadiusPx = 24.dp.toPx().toDouble()
-                            )
-                            if (tappedRoute != null) {
-                                currentOnSelectRoute(tappedRoute)
-                            } else if (controller.droppedPin.value != null) {
-                                controller.clearDroppedPin()
+
+                            if (tappedWpt != null) {
+                                currentOnSelectWaypoint(tappedWpt)
+                            } else {
+                                val activeRoadActive = controller.destinationRouteOptions.value
+                                    .getOrNull(controller.selectedDestinationOptionIndex.value) != null
+                                val visibleTracks = controller.routes.value.filter {
+                                    it.isVisible && it.points.isNotEmpty() && (!activeRoadActive || it.id != controller.activeRoute.value?.id)
+                                }
+                                val tappedRoute = findTappedRoute(
+                                    routes = visibleTracks,
+                                    activeRouteId = controller.activeRoute.value?.id,
+                                    tapScreenX = tapOffset.x.toDouble(),
+                                    tapScreenY = tapOffset.y.toDouble(),
+                                    viewportWidthPx = size.width.toDouble(),
+                                    viewportHeightPx = size.height.toDouble(),
+                                    center = curCenter,
+                                    zoom = curZoom,
+                                    headingDeg = curHeading,
+                                    baseTilePx = baseTilePx,
+                                    hitRadiusPx = 24.dp.toPx().toDouble()
+                                )
+                                if (tappedRoute != null) {
+                                    currentOnSelectRoute(tappedRoute)
+                                } else if (controller.droppedPin.value != null) {
+                                    controller.clearDroppedPin()
+                                }
                             }
                         }
                     },
@@ -504,6 +525,15 @@ fun InteractiveMap(
             for (wpt in quickMarkers) {
                 val pt = geoToScreen(wpt.coordinate)
                 drawWaypointMarker(pt, wpt, heading, textMeasurer, labelLayoutCache)
+            }
+
+            // 14b. Compañeros del grupo en tiempo real
+            if (groupMembers.isNotEmpty()) {
+                val nowMs = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+                for (member in groupMembers) {
+                    val pt = geoToScreen(member.coordinate)
+                    drawGroupMemberMarker(pt, member, heading, nowMs, textMeasurer, labelLayoutCache)
+                }
             }
 
             // 15. Icono del Piloto con precisión GPS y Rumbo
@@ -851,6 +881,86 @@ private fun DrawScope.drawWaypointMarker(
         )
         drawRoundRect(
             color = markerColor,
+            topLeft = Offset(badgeLeft, badgeTop),
+            size = Size(badgeW, badgeH),
+            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
+            style = Stroke(width = 1.dp.toPx())
+        )
+        drawText(
+            textLayoutResult = textLayout,
+            topLeft = Offset(badgeLeft + padH, badgeTop + padV)
+        )
+    }
+}
+
+private fun DrawScope.drawGroupMemberMarker(
+    pos: Offset,
+    member: GroupMember,
+    heading: Double,
+    nowMs: Long,
+    textMeasurer: TextMeasurer,
+    labelLayoutCache: HashMap<String, TextLayoutResult>
+) {
+    val memberColor = Color(member.color.argb)
+    val stale = member.isStale(nowMs)
+    val fillColor = if (stale) memberColor.copy(alpha = 0.55f) else memberColor
+
+    if (member.status.isAlert) {
+        val alertColor = when (member.status) {
+            RiderStatus.SOS -> EnduPalette.Danger
+            RiderStatus.MECHANICAL -> EnduPalette.Accent
+            else -> EnduPalette.Warning
+        }
+        drawCircle(color = alertColor.copy(alpha = 0.28f), radius = 20.dp.toPx(), center = pos)
+        drawCircle(color = alertColor, radius = 16.dp.toPx(), center = pos, style = Stroke(width = 2.dp.toPx()))
+    }
+
+    drawCircle(color = Color.Black, radius = 11.5.dp.toPx(), center = pos)
+    drawCircle(color = fillColor, radius = 9.2.dp.toPx(), center = pos)
+
+    if (member.speedKmh >= 3.0) {
+        rotate(degrees = member.headingDegrees.toFloat(), pivot = pos) {
+            val tip = 6.dp.toPx()
+            val wing = 4.2.dp.toPx()
+            val p = Path().apply {
+                moveTo(pos.x, pos.y - tip)
+                lineTo(pos.x + wing, pos.y + wing)
+                lineTo(pos.x, pos.y + 2.dp.toPx())
+                lineTo(pos.x - wing, pos.y + wing)
+                close()
+            }
+            drawPath(path = p, color = Color.White)
+        }
+    } else {
+        drawCircle(color = Color.White, radius = 3.2.dp.toPx(), center = pos)
+    }
+
+    rotate(degrees = heading.toFloat(), pivot = pos) {
+        val tag = if (member.status.isAlert) " · ${member.status.tftTag}" else ""
+        val label = member.name.take(14) + tag
+        val textLayout = labelLayoutCache[label] ?: textMeasurer.measure(
+            text = label,
+            style = WaypointLabelTextStyle
+        ).also {
+            if (labelLayoutCache.size > 128) labelLayoutCache.clear()
+            labelLayoutCache[label] = it
+        }
+        val padH = 5.dp.toPx()
+        val padV = 2.5.dp.toPx()
+        val badgeW = textLayout.size.width + padH * 2
+        val badgeH = textLayout.size.height + padV * 2
+        val badgeLeft = pos.x - badgeW / 2f
+        val badgeTop = pos.y - 14.dp.toPx() - badgeH
+
+        val borderClr = if (member.status.isAlert) EnduPalette.Danger else fillColor
+        drawRoundRect(
+            color = Color(0xEE0B111A),
+            topLeft = Offset(badgeLeft, badgeTop),
+            size = Size(badgeW, badgeH),
+            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+        )
+        drawRoundRect(
+            color = borderClr,
             topLeft = Offset(badgeLeft, badgeTop),
             size = Size(badgeW, badgeH),
             cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),

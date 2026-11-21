@@ -48,6 +48,7 @@ kotlin {
             implementation(libs.kotlinx.datetime)
 
             implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.websockets)
         }
 
         androidMain.dependencies {

@@ -1,6 +1,7 @@
 package com.oscar.endulink.ui
 
 import com.oscar.endulink.bike.*
+import com.oscar.endulink.group.*
 import com.oscar.endulink.platform.*
 import com.oscar.endulink.tiles.*
 import com.oscar.endulink.trail.*
@@ -159,6 +160,22 @@ class EnduController {
     private var encoder: PlatformH264Encoder? = null
     private val bikeMapRenderer = BikeMapRenderer(tileStore)
 
+    // Grupos en Tiempo Real (Móvil + Pantalla TFT)
+    val groupManager = GroupManager(onConfigChanged = { persistSettings() })
+    val groupRoomCode: StateFlow<String?> = groupManager.activeRoomCode
+    val groupConnectionState: StateFlow<GroupConnectionState> = groupManager.connectionState
+    val groupOnlineConnected: StateFlow<Boolean> = groupManager.onlineConnected
+    val groupLanActive: StateFlow<Boolean> = groupManager.lanActive
+    val groupMembers: StateFlow<List<GroupMember>> = groupManager.members
+    val groupMyStatus: StateFlow<RiderStatus> = groupManager.myStatus
+    val groupMyStatusMessage: StateFlow<String> = groupManager.myStatusMessage
+    val groupConfig: StateFlow<GroupConfig> = groupManager.config
+    val groupSharedTrack: StateFlow<SharedGroupTrack?> = groupManager.sharedTrack
+    private val _pendingGroupJoinCode = MutableStateFlow<String?>(null)
+    val pendingGroupJoinCode: StateFlow<String?> = _pendingGroupJoinCode.asStateFlow()
+    private var lastGroupBattSampleMs: Long = 0L
+    private var cachedGroupBattPct: Int = -1
+
     // Descargas Offline
     private val _offlineProgress = MutableStateFlow(OfflineDownloadProgress())
     val offlineProgress: StateFlow<OfflineDownloadProgress> = _offlineProgress.asStateFlow()
@@ -212,6 +229,7 @@ class EnduController {
         _allowLocalLanTesting.value = true
         _quickMarkers.value = WaypointStore.loadWaypoints()
         _routes.value = RouteStore.loadRoutes()
+        groupManager.loadConfig(savedSettings.groupConfig)
         if (!savedSettings.lanTestingDefaultApplied || !savedSettings.allowLocalLanTesting) {
             persistSettings()
         }
@@ -265,6 +283,14 @@ class EnduController {
         // Observador continuo de ubicación GPS
         scope.launch {
             locationProvider.telemetryFlow.collect { telemetry ->
+                if (groupManager.activeRoomCode.value != null) {
+                    val nowBattMs = Clock.System.now().toEpochMilliseconds()
+                    if (nowBattMs - lastGroupBattSampleMs >= 15_000L || cachedGroupBattPct < 0) {
+                        lastGroupBattSampleMs = nowBattMs
+                        cachedGroupBattPct = getPlatformBatteryStatus().percentage
+                    }
+                    groupManager.onLocationUpdate(telemetry, cachedGroupBattPct)
+                }
                 telemetry.coordinate?.let { pos ->
                     if (_followMode.value != MapFollowMode.FREE && _mapCenter.value.distanceTo(pos) >= 0.6) {
                         _mapCenter.value = pos
@@ -342,9 +368,11 @@ class EnduController {
         val isBikeActiveOrSearching = _bikeState.value == BikeState.SHOWING ||
             _bikeState.value == BikeState.GREETED ||
             (_bikeState.value == BikeState.LISTENING && _bikeSearchRemainingSeconds.value != null)
-        val shouldKeepAlive = _isNavigating.value || _isRecording.value || isBikeActiveOrSearching
+        val inGroup = groupManager.activeRoomCode.value != null
+        val shouldKeepAlive = _isNavigating.value || _isRecording.value || isBikeActiveOrSearching || inGroup
         val shouldHighPowerGps = _isNavigating.value || _isRecording.value ||
-            _bikeState.value == BikeState.SHOWING || _bikeState.value == BikeState.GREETED
+            _bikeState.value == BikeState.SHOWING || _bikeState.value == BikeState.GREETED ||
+            (inGroup && !groupManager.config.value.batterySaverMode)
         locationProvider.setHighPowerMode(shouldHighPowerGps)
         if (shouldKeepAlive) {
             BackgroundServiceController.startKeepAlive()
@@ -359,6 +387,7 @@ class EnduController {
     }
 
     fun stop() {
+        groupManager.shutdown()
         locationProvider.stopTracking()
         stopBikeStream()
         BackgroundServiceController.stopKeepAlive()
@@ -437,7 +466,8 @@ class EnduController {
             layer = _selectedLayer.value,
             bikeConfig = _bikeMapConfig.value,
             bikeQr = _bikeQr.value,
-            allowLocalLanTesting = _allowLocalLanTesting.value
+            allowLocalLanTesting = _allowLocalLanTesting.value,
+            groupConfig = groupManager.config.value
         )
     }
 
@@ -1309,6 +1339,8 @@ class EnduController {
     private fun renderTftFrame(width: Int, height: Int): ByteArray? {
         val snap = buildTftRouteHudSnapshot()
         val bikeLayer = effectiveBikeLayer
+        val currentGroupMembers = groupManager.members.value
+        val activeGroupCount = if (groupManager.activeRoomCode.value != null) currentGroupMembers.size + 1 else 0
 
         val rgba = bikeMapRenderer.renderRgba(
             width = width,
@@ -1324,7 +1356,9 @@ class EnduController {
             waypoints = snap.waypoints,
             intermediateStops = snap.intermediateStops,
             remainingMinutes = snap.remainingMinutes,
-            routeTypeLabel = snap.routeTypeLabel
+            routeTypeLabel = snap.routeTypeLabel,
+            groupMembers = currentGroupMembers,
+            groupActiveCount = activeGroupCount
         )
 
         // Actualizar preview periódicamente en el mismo hilo tras renderRgba para evitar contención de lock
@@ -1343,7 +1377,9 @@ class EnduController {
                 waypoints = snap.waypoints,
                 intermediateStops = snap.intermediateStops,
                 remainingMinutes = snap.remainingMinutes,
-                routeTypeLabel = snap.routeTypeLabel
+                routeTypeLabel = snap.routeTypeLabel,
+                groupMembers = currentGroupMembers,
+                groupActiveCount = activeGroupCount
             )
             if (preview != null) {
                 previewSeqLock.withLock { ++previewRequestSeq }
@@ -1418,6 +1454,8 @@ class EnduController {
         val seq = previewSeqLock.withLock { ++previewRequestSeq }
         scope.launch(Dispatchers.Default) {
             val snap = buildTftRouteHudSnapshot()
+            val currentGroupMembers = groupManager.members.value
+            val activeGroupCount = if (groupManager.activeRoomCode.value != null) currentGroupMembers.size + 1 else 0
 
             val preview = bikeMapRenderer.renderPreview(
                 width = 296,
@@ -1433,7 +1471,9 @@ class EnduController {
                 waypoints = snap.waypoints,
                 intermediateStops = snap.intermediateStops,
                 remainingMinutes = snap.remainingMinutes,
-                routeTypeLabel = snap.routeTypeLabel
+                routeTypeLabel = snap.routeTypeLabel,
+                groupMembers = currentGroupMembers,
+                groupActiveCount = activeGroupCount
             )
             if (preview != null) {
                 val shouldPublish = previewSeqLock.withLock { seq == previewRequestSeq }
@@ -1442,6 +1482,161 @@ class EnduController {
                 }
             }
         }
+    }
+
+    // --- Grupos en Tiempo Real (Móvil + Pantalla TFT) ---
+
+    fun createGroup(): String {
+        val code = groupManager.createGroup()
+        _pendingGroupJoinCode.value = null
+        cachedGroupBattPct = getPlatformBatteryStatus().percentage
+        groupManager.onLocationUpdate(riderTelemetry.value, cachedGroupBattPct)
+        updateBackgroundKeepAlive()
+        refreshStaticPreview()
+        showPlatformToast("Grupo creado: ${GroupInvite.formatForDisplay(code)}")
+        return code
+    }
+
+    fun joinGroup(rawInput: String): Boolean {
+        val ok = groupManager.joinGroup(rawInput)
+        if (ok) {
+            _pendingGroupJoinCode.value = null
+            cachedGroupBattPct = getPlatformBatteryStatus().percentage
+            groupManager.onLocationUpdate(riderTelemetry.value, cachedGroupBattPct)
+            updateBackgroundKeepAlive()
+            refreshStaticPreview()
+            val code = groupManager.activeRoomCode.value.orEmpty()
+            showPlatformToast("Unido al grupo ${GroupInvite.formatForDisplay(code)}")
+        } else {
+            showPlatformToast("Código de grupo no válido")
+        }
+        return ok
+    }
+
+    fun leaveGroup() {
+        groupManager.leaveGroup()
+        updateBackgroundKeepAlive()
+        refreshStaticPreview()
+        showPlatformToast("Has salido del grupo")
+    }
+
+    fun updateGroupProfile(nickname: String, color: RiderColor) {
+        groupManager.updateProfile(nickname, color)
+    }
+
+    fun updateGroupNetworkSettings(
+        batterySaver: Boolean,
+        enableOnline: Boolean,
+        enableLan: Boolean,
+        customBrokerUrl: String
+    ) {
+        groupManager.updateNetworkSettings(
+            batterySaverMode = batterySaver,
+            enableOnlineSync = enableOnline,
+            enableOfflineLanSync = enableLan,
+            customBrokerUrl = customBrokerUrl
+        )
+        updateBackgroundKeepAlive()
+    }
+
+    fun setGroupRiderStatus(status: RiderStatus, message: String = "") {
+        groupManager.setMyStatus(status, message)
+        if (status.isAlert) {
+            showPlatformToast("Aviso enviado al grupo: ${status.shortLabel}")
+        }
+    }
+
+    fun shareActiveRouteWithGroup() {
+        val route = selectedRoute ?: destinationRoadRoute?.asGPXRoute
+        if (route == null) {
+            showPlatformToast("Selecciona o calcula primero una ruta para compartirla")
+            return
+        }
+        if (groupManager.shareRoute(route)) {
+            val msg = "Track «${route.name}» compartido con el grupo"
+            _statusBannerMessage.value = msg
+            showPlatformToast(msg)
+        } else {
+            showPlatformToast("Únete primero a un grupo para compartir el track")
+        }
+    }
+
+    fun importSharedGroupTrack() {
+        val shared = groupManager.sharedTrack.value ?: return
+        importGPXContent("${shared.name}.gpx", shared.gpxXml)
+        groupManager.dismissSharedTrack()
+    }
+
+    fun dismissSharedGroupTrack() {
+        groupManager.dismissSharedTrack()
+    }
+
+    fun navigateToGroupMember(member: GroupMember) {
+        val riderPos = riderTelemetry.value.coordinate
+        val dist = riderPos?.let { it.distanceTo(member.coordinate) / 1000.0 }
+        val item = SearchResultItem(
+            title = member.name,
+            subtitle = "Compañero · ${member.status.shortLabel}",
+            coordinate = member.coordinate,
+            distanceKm = dist
+        )
+        selectSearchResult(item)
+    }
+
+    fun addGroupMemberAsStop(member: GroupMember) {
+        val riderPos = riderTelemetry.value.coordinate
+        val dist = riderPos?.let { it.distanceTo(member.coordinate) / 1000.0 }
+        val item = SearchResultItem(
+            title = member.name,
+            subtitle = "Parada en posición de ${member.name}",
+            coordinate = member.coordinate,
+            distanceKm = dist
+        )
+        addIntermediateWaypoint(item)
+    }
+
+    fun centerOnGroupMember(member: GroupMember) {
+        _mapCenter.value = member.coordinate
+        _followMode.value = MapFollowMode.FREE
+        if (_mapZoom.value < 15.5) {
+            setZoom(15.5)
+        }
+    }
+
+    fun fitGroupOnMap() {
+        val coords = mutableListOf<GeoCoord>()
+        riderTelemetry.value.coordinate?.let { coords.add(it) }
+        groupManager.members.value.forEach { coords.add(it.coordinate) }
+        if (coords.isNotEmpty()) {
+            fitCoordinates(coords)
+        }
+    }
+
+    fun setBikeGroupDisplayConfig(
+        showMembers: Boolean,
+        showNames: Boolean,
+        showEdgeRadar: Boolean,
+        showHudBadge: Boolean,
+        showAlerts: Boolean
+    ) {
+        _bikeMapConfig.value = _bikeMapConfig.value.copy(
+            showGroupMembersOnTft = showMembers,
+            showGroupNamesOnTft = showNames,
+            showGroupEdgeRadarOnTft = showEdgeRadar,
+            showGroupHudBadgeOnTft = showHudBadge,
+            showGroupAlertsOnTft = showAlerts
+        )
+        persistSettings()
+        refreshStaticPreview()
+    }
+
+    fun handleIncomingGroupLink(url: String) {
+        val parsed = GroupInvite.parseRoomCode(url) ?: return
+        _pendingGroupJoinCode.value = parsed
+    }
+
+    fun consumePendingGroupJoinCode() {
+        _pendingGroupJoinCode.value = null
     }
 
     // --- Descarga Offline ---

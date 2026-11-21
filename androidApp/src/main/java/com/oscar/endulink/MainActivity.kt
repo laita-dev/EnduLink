@@ -60,6 +60,13 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIncomingGpxIntent(incoming: Intent?) {
         if (incoming == null) return
+        val viewUri = if (incoming.action == Intent.ACTION_VIEW) incoming.data else null
+        if (viewUri != null && viewUri.scheme.equals("endulink", ignoreCase = true)) {
+            incoming.action = null
+            incoming.data = null
+            com.oscar.endulink.ui.EnduController.shared.handleIncomingGroupLink(viewUri.toString())
+            return
+        }
         val uri: Uri? = when (incoming.action) {
             Intent.ACTION_VIEW -> incoming.data
                 ?: incoming.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri

@@ -959,5 +959,73 @@ fun QrScannerIcon(
     }
 }
 
+@Composable
+fun GroupRidersIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.6f.dp.toPx()
+
+        // Piloto principal (izquierda/centro)
+        drawCircle(
+            color = color,
+            radius = w * 0.15f,
+            center = Offset(w * 0.36f, h * 0.30f),
+            style = Stroke(width = strokeW)
+        )
+        val mainBody = Path().apply {
+            moveTo(w * 0.12f, h * 0.84f)
+            quadraticTo(w * 0.14f, h * 0.54f, w * 0.36f, h * 0.54f)
+            quadraticTo(w * 0.58f, h * 0.54f, w * 0.60f, h * 0.84f)
+        }
+        drawPath(
+            path = mainBody,
+            color = color,
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Segundo compañero (derecha)
+        drawCircle(
+            color = color,
+            radius = w * 0.13f,
+            center = Offset(w * 0.70f, h * 0.34f),
+            style = Stroke(width = strokeW)
+        )
+        val secondBody = Path().apply {
+            moveTo(w * 0.62f, h * 0.58f)
+            quadraticTo(w * 0.84f, h * 0.58f, w * 0.88f, h * 0.84f)
+        }
+        drawPath(
+            path = secondBody,
+            color = color,
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
+
+@Composable
+fun QrCodeIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.6f.dp.toPx()
+        val box = w * 0.30f
+        drawRect(color = color, topLeft = Offset(w * 0.12f, h * 0.12f), size = Size(box, box), style = Stroke(strokeW))
+        drawRect(color = color, topLeft = Offset(w * 0.58f, h * 0.12f), size = Size(box, box), style = Stroke(strokeW))
+        drawRect(color = color, topLeft = Offset(w * 0.12f, h * 0.58f), size = Size(box, box), style = Stroke(strokeW))
+        drawRect(color = color, topLeft = Offset(w * 0.58f, h * 0.58f), size = Size(w * 0.13f, h * 0.13f))
+        drawRect(color = color, topLeft = Offset(w * 0.75f, h * 0.75f), size = Size(w * 0.13f, h * 0.13f))
+    }
+}
+
+
 
 

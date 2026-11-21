@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>es</string>
     <key>CFBundleDisplayName</key>
-    <string>motillOS</string>
+    <string>motillOS-test</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -13,11 +13,24 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>motillOS</string>
+    <string>motillOS-test</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleURLName</key>
+            <string>com.oscar.endulink.group</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>endulink</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.0</string>
+    <string>0.2.0-test</string>
     <key>CFBundleVersion</key>
     <string>20</string>
     <key>CADisableMinimumFrameDurationOnPhone</key>

@@ -1,6 +1,7 @@
 package com.oscar.endulink.bike
 
 import androidx.compose.ui.graphics.ImageBitmap
+import com.oscar.endulink.group.GroupMember
 import com.oscar.endulink.platform.RiderTelemetry
 import com.oscar.endulink.tiles.MapLayer
 import com.oscar.endulink.tiles.TileStore
@@ -49,7 +50,12 @@ data class BikeMapConfig(
     val autoZoomMidSpeedKmh: Int = 75,
     val autoZoomLowLevel: Int = 17,
     val autoZoomMidLevel: Int = 15,
-    val autoZoomHighLevel: Int = 13
+    val autoZoomHighLevel: Int = 13,
+    val showGroupMembersOnTft: Boolean = true,
+    val showGroupNamesOnTft: Boolean = true,
+    val showGroupEdgeRadarOnTft: Boolean = true,
+    val showGroupHudBadgeOnTft: Boolean = true,
+    val showGroupAlertsOnTft: Boolean = true
 ) {
     fun resolveEffectiveZoom(speedKmh: Double): Int {
         if (!autoZoomBySpeed) return zoom.coerceIn(5, 18)
@@ -114,7 +120,9 @@ expect class BikeMapRenderer(tileStore: TileStore) {
         waypoints: List<GPXWaypoint> = emptyList(),
         intermediateStops: List<GeoCoord> = emptyList(),
         remainingMinutes: Int? = null,
-        routeTypeLabel: String? = null
+        routeTypeLabel: String? = null,
+        groupMembers: List<GroupMember> = emptyList(),
+        groupActiveCount: Int = 0
     ): ByteArray?
 
     fun renderPreview(
@@ -131,6 +139,8 @@ expect class BikeMapRenderer(tileStore: TileStore) {
         waypoints: List<GPXWaypoint> = emptyList(),
         intermediateStops: List<GeoCoord> = emptyList(),
         remainingMinutes: Int? = null,
-        routeTypeLabel: String? = null
+        routeTypeLabel: String? = null,
+        groupMembers: List<GroupMember> = emptyList(),
+        groupActiveCount: Int = 0
     ): ImageBitmap?
 }

@@ -22,6 +22,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.oscar.endulink.bike.BikeState
+import com.oscar.endulink.group.GroupConnectionState
+import com.oscar.endulink.group.GroupMember
+import com.oscar.endulink.group.GroupTftLayout
+import com.oscar.endulink.group.RiderStatus
+import com.oscar.endulink.group.SharedGroupTrack
 import com.oscar.endulink.platform.RiderTelemetry
 import com.oscar.endulink.trail.CalculatedRoadRoute
 import com.oscar.endulink.trail.GPXRoute
@@ -87,6 +92,15 @@ fun HudOverlay(
     onConfirmPickOnMap: () -> Unit = {},
     onConfirmPickAsStop: () -> Unit = {},
     onCancelPickOnMap: () -> Unit = {},
+    groupRoomCode: String? = null,
+    groupMembers: List<GroupMember> = emptyList(),
+    groupConnectionState: GroupConnectionState = GroupConnectionState.DISCONNECTED,
+    groupSharedTrack: SharedGroupTrack? = null,
+    onOpenGroupSheet: () -> Unit = {},
+    onSelectAlertMember: (GroupMember) -> Unit = {},
+    onNavigateToAlertMember: (GroupMember) -> Unit = {},
+    onImportSharedTrack: () -> Unit = {},
+    onDismissSharedTrack: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -355,6 +369,114 @@ fun HudOverlay(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
                             .clickable { onDismissBanner() }
+                            .padding(4.dp)
+                    )
+                }
+            }
+
+            // Alerta rápida de compañero de grupo (SOS / Avería / Esperadme)
+            val topAlertMember = groupMembers
+                .filter { it.status.isAlert }
+                .maxByOrNull { it.status.alertPriority }
+            if (topAlertMember != null) {
+                val alertColor = when (topAlertMember.status) {
+                    RiderStatus.SOS -> EnduPalette.Danger
+                    RiderStatus.MECHANICAL -> EnduPalette.Accent
+                    else -> EnduPalette.Warning
+                }
+                val distTxt = rider.coordinate?.let {
+                    " · a ${GroupTftLayout.formatCompactDistance(it.distanceTo(topAlertMember.coordinate))}"
+                } ?: ""
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(alertColor.copy(alpha = 0.22f))
+                        .border(1.dp, alertColor, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${topAlertMember.status.shortLabel.uppercase()}: ${topAlertMember.name}$distTxt",
+                            color = Color.White,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (topAlertMember.statusMessage.isNotBlank()) {
+                            Text(
+                                text = topAlertMember.statusMessage,
+                                color = EnduPalette.TextPrimary,
+                                fontSize = 10.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(EnduPalette.Surface)
+                                .clickable { onSelectAlertMember(topAlertMember) }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("Ver", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(alertColor)
+                                .clickable { onNavigateToAlertMember(topAlertMember) }
+                                .padding(horizontal = 9.dp, vertical = 4.dp)
+                        ) {
+                            Text("Ir", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            // Notificación de track GPX recibido del grupo
+            if (groupSharedTrack != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(EnduPalette.Surface.copy(alpha = 0.96f))
+                        .border(1.dp, EnduPalette.AccentBlue.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Track grupo (${groupSharedTrack.senderName}): ${groupSharedTrack.name}",
+                        color = EnduPalette.TextPrimary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(EnduPalette.AccentBlue)
+                            .clickable { onImportSharedTrack() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text("Cargar", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "✕",
+                        color = EnduPalette.TextMuted,
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .clickable { onDismissSharedTrack() }
                             .padding(4.dp)
                     )
                 }
@@ -1231,6 +1353,44 @@ fun HudOverlay(
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
+                    }
+
+                    // 6. Grupo en Tiempo Real
+                    val isGroupActive = groupRoomCode != null
+                    val alertRider = groupMembers.firstOrNull { it.status.isAlert }
+                    val groupBg = when {
+                        alertRider != null -> EnduPalette.Danger.copy(alpha = 0.28f)
+                        isGroupActive -> EnduPalette.Success.copy(alpha = 0.22f)
+                        else -> EnduPalette.SurfaceHigh
+                    }
+                    val groupTint = when {
+                        alertRider != null -> EnduPalette.Danger
+                        isGroupActive -> EnduPalette.Success
+                        else -> EnduPalette.TextPrimary
+                    }
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(groupBg)
+                            .clickable { onOpenGroupSheet() }
+                            .padding(horizontal = 8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            GroupRidersIcon(color = groupTint, size = 14.dp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = when {
+                                    alertRider != null -> "${alertRider.status.tftTag.ifBlank { "AVISO" }} · ${alertRider.name.take(6)}"
+                                    isGroupActive -> "Grupo (${groupMembers.size + 1})"
+                                    else -> "Grupo"
+                                },
+                                color = groupTint,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
 

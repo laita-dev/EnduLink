@@ -22,3 +22,7 @@ fun notifyExternalGpxError(message: String) {
     showPlatformToast(message)
 }
 
+fun handleIncomingGroupLink(url: String) {
+    EnduController.shared.handleIncomingGroupLink(url)
+}
+

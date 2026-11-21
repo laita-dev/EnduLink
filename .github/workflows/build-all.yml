@@ -32,7 +32,8 @@ jobs:
           GRADLE_ARGS=":androidApp:assembleRelease --stacktrace"
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             TAG_VER="${GITHUB_REF_NAME#v}"
-            IFS='.' read -r major minor patch <<< "$TAG_VER"
+            TAG_BASE="${TAG_VER%%-*}"
+            IFS='.' read -r major minor patch <<< "$TAG_BASE"
             V_CODE=$(( ${major:-0} * 10000 + ${minor:-0} * 100 + ${patch:-0} ))
             echo "Sincronizando APK con tag $TAG_VER (code: $V_CODE)"
             GRADLE_ARGS=":androidApp:assembleRelease -PappVersionName=$TAG_VER -PappVersionCode=$V_CODE --stacktrace"
@@ -84,9 +85,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           TAG_VER="${GITHUB_REF_NAME#v}"
-          echo "Sincronizando iOS Info.plist con tag: $TAG_VER"
+          TAG_BASE="${TAG_VER%%-*}"
+          echo "Sincronizando iOS Info.plist con tag: $TAG_VER (CFBundleVersion: $TAG_BASE)"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $TAG_VER" iosApp/iosApp/Info.plist || true
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $TAG_VER" iosApp/iosApp/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $TAG_BASE" iosApp/iosApp/Info.plist || true
 
       - name: Generar proyecto Xcode con XcodeGen
         run: |
@@ -174,6 +176,7 @@ jobs:
         with:
           files: release-artifacts/*
           body_path: release_notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

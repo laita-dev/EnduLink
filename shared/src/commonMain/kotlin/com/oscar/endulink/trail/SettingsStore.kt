@@ -2,6 +2,7 @@ package com.oscar.endulink.trail
 
 import com.oscar.endulink.bike.BikeMapConfig
 import com.oscar.endulink.bike.BikeQr
+import com.oscar.endulink.group.GroupConfig
 import com.oscar.endulink.tiles.MapLayer
 import com.oscar.endulink.tiles.PlatformPaths
 import com.oscar.endulink.tiles.TileDiskStorage
@@ -15,7 +16,8 @@ data class PersistedSettings(
     val bikeMapConfig: BikeMapConfig = BikeMapConfig(),
     val bikeQr: BikeQr? = null,
     val allowLocalLanTesting: Boolean = true,
-    val lanTestingDefaultApplied: Boolean = false
+    val lanTestingDefaultApplied: Boolean = false,
+    val groupConfig: GroupConfig = GroupConfig()
 )
 
 object SettingsStore {
@@ -52,7 +54,8 @@ object SettingsStore {
         layer: MapLayer,
         bikeConfig: BikeMapConfig,
         bikeQr: BikeQr? = null,
-        allowLocalLanTesting: Boolean = true
+        allowLocalLanTesting: Boolean = true,
+        groupConfig: GroupConfig = GroupConfig()
     ) {
         try {
             val payload = PersistedSettings(
@@ -60,7 +63,8 @@ object SettingsStore {
                 bikeMapConfig = bikeConfig,
                 bikeQr = bikeQr,
                 allowLocalLanTesting = allowLocalLanTesting,
-                lanTestingDefaultApplied = true
+                lanTestingDefaultApplied = true,
+                groupConfig = groupConfig
             )
             TileDiskStorage.writeBytes(getFilePath(), json.encodeToString(payload).encodeToByteArray())
         } catch (_: Exception) {}

@@ -11,7 +11,7 @@ settings:
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.2.0"
+    MARKETING_VERSION: "0.2.0-test"
     CURRENT_PROJECT_VERSION: "20"
 
 targets:
@@ -25,7 +25,7 @@ targets:
           - Info.plist
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.oscar.endulink
+        PRODUCT_BUNDLE_IDENTIFIER: com.oscar.endulink.test
         PRODUCT_NAME: EnduLink
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO

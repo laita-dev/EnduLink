@@ -1,0 +1,252 @@
+package com.oscar.endulink.group
+
+import com.oscar.endulink.tiles.TileMath
+import com.oscar.endulink.trail.GeoCoord
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
+
+data class TftProjectedMember(
+    val member: GroupMember,
+    val screenX: Float,
+    val screenY: Float,
+    val relativeHeadingDeg: Float,
+    val distanceMeters: Double,
+    val isOnScreen: Boolean,
+    val isStale: Boolean
+)
+
+data class TftEdgeIndicator(
+    val member: GroupMember,
+    val edgeX: Float,
+    val edgeY: Float,
+    val angleRad: Float,
+    val label: String,
+    val distanceMeters: Double,
+    val isAlert: Boolean,
+    val isStale: Boolean
+)
+
+data class TftGroupAlertBanner(
+    val member: GroupMember,
+    val text: String,
+    val status: RiderStatus
+)
+
+data class TftGroupOverlayPlan(
+    val inViewMembers: List<TftProjectedMember>,
+    val edgeIndicators: List<TftEdgeIndicator>,
+    val alertBanner: TftGroupAlertBanner?
+)
+
+/**
+ * Motor geométrico compartido (Android + iOS) para proyectar compañeros, radar en bordes
+ * y alertas rápidas sobre el lienzo TFT (`592x816` o preview escalada).
+ */
+object GroupTftLayout {
+
+    fun formatCompactDistance(meters: Double): String {
+        if (meters < 1000.0) {
+            val m = maxOf(10, (meters / 10.0).roundToInt() * 10)
+            return "${m}M"
+        }
+        val km = meters / 1000.0
+        return if (km < 100.0) {
+            val tenths = (km * 10.0).roundToInt()
+            val whole = tenths / 10
+            val dec = tenths % 10
+            if (dec == 0) "${whole}K" else "${whole}.${dec}K"
+        } else {
+            "${km.roundToInt()}K"
+        }
+    }
+
+    fun formatShortName(name: String): String {
+        val clean = buildString {
+            for (ch in name.trim().uppercase()) {
+                val mapped = when (ch) {
+                    'Á', 'À', 'Ä' -> 'A'
+                    'É', 'È', 'Ë' -> 'E'
+                    'Í', 'Ì', 'Ï' -> 'I'
+                    'Ó', 'Ò', 'Ö' -> 'O'
+                    'Ú', 'Ù', 'Ü' -> 'U'
+                    'Ñ' -> 'N'
+                    else -> ch
+                }
+                append(mapped)
+                if (length >= 8) break
+            }
+        }
+        return clean.ifBlank { "COMP" }
+    }
+
+    fun compute(
+        members: List<GroupMember>,
+        mapCenter: GeoCoord,
+        zoom: Int,
+        tileSizePx: Float,
+        mapHeadingDeg: Double,
+        anchorX: Float,
+        anchorY: Float,
+        width: Float,
+        height: Float,
+        scale: Float,
+        nowMs: Long
+    ): TftGroupOverlayPlan {
+        if (members.isEmpty()) {
+            return TftGroupOverlayPlan(emptyList(), emptyList(), null)
+        }
+
+        val (centerFracX, centerFracY) = TileMath.latLonToFractionalTile(
+            mapCenter.latitude,
+            mapCenter.longitude,
+            zoom
+        )
+        val rad = -mapHeadingDeg * PI / 180.0
+        val cosR = cos(rad)
+        val sinR = sin(rad)
+
+        val visiblePadX = 18f * scale
+        val visibleTop = 64f * scale
+        val visibleBottom = height - 86f * scale
+
+        val safeLeft = 56f * scale
+        val safeRight = (width - 56f * scale).coerceAtLeast(safeLeft + 10f)
+        val safeTop = 104f * scale
+        val safeBottom = (height - 104f * scale).coerceAtLeast(safeTop + 10f)
+
+        val inView = ArrayList<TftProjectedMember>()
+        val offScreen = ArrayList<TftProjectedMember>()
+
+        for (member in members) {
+            val (fx, fy) = TileMath.latLonToFractionalTile(member.latitude, member.longitude, zoom)
+            val lx = (fx - centerFracX) * tileSizePx
+            val ly = (fy - centerFracY) * tileSizePx
+            val sx = (anchorX + (lx * cosR - ly * sinR)).toFloat()
+            val sy = (anchorY + (lx * sinR + ly * cosR)).toFloat()
+
+            val distM = mapCenter.distanceTo(member.coordinate)
+            val stale = member.isStale(nowMs)
+            val relHead = (((member.headingDegrees - mapHeadingDeg) % 360.0 + 360.0) % 360.0).toFloat()
+
+            val onScreen = sx in visiblePadX..(width - visiblePadX) && sy in visibleTop..visibleBottom
+            val projected = TftProjectedMember(
+                member = member,
+                screenX = sx,
+                screenY = sy,
+                relativeHeadingDeg = relHead,
+                distanceMeters = distM,
+                isOnScreen = onScreen,
+                isStale = stale
+            )
+            if (onScreen) {
+                inView.add(projected)
+            } else {
+                offScreen.add(projected)
+            }
+        }
+
+        // Priorizar alertas y compañeros más cercanos para el radar en bordes (máximo 6)
+        val prioritizedOffScreen = offScreen
+            .sortedWith(
+                compareByDescending<TftProjectedMember> { it.member.status.alertPriority }
+                    .thenBy { it.distanceMeters }
+            )
+            .take(6)
+
+        val rawIndicators = prioritizedOffScreen.map { proj ->
+            val dx = proj.screenX - anchorX
+            val dy = proj.screenY - anchorY
+            var tMin = Float.MAX_VALUE
+            if (dx > 1e-3f) {
+                val t = (safeRight - anchorX) / dx
+                if (t > 0f && t < tMin) tMin = t
+            } else if (dx < -1e-3f) {
+                val t = (safeLeft - anchorX) / dx
+                if (t > 0f && t < tMin) tMin = t
+            }
+            if (dy > 1e-3f) {
+                val t = (safeBottom - anchorY) / dy
+                if (t > 0f && t < tMin) tMin = t
+            } else if (dy < -1e-3f) {
+                val t = (safeTop - anchorY) / dy
+                if (t > 0f && t < tMin) tMin = t
+            }
+            if (tMin == Float.MAX_VALUE) tMin = 1f
+
+            val ex = (anchorX + dx * tMin).coerceIn(safeLeft, safeRight)
+            val ey = (anchorY + dy * tMin).coerceIn(safeTop, safeBottom)
+            val angle = atan2(dy, dx)
+            val distStr = formatCompactDistance(proj.distanceMeters)
+            val label = if (proj.member.status.isAlert) {
+                "!${proj.member.status.tftTag} ${proj.member.initials()}"
+            } else {
+                "${proj.member.initials()} $distStr"
+            }
+            TftEdgeIndicator(
+                member = proj.member,
+                edgeX = ex,
+                edgeY = ey,
+                angleRad = angle,
+                label = label,
+                distanceMeters = proj.distanceMeters,
+                isAlert = proj.member.status.isAlert,
+                isStale = proj.isStale
+            )
+        }
+
+        val resolvedIndicators = separateCloseIndicators(rawIndicators, safeTop, safeBottom, 26f * scale)
+
+        // Banner destacado solo si algún compañero tiene alerta activa
+        val topAlert = (inView + offScreen)
+            .filter { it.member.status.isAlert }
+            .maxWithOrNull(
+                compareBy<TftProjectedMember> { it.member.status.alertPriority }
+                    .thenBy { -it.distanceMeters }
+            )
+        val banner = topAlert?.let {
+            val tag = it.member.status.tftTag.ifBlank { "AVISO" }
+            val who = formatShortName(it.member.name)
+            val dist = formatCompactDistance(it.distanceMeters)
+            TftGroupAlertBanner(
+                member = it.member,
+                text = "$tag: $who - $dist",
+                status = it.member.status
+            )
+        }
+
+        return TftGroupOverlayPlan(
+            inViewMembers = inView,
+            edgeIndicators = resolvedIndicators,
+            alertBanner = banner
+        )
+    }
+
+    private fun separateCloseIndicators(
+        items: List<TftEdgeIndicator>,
+        minY: Float,
+        maxY: Float,
+        minGapPx: Float
+    ): List<TftEdgeIndicator> {
+        if (items.size <= 1) return items
+        val result = items.toMutableList()
+        for (i in result.indices) {
+            for (j in 0 until i) {
+                val a = result[j]
+                val b = result[i]
+                if (abs(a.edgeX - b.edgeX) < minGapPx * 2.2f && abs(a.edgeY - b.edgeY) < minGapPx) {
+                    val shiftedY = if (b.edgeY + minGapPx <= maxY) {
+                        b.edgeY + minGapPx
+                    } else {
+                        (b.edgeY - minGapPx).coerceAtLeast(minY)
+                    }
+                    result[i] = b.copy(edgeY = shiftedY)
+                }
+            }
+        }
+        return result
+    }
+}

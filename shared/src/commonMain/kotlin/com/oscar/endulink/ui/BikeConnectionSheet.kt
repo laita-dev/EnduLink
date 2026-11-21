@@ -57,6 +57,7 @@ fun BikeConnectionSheet(
     onSetAutoZoomConfig: (lowSpeedKmh: Int, midSpeedKmh: Int, lowZoom: Int, midZoom: Int, highZoom: Int) -> Unit,
     onSetBitrate: (Int) -> Unit,
     onSetBikeMapLayer: (MapLayer?) -> Unit,
+    onSetBikeGroupDisplayConfig: (showMembers: Boolean, showNames: Boolean, showEdgeRadar: Boolean, showHudBadge: Boolean, showAlerts: Boolean) -> Unit = { _, _, _, _, _ -> },
     onSetAllowLocalLanTesting: (Boolean) -> Unit,
     onSaveQr: (String) -> Boolean,
     onClearQr: () -> Unit = {},
@@ -796,6 +797,13 @@ fun BikeConnectionSheet(
                                 )
                             }
                         }
+
+                        HorizontalDivider(color = EnduPalette.Outline.copy(alpha = 0.4f))
+
+                        TftGroupDisplaySwitches(
+                            config = config,
+                            onUpdate = onSetBikeGroupDisplayConfig
+                        )
                     }
                 }
 
@@ -1101,6 +1109,13 @@ fun BikeConnectionSheet(
                                 )
                             }
                         }
+
+                        HorizontalDivider(color = EnduPalette.Outline.copy(alpha = 0.4f))
+
+                        TftGroupDisplaySwitches(
+                            config = config,
+                            onUpdate = onSetBikeGroupDisplayConfig
+                        )
                     }
                 }
             },

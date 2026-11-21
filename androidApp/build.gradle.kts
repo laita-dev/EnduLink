@@ -10,15 +10,16 @@ android {
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "com.oscar.endulink"
+        applicationId = "com.oscar.endulink.test"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
 
         val envVersionName = project.findProperty("appVersionName") as? String
         val envVersionCode = (project.findProperty("appVersionCode") as? String)?.toIntOrNull()
 
-        val resolvedVersionName = envVersionName ?: "0.2.0"
-        val versionParts = resolvedVersionName.split(".").mapNotNull { it.toIntOrNull() }
+        val resolvedVersionName = envVersionName ?: "0.2.0-test"
+        val baseVersion = resolvedVersionName.substringBefore("-")
+        val versionParts = baseVersion.split(".").mapNotNull { it.toIntOrNull() }
         val derivedVersionCode = if (versionParts.size >= 3) {
             versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
         } else {

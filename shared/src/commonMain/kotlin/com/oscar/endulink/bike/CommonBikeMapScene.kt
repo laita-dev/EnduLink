@@ -5,6 +5,11 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import com.oscar.endulink.group.GroupMember
+import com.oscar.endulink.group.GroupTftLayout
+import com.oscar.endulink.group.RiderStatus
+import com.oscar.endulink.group.TftEdgeIndicator
+import com.oscar.endulink.group.TftProjectedMember
 import com.oscar.endulink.platform.BatteryStatus
 import com.oscar.endulink.platform.RiderTelemetry
 import com.oscar.endulink.platform.SynchronizedLock
@@ -18,6 +23,7 @@ import com.oscar.endulink.trail.GPXRoute
 import com.oscar.endulink.trail.GPXWaypoint
 import com.oscar.endulink.trail.GeoCoord
 import kotlinx.datetime.Clock
+import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.cos
@@ -129,6 +135,19 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         style = PaintingStyle.Fill
         isAntiAlias = true
     }
+    private val groupFillPaint = Paint().apply {
+        style = PaintingStyle.Fill
+        isAntiAlias = true
+    }
+    private val groupStrokePaint = Paint().apply {
+        style = PaintingStyle.Stroke
+        isAntiAlias = true
+    }
+    private val groupAlertBgPaint = Paint().apply {
+        style = PaintingStyle.Fill
+        isAntiAlias = true
+    }
+    private val groupArrowPath = Path()
 
     private var lastBatteryCheckMs: Long = 0L
     private var cachedBatteryStatus: BatteryStatus = BatteryStatus()
@@ -156,7 +175,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         waypoints: List<GPXWaypoint>,
         intermediateStops: List<GeoCoord>,
         remainingMinutes: Int? = null,
-        routeTypeLabel: String? = null
+        routeTypeLabel: String? = null,
+        groupMembers: List<GroupMember> = emptyList(),
+        groupActiveCount: Int = 0
     ): ImageBitmap = lock.withLock {
         val bmp = ImageBitmap(width, height, ImageBitmapConfig.Argb8888)
         val canvas = Canvas(bmp)
@@ -175,7 +196,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             waypoints = waypoints,
             intermediateStops = intermediateStops,
             remainingMinutes = remainingMinutes,
-            routeTypeLabel = routeTypeLabel
+            routeTypeLabel = routeTypeLabel,
+            groupMembers = groupMembers,
+            groupActiveCount = groupActiveCount
         )
         return bmp
     }
@@ -194,7 +217,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         waypoints: List<GPXWaypoint>,
         intermediateStops: List<GeoCoord>,
         remainingMinutes: Int? = null,
-        routeTypeLabel: String? = null
+        routeTypeLabel: String? = null,
+        groupMembers: List<GroupMember> = emptyList(),
+        groupActiveCount: Int = 0
     ): ByteArray = lock.withLock {
         val cur = cachedBitmap
         val bmp = if (cur != null && cur.width == width && cur.height == height) {
@@ -226,7 +251,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             waypoints = waypoints,
             intermediateStops = intermediateStops,
             remainingMinutes = remainingMinutes,
-            routeTypeLabel = routeTypeLabel
+            routeTypeLabel = routeTypeLabel,
+            groupMembers = groupMembers,
+            groupActiveCount = groupActiveCount
         )
 
         bmp.readPixels(
@@ -263,7 +290,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         waypoints: List<GPXWaypoint>,
         intermediateStops: List<GeoCoord>,
         remainingMinutes: Int?,
-        routeTypeLabel: String?
+        routeTypeLabel: String?,
+        groupMembers: List<GroupMember>,
+        groupActiveCount: Int
     ) {
         val w = width
         val h = height
@@ -437,6 +466,36 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         }
 
         canvas.restore()
+
+        // 4d. Compañeros de grupo en tiempo real (en pantalla y radar de bordes configurables)
+        val groupPlan = if (groupMembers.isNotEmpty() && (config.showGroupMembersOnTft || config.showGroupAlertsOnTft)) {
+            GroupTftLayout.compute(
+                members = groupMembers,
+                mapCenter = center,
+                zoom = zoom,
+                tileSizePx = tileSizePx,
+                mapHeadingDeg = heading,
+                anchorX = anchorX,
+                anchorY = anchorY,
+                width = w,
+                height = h,
+                scale = scale,
+                nowMs = Clock.System.now().toEpochMilliseconds()
+            )
+        } else {
+            null
+        }
+
+        if (config.showGroupMembersOnTft && groupPlan != null) {
+            for (proj in groupPlan.inViewMembers) {
+                drawGroupMemberPin(canvas, proj, config.showGroupNamesOnTft, scale)
+            }
+            if (config.showGroupEdgeRadarOnTft) {
+                for (ind in groupPlan.edgeIndicators) {
+                    drawGroupEdgeIndicator(canvas, ind, anchorX, anchorY, w, h, scale)
+                }
+            }
+        }
 
         // 5. Flecha del piloto en (anchorX, anchorY)
         canvas.save()
@@ -663,6 +722,62 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             )
         }
 
+        // 9b. Contador discreto de grupo en HUD (debajo de hora/batería)
+        val grpBoxWidth = 86f * scale
+        val grpLeft = w - grpBoxWidth - 14f * scale
+        val grpTop = 56f * scale
+        val grpBottom = 82f * scale
+        if (groupActiveCount > 0 && config.showGroupHudBadgeOnTft) {
+            canvas.drawRoundRect(grpLeft, grpTop, w - 14f * scale, grpBottom, 8f * scale, 8f * scale, hudCardPaint)
+            canvas.drawRoundRect(grpLeft, grpTop, w - 14f * scale, grpBottom, 8f * scale, 8f * scale, hudBorderPaint)
+            val hasAnyAlert = groupMembers.any { it.status.isAlert }
+            groupFillPaint.color = if (hasAnyAlert) Color(255, 59, 48) else Color(48, 209, 88)
+            canvas.drawCircle(Offset(grpLeft + 12f * scale, (grpTop + grpBottom) * 0.5f), 4f * scale, groupFillPaint)
+            TftVectorText.drawText(
+                canvas = canvas,
+                text = "GRP $groupActiveCount",
+                x = grpLeft + 21f * scale,
+                y = grpBottom - 8f * scale,
+                size = 11.5f * scale,
+                color = Color.White,
+                strokeW = 1.7f * scale
+            )
+        }
+
+        // 9c. Banner destacado de alerta rápida (SOS / Avería / Esperadme)
+        val alertBanner = if (config.showGroupAlertsOnTft) groupPlan?.alertBanner else null
+        if (alertBanner != null) {
+            val alertLeft = 14f * scale
+            val maxAlertRight = if (groupActiveCount > 0 && config.showGroupHudBadgeOnTft) {
+                grpLeft - 8f * scale
+            } else {
+                w - 14f * scale
+            }
+            val alertRight = minOf(maxAlertRight, alertLeft + 286f * scale)
+            val alertTop = 62f * scale
+            val alertBottom = 90f * scale
+            if (alertRight > alertLeft + 40f * scale) {
+                groupAlertBgPaint.color = when (alertBanner.status) {
+                    RiderStatus.SOS -> Color(215, 38, 38, 240)
+                    RiderStatus.MECHANICAL -> Color(225, 105, 0, 240)
+                    else -> Color(195, 145, 0, 240)
+                }
+                groupStrokePaint.color = Color.White
+                groupStrokePaint.strokeWidth = 1.6f * scale
+                canvas.drawRoundRect(alertLeft, alertTop, alertRight, alertBottom, 8f * scale, 8f * scale, groupAlertBgPaint)
+                canvas.drawRoundRect(alertLeft, alertTop, alertRight, alertBottom, 8f * scale, 8f * scale, groupStrokePaint)
+                TftVectorText.drawText(
+                    canvas = canvas,
+                    text = alertBanner.text,
+                    x = alertLeft + 10f * scale,
+                    y = alertBottom - 8.5f * scale,
+                    size = 11.5f * scale,
+                    color = Color.White,
+                    strokeW = 1.9f * scale
+                )
+            }
+        }
+
         // 10. BlackEdges (4px arriba y abajo requeridos por Carbit EasyConn)
         val edgePx = (4f * scale).coerceAtLeast(2f)
         canvas.drawRect(0f, 0f, w, edgePx, blackEdgePaint)
@@ -819,6 +934,146 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             prevY = by
         }
         return hasChevrons
+    }
+
+    private fun drawGroupMemberPin(
+        canvas: Canvas,
+        proj: TftProjectedMember,
+        showNames: Boolean,
+        scale: Float
+    ) {
+        val sx = proj.screenX
+        val sy = proj.screenY
+        val baseColor = Color(proj.member.color.argb)
+        val fillColor = if (proj.isStale) baseColor.copy(alpha = 0.55f) else baseColor
+
+        if (proj.member.status.isAlert) {
+            val alertClr = when (proj.member.status) {
+                RiderStatus.SOS -> Color(255, 59, 48)
+                RiderStatus.MECHANICAL -> Color(255, 107, 0)
+                else -> Color(255, 204, 0)
+            }
+            groupAlertBgPaint.color = alertClr.copy(alpha = 0.35f)
+            canvas.drawCircle(Offset(sx, sy), 18f * scale, groupAlertBgPaint)
+            groupStrokePaint.color = alertClr
+            groupStrokePaint.strokeWidth = 2.2f * scale
+            canvas.drawCircle(Offset(sx, sy), 16f * scale, groupStrokePaint)
+        }
+
+        groupFillPaint.color = Color.Black
+        canvas.drawCircle(Offset(sx, sy), 11.5f * scale, groupFillPaint)
+        groupFillPaint.color = fillColor
+        canvas.drawCircle(Offset(sx, sy), 9.2f * scale, groupFillPaint)
+
+        if (proj.member.speedKmh >= 3.0) {
+            canvas.save()
+            canvas.translate(sx, sy)
+            canvas.rotate(proj.relativeHeadingDeg)
+            groupArrowPath.reset()
+            groupArrowPath.moveTo(0f, -6.2f * scale)
+            groupArrowPath.lineTo(4.4f * scale, 4.5f * scale)
+            groupArrowPath.lineTo(0f, 2.2f * scale)
+            groupArrowPath.lineTo(-4.4f * scale, 4.5f * scale)
+            groupArrowPath.close()
+            groupFillPaint.color = Color.White
+            canvas.drawPath(groupArrowPath, groupFillPaint)
+            canvas.restore()
+        } else {
+            groupFillPaint.color = Color.White
+            canvas.drawCircle(Offset(sx, sy), 3.3f * scale, groupFillPaint)
+        }
+
+        if (showNames) {
+            val shortName = GroupTftLayout.formatShortName(proj.member.name)
+            val txtSize = 9.5f * scale
+            val txtW = TftVectorText.measureText(shortName, txtSize)
+            val padX = 5f * scale
+            val pillH = 16f * scale
+            val left = sx - txtW * 0.5f - padX
+            val right = sx + txtW * 0.5f + padX
+            val bottom = sy - 14f * scale
+            val top = bottom - pillH
+            canvas.drawRoundRect(left, top, right, bottom, 4f * scale, 4f * scale, hudCardPaint)
+            groupStrokePaint.color = fillColor
+            groupStrokePaint.strokeWidth = 1.2f * scale
+            canvas.drawRoundRect(left, top, right, bottom, 4f * scale, 4f * scale, groupStrokePaint)
+            TftVectorText.drawText(
+                canvas = canvas,
+                text = shortName,
+                x = left + padX,
+                y = bottom - 4f * scale,
+                size = txtSize,
+                color = Color.White,
+                strokeW = 1.4f * scale
+            )
+        }
+    }
+
+    private fun drawGroupEdgeIndicator(
+        canvas: Canvas,
+        ind: TftEdgeIndicator,
+        anchorX: Float,
+        anchorY: Float,
+        w: Float,
+        h: Float,
+        scale: Float
+    ) {
+        val baseColor = when {
+            ind.member.status == RiderStatus.SOS -> Color(255, 59, 48)
+            ind.member.status == RiderStatus.MECHANICAL -> Color(255, 107, 0)
+            ind.member.status == RiderStatus.STOPPED_WAIT -> Color(255, 204, 0)
+            else -> Color(ind.member.color.argb)
+        }
+        val color = if (ind.isStale) baseColor.copy(alpha = 0.6f) else baseColor
+
+        val deg = (ind.angleRad * 180.0 / PI).toFloat() + 90f
+        canvas.save()
+        canvas.translate(ind.edgeX, ind.edgeY)
+        canvas.rotate(deg)
+        groupArrowPath.reset()
+        groupArrowPath.moveTo(0f, -9f * scale)
+        groupArrowPath.lineTo(6.5f * scale, 6f * scale)
+        groupArrowPath.lineTo(0f, 3f * scale)
+        groupArrowPath.lineTo(-6.5f * scale, 6f * scale)
+        groupArrowPath.close()
+        groupFillPaint.color = Color.Black
+        canvas.drawPath(groupArrowPath, groupFillPaint)
+        groupStrokePaint.color = Color.Black
+        groupStrokePaint.strokeWidth = 2.5f * scale
+        canvas.drawPath(groupArrowPath, groupStrokePaint)
+        groupFillPaint.color = color
+        canvas.drawPath(groupArrowPath, groupFillPaint)
+        canvas.restore()
+
+        val txtSize = 9.5f * scale
+        val txtW = TftVectorText.measureText(ind.label, txtSize)
+        val padX = 5.5f * scale
+        val pillW = txtW + padX * 2f
+        val pillH = 17f * scale
+        val inDx = anchorX - ind.edgeX
+        val inDy = anchorY - ind.edgeY
+        val inLen = hypot(inDx, inDy).coerceAtLeast(1f)
+        val cx = ind.edgeX + (inDx / inLen) * 20f * scale
+        val cy = ind.edgeY + (inDy / inLen) * 16f * scale
+
+        val left = (cx - pillW * 0.5f).coerceIn(8f * scale, (w - pillW - 8f * scale).coerceAtLeast(8f * scale))
+        val top = (cy - pillH * 0.5f).coerceIn(60f * scale, (h - pillH - 22f * scale).coerceAtLeast(60f * scale))
+        val right = left + pillW
+        val bottom = top + pillH
+
+        canvas.drawRoundRect(left, top, right, bottom, 5f * scale, 5f * scale, hudCardPaint)
+        groupStrokePaint.color = color
+        groupStrokePaint.strokeWidth = 1.4f * scale
+        canvas.drawRoundRect(left, top, right, bottom, 5f * scale, 5f * scale, groupStrokePaint)
+        TftVectorText.drawText(
+            canvas = canvas,
+            text = ind.label,
+            x = left + padX,
+            y = bottom - 4.5f * scale,
+            size = txtSize,
+            color = Color.White,
+            strokeW = 1.5f * scale
+        )
     }
 
     private fun drawBatchedChevrons(canvas: Canvas, scale: Float) {
@@ -1162,6 +1417,12 @@ internal object TftVectorText {
                 p.lineTo(x1, ym)
                 p.moveTo(xm, y0 + h * 0.2f)
                 p.lineTo(xm, y1 - h * 0.2f)
+            }
+            '!' -> {
+                p.moveTo(xm, y0)
+                p.lineTo(xm, y0 + h * 0.62f)
+                p.moveTo(xm, y1 - h * 0.14f)
+                p.lineTo(xm, y1)
             }
         }
     }

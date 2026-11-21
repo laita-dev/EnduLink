@@ -15,7 +15,12 @@ interface IosWifiConnectCallback {
 }
 
 interface IosQrScannerBridge {
-    fun startQrScan(callback: IosQrScannerCallback)
+    fun startQrScan(
+        title: String,
+        hint: String,
+        manualButtonLabel: String,
+        callback: IosQrScannerCallback
+    )
     fun openSettings()
     fun connectToWifi(ssid: String, password: String, callback: IosWifiConnectCallback)
 }
@@ -29,7 +34,10 @@ object IosQrScannerBridgeHolder {
 actual fun rememberBikeQrScanner(
     onQrScanned: (String) -> Unit,
     onManualInputRequested: () -> Unit,
-    onScannerError: (String) -> Unit
+    onScannerError: (String) -> Unit,
+    title: String,
+    hint: String,
+    manualButtonLabel: String
 ): () -> Unit {
     val currentScanned = rememberUpdatedState(onQrScanned)
     val currentManual = rememberUpdatedState(onManualInputRequested)
@@ -41,19 +49,24 @@ actual fun rememberBikeQrScanner(
             currentError.value("Escáner de cámara iOS no inicializado. Introduce el código manualmente.")
             currentManual.value()
         } else {
-            bridge.startQrScan(object : IosQrScannerCallback {
-                override fun onQrScanned(rawText: String) {
-                    currentScanned.value(rawText)
-                }
+            bridge.startQrScan(
+                title = title,
+                hint = hint,
+                manualButtonLabel = manualButtonLabel,
+                callback = object : IosQrScannerCallback {
+                    override fun onQrScanned(rawText: String) {
+                        currentScanned.value(rawText)
+                    }
 
-                override fun onManualFallback() {
-                    currentManual.value()
-                }
+                    override fun onManualFallback() {
+                        currentManual.value()
+                    }
 
-                override fun onError(message: String) {
-                    currentError.value(message)
+                    override fun onError(message: String) {
+                        currentError.value(message)
+                    }
                 }
-            })
+            )
         }
     }
 }

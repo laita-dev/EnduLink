@@ -78,7 +78,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 actual fun rememberBikeQrScanner(
     onQrScanned: (String) -> Unit,
     onManualInputRequested: () -> Unit,
-    onScannerError: (String) -> Unit
+    onScannerError: (String) -> Unit,
+    title: String,
+    hint: String,
+    manualButtonLabel: String
 ): () -> Unit {
     val context = LocalContext.current
     val currentOnQrScanned by rememberUpdatedState(onQrScanned)
@@ -93,13 +96,16 @@ actual fun rememberBikeQrScanner(
         if (granted) {
             showScannerDialog = true
         } else {
-            currentOnError("Permiso de cámara necesario para escanear el QR de la moto.")
+            currentOnError("Permiso de cámara necesario para escanear el código QR.")
             currentOnManual()
         }
     }
 
     if (showScannerDialog) {
         AndroidQrScannerDialog(
+            title = title,
+            hint = hint,
+            manualButtonLabel = manualButtonLabel,
             onQrDetected = { raw ->
                 showScannerDialog = false
                 currentOnQrScanned(raw)
@@ -297,6 +303,9 @@ actual fun connectToBikeWifi(
 
 @Composable
 private fun AndroidQrScannerDialog(
+    title: String,
+    hint: String,
+    manualButtonLabel: String,
     onQrDetected: (String) -> Unit,
     onManualFallback: () -> Unit,
     onError: (String) -> Unit,
@@ -508,7 +517,7 @@ private fun AndroidQrScannerDialog(
                 }
 
                 Text(
-                    text = "Escanear QR Moto",
+                    text = title,
                     color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
@@ -556,7 +565,7 @@ private fun AndroidQrScannerDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "Apunta la cámara al código QR de la pantalla TFT de tu moto",
+                    text = hint,
                     color = Color.White,
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Medium,
@@ -574,7 +583,7 @@ private fun AndroidQrScannerDialog(
                     )
                 ) {
                     Text(
-                        text = "Introducir o pegar QR manualmente",
+                        text = manualButtonLabel,
                         color = EnduPalette.Accent,
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold

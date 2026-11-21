@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
+import com.oscar.endulink.group.GroupMember
 import com.oscar.endulink.platform.PlatformBackHandler
 import com.oscar.endulink.platform.PlatformToastCenter
 import com.oscar.endulink.platform.closeApp
@@ -83,6 +84,17 @@ fun App() {
     val tileRevision by controller.tileRevision.collectAsState()
     val inAppToast by PlatformToastCenter.toast.collectAsState()
 
+    val groupRoomCode by controller.groupRoomCode.collectAsState()
+    val groupConnectionState by controller.groupConnectionState.collectAsState()
+    val groupOnlineConnected by controller.groupOnlineConnected.collectAsState()
+    val groupLanActive by controller.groupLanActive.collectAsState()
+    val groupMembers by controller.groupMembers.collectAsState()
+    val groupMyStatus by controller.groupMyStatus.collectAsState()
+    val groupMyStatusMessage by controller.groupMyStatusMessage.collectAsState()
+    val groupConfig by controller.groupConfig.collectAsState()
+    val groupSharedTrack by controller.groupSharedTrack.collectAsState()
+    val pendingGroupJoinCode by controller.pendingGroupJoinCode.collectAsState()
+
     LaunchedEffect(inAppToast?.id) {
         val current = inAppToast ?: return@LaunchedEffect
         kotlinx.coroutines.delay(2200L)
@@ -112,6 +124,24 @@ fun App() {
     var showUpdateDialog by remember { mutableStateOf(false) }
     var routeForDetailId by remember { mutableStateOf<String?>(null) }
     var routeToEditId by remember { mutableStateOf<String?>(null) }
+    var showGroupSheet by remember { mutableStateOf(false) }
+    var selectedGroupMemberId by remember { mutableStateOf<String?>(null) }
+
+    val selectedGroupMember: GroupMember? = selectedGroupMemberId?.let { id ->
+        groupMembers.firstOrNull { it.id == id }
+    }
+
+    LaunchedEffect(pendingGroupJoinCode) {
+        if (pendingGroupJoinCode != null) {
+            showGroupSheet = true
+        }
+    }
+
+    LaunchedEffect(selectedGroupMemberId, selectedGroupMember) {
+        if (selectedGroupMemberId != null && selectedGroupMember == null) {
+            selectedGroupMemberId = null
+        }
+    }
 
     // Geocodificación inversa continua del centro de la pantalla en modo selección en el mapa
     LaunchedEffect(isPickingOnMap, center) {
@@ -154,6 +184,8 @@ fun App() {
                 showSaveWaypointDialog = false
                 waypointToEdit = null
             }
+            selectedGroupMemberId != null -> selectedGroupMemberId = null
+            showGroupSheet -> showGroupSheet = false
             routeToEditId != null -> routeToEditId = null
             routeForDetailId != null -> routeForDetailId = null
             selectedWaypointForDetail != null -> selectedWaypointForDetail = null
@@ -204,14 +236,22 @@ fun App() {
                     recordedCoords = recordedCoords,
                     quickMarkers = quickMarkers,
                     trackProgress = trackProgress,
+                    groupMembers = groupMembers,
                     isPickingOnMap = isPickingOnMap,
                     onSelectWaypoint = { wpt ->
+                        selectedGroupMemberId = null
                         routeForDetailId = null
                         selectedWaypointForDetail = wpt
                     },
                     onSelectRoute = { tappedRoute ->
+                        selectedGroupMemberId = null
                         selectedWaypointForDetail = null
                         routeForDetailId = tappedRoute.id
+                    },
+                    onSelectGroupMember = { member ->
+                        selectedWaypointForDetail = null
+                        routeForDetailId = null
+                        selectedGroupMemberId = member.id
                     },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -346,6 +386,25 @@ fun App() {
                     onCancelPickOnMap = {
                         isPickingOnMap = false
                         isSearchingForStop = false
+                    },
+                    groupRoomCode = groupRoomCode,
+                    groupMembers = groupMembers,
+                    groupConnectionState = groupConnectionState,
+                    groupSharedTrack = groupSharedTrack,
+                    onOpenGroupSheet = { showGroupSheet = true },
+                    onSelectAlertMember = { member ->
+                        selectedWaypointForDetail = null
+                        routeForDetailId = null
+                        selectedGroupMemberId = member.id
+                    },
+                    onNavigateToAlertMember = { member ->
+                        controller.navigateToGroupMember(member)
+                    },
+                    onImportSharedTrack = {
+                        controller.importSharedGroupTrack()
+                    },
+                    onDismissSharedTrack = {
+                        controller.dismissSharedGroupTrack()
                     }
                 )
 
@@ -530,7 +589,7 @@ fun App() {
                 }
 
                 if (showBikeSheet) {
-                    LaunchedEffect(layer, bikeMapConfig, activeRoute, quickMarkers, intermediateWaypoints) {
+                    LaunchedEffect(layer, bikeMapConfig, activeRoute, quickMarkers, intermediateWaypoints, groupRoomCode, groupMembers) {
                         while (true) {
                             controller.refreshStaticPreview()
                             kotlinx.coroutines.delay(1000)
@@ -561,6 +620,9 @@ fun App() {
                         },
                         onSetBitrate = { controller.setBikeBitrate(it) },
                         onSetBikeMapLayer = { controller.setBikeMapLayer(it) },
+                        onSetBikeGroupDisplayConfig = { showMembers, showNames, showEdgeRadar, showHudBadge, showAlerts ->
+                            controller.setBikeGroupDisplayConfig(showMembers, showNames, showEdgeRadar, showHudBadge, showAlerts)
+                        },
                         onSetAllowLocalLanTesting = { controller.setAllowLocalLanTesting(it) },
                         onSaveQr = { controller.saveScannedQr(it) },
                         onClearQr = { controller.clearScannedQr() },
@@ -768,6 +830,79 @@ fun App() {
                             onDismiss = { routeToEditId = null }
                         )
                     }
+                }
+
+                // Tarjeta inferior de Detalle de Compañero del Grupo
+                selectedGroupMember?.let { member ->
+                    GroupMemberDetailSheet(
+                        member = member,
+                        riderCoord = rider.coordinate,
+                        hasActiveRoute = (searchPin != null || activeRoute != null),
+                        onNavigate = {
+                            controller.navigateToGroupMember(member)
+                            selectedGroupMemberId = null
+                        },
+                        onCenter = {
+                            controller.centerOnGroupMember(member)
+                            selectedGroupMemberId = null
+                        },
+                        onAddStop = {
+                            controller.addGroupMemberAsStop(member)
+                            selectedGroupMemberId = null
+                        },
+                        onSaveAsWaypoint = {
+                            saveWaypointInitialCoord = member.coordinate
+                            saveWaypointInitialName = member.name
+                            saveWaypointInitialSymbol = if (member.status.isAlert) "danger" else "camp"
+                            waypointToEdit = null
+                            selectedGroupMemberId = null
+                            showSaveWaypointDialog = true
+                        },
+                        onClose = {
+                            selectedGroupMemberId = null
+                        },
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
+                }
+
+                // Hoja de Grupo en Tiempo Real
+                if (showGroupSheet) {
+                    val shareableName = activeRoute?.name ?: controller.destinationRoadRoute?.destinationName
+                    GroupSheet(
+                        roomCode = groupRoomCode,
+                        connectionState = groupConnectionState,
+                        onlineConnected = groupOnlineConnected,
+                        lanActive = groupLanActive,
+                        members = groupMembers,
+                        myStatus = groupMyStatus,
+                        myStatusMessage = groupMyStatusMessage,
+                        config = groupConfig,
+                        sharedTrack = groupSharedTrack,
+                        pendingJoinCode = pendingGroupJoinCode,
+                        activeShareableRouteName = shareableName,
+                        bikeMapConfig = bikeMapConfig,
+                        riderCoord = rider.coordinate,
+                        onCreateGroup = { controller.createGroup() },
+                        onJoinGroup = { controller.joinGroup(it) },
+                        onLeaveGroup = { controller.leaveGroup() },
+                        onConsumePendingJoinCode = { controller.consumePendingGroupJoinCode() },
+                        onUpdateProfile = { nick, clr -> controller.updateGroupProfile(nick, clr) },
+                        onUpdateNetworkSettings = { saver, online, lan, broker ->
+                            controller.updateGroupNetworkSettings(saver, online, lan, broker)
+                        },
+                        onSetMyStatus = { st, msg -> controller.setGroupRiderStatus(st, msg) },
+                        onShareActiveRoute = { controller.shareActiveRouteWithGroup() },
+                        onImportSharedTrack = { controller.importSharedGroupTrack() },
+                        onDismissSharedTrack = { controller.dismissSharedGroupTrack() },
+                        onCenterMember = { controller.centerOnGroupMember(it) },
+                        onNavigateToMember = { controller.navigateToGroupMember(it) },
+                        onFitGroupOnMap = { controller.fitGroupOnMap() },
+                        onSetBikeGroupDisplayConfig = { showMembers, showNames, showEdgeRadar, showHudBadge, showAlerts ->
+                            controller.setBikeGroupDisplayConfig(showMembers, showNames, showEdgeRadar, showHudBadge, showAlerts)
+                        },
+                        onClose = { showGroupSheet = false },
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
                 }
 
                 // Diálogo de comprobación y descarga de actualizaciones
