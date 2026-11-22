@@ -10,7 +10,6 @@ android {
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "com.oscar.endulink"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
 
@@ -18,6 +17,8 @@ android {
         val envVersionCode = (project.findProperty("appVersionCode") as? String)?.toIntOrNull()
 
         val resolvedVersionName = envVersionName ?: "0.3.0"
+        val isTestBuild = (project.findProperty("isTestBuild") as? String)?.toBooleanStrictOrNull()
+            ?: resolvedVersionName.contains("-")
         val baseVersion = resolvedVersionName.substringBefore("-")
         val versionParts = baseVersion.split(".").mapNotNull { it.toIntOrNull() }
         val derivedVersionCode = if (versionParts.size >= 3) {
@@ -26,8 +27,10 @@ android {
             300
         }
 
+        applicationId = if (isTestBuild) "com.oscar.endulink.test" else "com.oscar.endulink"
         versionCode = envVersionCode ?: derivedVersionCode
         versionName = resolvedVersionName
+        resValue("string", "app_name", if (isTestBuild) "EnduLink-test" else "EnduLink")
         resourceConfigurations += listOf("es", "en")
     }
 

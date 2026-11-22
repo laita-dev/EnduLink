@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">EnduLink</string>
+    <!-- app_name se genera en androidApp/build.gradle.kts según release (EnduLink) o pre-release -test (EnduLink-test) -->
 </resources>
 

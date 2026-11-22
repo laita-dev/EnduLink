@@ -4,6 +4,17 @@ on:
   push:
     tags: [ 'v*' ]
   workflow_dispatch:
+    inputs:
+      is_test:
+        description: 'Compilar variante de test (-test en nombre y bundle ID .test)'
+        required: false
+        default: false
+        type: boolean
+      version_name:
+        description: 'Versión opcional (ej. 0.3.1-test). Vacío = versión del proyecto'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -37,6 +48,17 @@ jobs:
             V_CODE=$(( ${major:-0} * 10000 + ${minor:-0} * 100 + ${patch:-0} ))
             echo "Sincronizando APK con tag $TAG_VER (code: $V_CODE)"
             GRADLE_ARGS=":androidApp:assembleRelease -PappVersionName=$TAG_VER -PappVersionCode=$V_CODE --stacktrace"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            CUSTOM_VER="${{ inputs.version_name }}"
+            if [[ -n "$CUSTOM_VER" ]]; then
+              TAG_BASE="${CUSTOM_VER%%-*}"
+              IFS='.' read -r major minor patch <<< "$TAG_BASE"
+              V_CODE=$(( ${major:-0} * 10000 + ${minor:-0} * 100 + ${patch:-0} ))
+              GRADLE_ARGS="$GRADLE_ARGS -PappVersionName=$CUSTOM_VER -PappVersionCode=$V_CODE"
+            fi
+            if [[ "${{ inputs.is_test }}" == "true" ]]; then
+              GRADLE_ARGS="$GRADLE_ARGS -PisTestBuild=true"
+            fi
           fi
           ./gradlew $GRADLE_ARGS
 
@@ -81,14 +103,50 @@ jobs:
           chmod +x gradlew
           ./gradlew :shared:assembleSharedAppReleaseXCFramework -PiosArm64Only=true --stacktrace
 
-      - name: Sincronizar versión con Tag en Info.plist (si aplica)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Sincronizar versión e identidad iOS (Release o Test)
         run: |
-          TAG_VER="${GITHUB_REF_NAME#v}"
-          TAG_BASE="${TAG_VER%%-*}"
-          echo "Sincronizando iOS Info.plist con tag: $TAG_VER (CFBundleVersion: $TAG_BASE)"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $TAG_VER" iosApp/iosApp/Info.plist || true
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $TAG_BASE" iosApp/iosApp/Info.plist || true
+          IS_TEST="false"
+          TARGET_VER=""
+          TARGET_CODE=""
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TARGET_VER="${GITHUB_REF_NAME#v}"
+            TAG_BASE="${TARGET_VER%%-*}"
+            IFS='.' read -r major minor patch <<< "$TAG_BASE"
+            TARGET_CODE=$(( ${major:-0} * 10000 + ${minor:-0} * 100 + ${patch:-0} ))
+            if [[ "$TARGET_VER" == *-* ]]; then
+              IS_TEST="true"
+            fi
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TARGET_VER="${{ inputs.version_name }}"
+            if [[ "${{ inputs.is_test }}" == "true" || "$TARGET_VER" == *-* ]]; then
+              IS_TEST="true"
+            fi
+            if [[ -n "$TARGET_VER" ]]; then
+              TAG_BASE="${TARGET_VER%%-*}"
+              IFS='.' read -r major minor patch <<< "$TAG_BASE"
+              TARGET_CODE=$(( ${major:-0} * 10000 + ${minor:-0} * 100 + ${patch:-0} ))
+            fi
+          fi
+
+          if [[ "$IS_TEST" == "true" ]]; then
+            BUNDLE_ID="com.oscar.endulink.test"
+            APP_NAME="motillOS-test"
+          else
+            BUNDLE_ID="com.oscar.endulink"
+            APP_NAME="motillOS"
+          fi
+
+          echo "iOS build -> appName=$APP_NAME bundleId=$BUNDLE_ID version=${TARGET_VER:-default} code=${TARGET_CODE:-default}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_NAME" iosApp/iosApp/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName $APP_NAME" iosApp/iosApp/Info.plist
+          if [[ -n "$TARGET_VER" ]]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $TARGET_VER" iosApp/iosApp/Info.plist
+          fi
+          if [[ -n "$TARGET_CODE" ]]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $TARGET_CODE" iosApp/iosApp/Info.plist
+          fi
+
+          TARGET_VER="$TARGET_VER" TARGET_CODE="$TARGET_CODE" BUNDLE_ID="$BUNDLE_ID" python3 -c 'import os, re; p="iosApp/project.yml"; s=open(p,encoding="utf-8").read(); s=re.sub(r"(PRODUCT_BUNDLE_IDENTIFIER:\s*).*", r"\g<1>"+os.environ["BUNDLE_ID"], s); s=re.sub(r"(MARKETING_VERSION:\s*).*", r"\g<1>\""+os.environ["TARGET_VER"]+"\"", s) if os.environ.get("TARGET_VER") else s; s=re.sub(r"(CURRENT_PROJECT_VERSION:\s*).*", r"\g<1>\""+os.environ["TARGET_CODE"]+"\"", s) if os.environ.get("TARGET_CODE") else s; open(p,"w",encoding="utf-8").write(s)'
 
       - name: Generar proyecto Xcode con XcodeGen
         run: |
