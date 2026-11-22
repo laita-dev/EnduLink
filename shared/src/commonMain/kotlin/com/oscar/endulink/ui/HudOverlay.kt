@@ -102,6 +102,9 @@ fun HudOverlay(
     onNavigateToAlertMember: (GroupMember) -> Unit = {},
     onImportSharedTrack: () -> Unit = {},
     onDismissSharedTrack: () -> Unit = {},
+    isOffGpxTrack: Boolean = false,
+    showGpxOffTrackWarning: Boolean = true,
+    onDisableGpxOffTrackWarning: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(
@@ -385,6 +388,62 @@ fun HudOverlay(
                             .clickable { onDismissBanner() }
                             .padding(4.dp)
                     )
+                }
+            }
+
+            // Advertencia configurable de salida del track GPX activo (Móvil)
+            if (isOffGpxTrack && showGpxOffTrackWarning && selectedRoute != null && approachRoute == null && roadOptions.isEmpty() && trackProgress != null) {
+                val offDist = GroupTftLayout.formatCompactDistance(trackProgress.offTrackMeters)
+                val dirs = listOf("N", "NE", "E", "SE", "S", "SO", "O", "NO")
+                val cardinal = dirs[((trackProgress.bearingToNearestDeg + 22.5) / 45.0).toInt() % 8]
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Color(0xFF3E220D).copy(alpha = 0.96f))
+                        .border(1.5.dp, EnduPalette.Warning, RoundedCornerShape(9.dp))
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "⚠ TE HAS SALIDO DEL TRACK GPX",
+                            color = EnduPalette.Warning,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "A $offDist · Línea recta rumbo $cardinal al punto más cercano",
+                            color = Color.White,
+                            fontSize = 10.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(EnduPalette.Warning)
+                                .clickable { onRequestApproach() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("Enlace", color = Color.Black, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(EnduPalette.SurfaceHigh)
+                                .clickable { onDisableGpxOffTrackWarning() }
+                                .padding(horizontal = 7.dp, vertical = 4.dp)
+                        ) {
+                            Text("Silenciar", color = EnduPalette.TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
 

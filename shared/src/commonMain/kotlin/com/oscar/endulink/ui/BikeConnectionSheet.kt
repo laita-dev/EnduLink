@@ -62,6 +62,7 @@ fun BikeConnectionSheet(
     onSetBikeMapLayer: (MapLayer?) -> Unit,
     onSetBikeGroupDisplayConfig: (showMembers: Boolean, showNames: Boolean, showEdgeRadar: Boolean, showHudBadge: Boolean, showAlerts: Boolean) -> Unit = { _, _, _, _, _ -> },
     onSetBikePhoneNotificationsConfig: (enabled: Boolean, durationSeconds: Int) -> Unit = { _, _ -> },
+    onSetGpxOffTrackWarning: (Boolean) -> Unit = {},
     onTriggerTestTftNotification: () -> Unit = {},
     onSetAllowLocalLanTesting: (Boolean) -> Unit,
     onSaveQr: (String) -> Boolean,
@@ -830,6 +831,39 @@ fun BikeConnectionSheet(
                             onOpenAccessSettings = { openPhoneNotificationAccessSettings() },
                             onTestNotification = onTriggerTestTftNotification
                         )
+
+                        HorizontalDivider(color = EnduPalette.Outline.copy(alpha = 0.4f))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(
+                                    text = "Advertencia si te sales del GPX",
+                                    color = EnduPalette.TextPrimary,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Muestra aviso en el móvil y TFT cuando te desvías del track GPX activo",
+                                    color = EnduPalette.TextMuted,
+                                    fontSize = 10.5.sp,
+                                    lineHeight = 14.sp
+                                )
+                            }
+                            Switch(
+                                checked = config.showGpxOffTrackWarning,
+                                onCheckedChange = { onSetGpxOffTrackWarning(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = EnduPalette.Accent,
+                                    uncheckedThumbColor = EnduPalette.TextMuted,
+                                    uncheckedTrackColor = EnduPalette.SurfaceHigh
+                                )
+                            )
+                        }
                     }
                 }
 

@@ -119,7 +119,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
         groupActiveCount: Int,
-        activeNotification: TftPhoneNotification?
+        activeNotification: TftPhoneNotification?,
+        gpxOffTrackTarget: GeoCoord?,
+        gpxOffTrackMeters: Double?
     ): ByteArray? {
         return scene.renderRgba(
             width = width,
@@ -138,7 +140,53 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
             groupActiveCount = groupActiveCount,
-            activeNotification = activeNotification
+            activeNotification = activeNotification,
+            gpxOffTrackTarget = gpxOffTrackTarget,
+            gpxOffTrackMeters = gpxOffTrackMeters
+        )
+    }
+
+    actual fun renderBgraInts(
+        width: Int,
+        height: Int,
+        config: BikeMapConfig,
+        rider: RiderTelemetry,
+        layer: MapLayer,
+        activeRoute: GPXRoute?,
+        roadRouteCoordinates: List<GeoCoord>?,
+        isNavigating: Boolean,
+        remainingKm: Double?,
+        nextInstruction: String?,
+        waypoints: List<GPXWaypoint>,
+        intermediateStops: List<GeoCoord>,
+        remainingMinutes: Int?,
+        routeTypeLabel: String?,
+        groupMembers: List<GroupMember>,
+        groupActiveCount: Int,
+        activeNotification: TftPhoneNotification?,
+        gpxOffTrackTarget: GeoCoord?,
+        gpxOffTrackMeters: Double?
+    ): IntArray? {
+        return scene.renderBgraInts(
+            width = width,
+            height = height,
+            config = config,
+            rider = rider,
+            layer = layer,
+            activeRoute = activeRoute,
+            roadRouteCoordinates = roadRouteCoordinates,
+            isNavigating = isNavigating,
+            remainingKm = remainingKm,
+            nextInstruction = nextInstruction,
+            waypoints = waypoints,
+            intermediateStops = intermediateStops,
+            remainingMinutes = remainingMinutes,
+            routeTypeLabel = routeTypeLabel,
+            groupMembers = groupMembers,
+            groupActiveCount = groupActiveCount,
+            activeNotification = activeNotification,
+            gpxOffTrackTarget = gpxOffTrackTarget,
+            gpxOffTrackMeters = gpxOffTrackMeters
         )
     }
 
@@ -159,7 +207,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
         groupActiveCount: Int,
-        activeNotification: TftPhoneNotification?
+        activeNotification: TftPhoneNotification?,
+        gpxOffTrackTarget: GeoCoord?,
+        gpxOffTrackMeters: Double?
     ): ImageBitmap? {
         return scene.renderPreview(
             width = width,
@@ -178,7 +228,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
             groupActiveCount = groupActiveCount,
-            activeNotification = activeNotification
+            activeNotification = activeNotification,
+            gpxOffTrackTarget = gpxOffTrackTarget,
+            gpxOffTrackMeters = gpxOffTrackMeters
         )
     }
 }

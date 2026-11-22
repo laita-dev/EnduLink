@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>es</string>
     <key>CFBundleDisplayName</key>
-    <string>motillOS-test</string>
+    <string>motillOS</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>motillOS-test</string>
+    <string>motillOS</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleURLTypes</key>
@@ -30,7 +30,7 @@
         </dict>
     </array>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.0-test</string>
+    <string>0.3.0</string>
     <key>CFBundleVersion</key>
     <string>300</string>
     <key>CADisableMinimumFrameDurationOnPhone</key>

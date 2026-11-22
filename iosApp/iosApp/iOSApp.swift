@@ -246,9 +246,12 @@ final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
         let profile = blocks <= 3600 ? kVTProfileLevel_H264_Baseline_3_1 : kVTProfileLevel_H264_Baseline_AutoLevel
 
         VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
+        VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 0 as CFNumber)
         VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_ProfileLevel, value: profile)
         VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_AverageBitRate, value: Int(cachedBitrate) as CFNumber)
+        let peakBytesPerSec = max(Int(cachedBitrate) * 3 / 16, 125_000)
+        VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_DataRateLimits, value: [peakBytesPerSec, 1] as CFArray)
         VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: Int(cachedFps) as CFNumber)
         VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: Int(cachedFps * 2) as CFNumber)
         VTSessionSetProperty(vtSession, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 2.0 as CFNumber)
@@ -348,6 +351,89 @@ final class VideoToolboxBridge: NSObject, IosH264HardwareBridge {
 
         VTCompressionSessionCompleteFrames(vtSession, untilPresentationTimeStamp: pts)
         return lastEncodedAnnexB?.base64EncodedString()
+    }
+
+    func encodeBgraInto(
+        bgraPtr: Int64,
+        width: Int32,
+        height: Int32,
+        ptsMs: Int64,
+        forceKeyFrame: Bool,
+        outPtr: Int64,
+        outCapacity: Int32
+    ) -> Int32 {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if session == nil || width != cachedWidth || height != cachedHeight {
+            cachedWidth = width
+            cachedHeight = height
+            _ = createSessionLocked()
+        }
+        guard let vtSession = session else { return 0 }
+        guard let srcBase = UnsafeRawPointer(bitPattern: Int(bgraPtr)) else {
+            return 0
+        }
+
+        let w = Int(width)
+        let h = Int(height)
+        guard w > 0, h > 0 else { return 0 }
+
+        guard let pixelBuffer = allocatePixelBuffer(width: w, height: h) else {
+            return 0
+        }
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        if let dstRaw = CVPixelBufferGetBaseAddress(pixelBuffer) {
+            let dstStride = CVPixelBufferGetBytesPerRow(pixelBuffer)
+            let srcStride = w * 4
+            if dstStride == srcStride {
+                memcpy(dstRaw, srcBase, h * srcStride)
+            } else {
+                let dstBytes = dstRaw.assumingMemoryBound(to: UInt8.self)
+                let srcBytes = srcBase.assumingMemoryBound(to: UInt8.self)
+                for row in 0..<h {
+                    memcpy(dstBytes.advanced(by: row * dstStride), srcBytes.advanced(by: row * srcStride), srcStride)
+                }
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+
+        var frameProps: CFDictionary? = nil
+        if forceKeyFrame {
+            let dict: [CFString: Any] = [kVTEncodeFrameOptionKey_ForceKeyFrame: true]
+            frameProps = dict as CFDictionary
+        }
+
+        let pts = CMTimeMake(value: ptsMs, timescale: 1000)
+        let duration = CMTimeMake(value: 1, timescale: cachedFps)
+        lastEncodedAnnexB = nil
+
+        var flagsOut = VTEncodeInfoFlags()
+        let encodeStatus = VTCompressionSessionEncodeFrame(
+            vtSession,
+            imageBuffer: pixelBuffer,
+            presentationTimeStamp: pts,
+            duration: duration,
+            frameProperties: frameProps,
+            sourceFrameRefcon: nil,
+            infoFlagsOut: &flagsOut
+        )
+
+        if encodeStatus != noErr {
+            _ = createSessionLocked()
+            return 0
+        }
+
+        VTCompressionSessionCompleteFrames(vtSession, untilPresentationTimeStamp: pts)
+        guard let data = lastEncodedAnnexB, !data.isEmpty else { return 0 }
+        let count = data.count
+        guard count <= Int(outCapacity),
+              let outBase = UnsafeMutableRawPointer(bitPattern: Int(outPtr))?.assumingMemoryBound(to: UInt8.self) else {
+            return -Int32(count)
+        }
+        data.copyBytes(to: outBase, count: count)
+        return Int32(count)
     }
 
     private func allocatePixelBuffer(width: Int, height: Int) -> CVPixelBuffer? {
@@ -1193,6 +1279,9 @@ struct iOSApp: App {
         WindowGroup {
             ComposeView()
                 .ignoresSafeArea(.all)
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
+                    MainViewControllerKt.onIosAppWillTerminate()
+                }
                 .onOpenURL { url in
                     let scheme = url.scheme?.lowercased() ?? ""
                     let host = url.host?.lowercased() ?? ""

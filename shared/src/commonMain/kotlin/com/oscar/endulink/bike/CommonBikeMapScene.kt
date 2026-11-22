@@ -25,6 +25,7 @@ import com.oscar.endulink.tiles.TileStore
 import com.oscar.endulink.trail.GPXRoute
 import com.oscar.endulink.trail.GPXWaypoint
 import com.oscar.endulink.trail.GeoCoord
+import com.oscar.endulink.trail.RouteNavigator
 import kotlinx.datetime.Clock
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -171,6 +172,28 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         style = PaintingStyle.Fill
         isAntiAlias = true
     }
+    private val gpxReturnHaloPaint = Paint().apply {
+        color = Color(14, 17, 23, 240)
+        style = PaintingStyle.Stroke
+        strokeCap = StrokeCap.Round
+        isAntiAlias = true
+    }
+    private val gpxReturnLinePaint = Paint().apply {
+        color = Color(255, 214, 10)
+        style = PaintingStyle.Stroke
+        strokeCap = StrokeCap.Round
+        isAntiAlias = true
+    }
+    private val gpxReturnWarnBgPaint = Paint().apply {
+        color = Color(180, 96, 0, 244)
+        style = PaintingStyle.Fill
+        isAntiAlias = true
+    }
+    private val gpxReturnWarnStrokePaint = Paint().apply {
+        color = Color(255, 214, 10)
+        style = PaintingStyle.Stroke
+        isAntiAlias = true
+    }
     private val notifIconPath = Path()
 
     private var lastBatteryCheckMs: Long = 0L
@@ -202,7 +225,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         routeTypeLabel: String? = null,
         groupMembers: List<GroupMember> = emptyList(),
         groupActiveCount: Int = 0,
-        activeNotification: TftPhoneNotification? = null
+        activeNotification: TftPhoneNotification? = null,
+        gpxOffTrackTarget: GeoCoord? = null,
+        gpxOffTrackMeters: Double? = null
     ): ImageBitmap = lock.withLock {
         val bmp = ImageBitmap(width, height, ImageBitmapConfig.Argb8888)
         val canvas = Canvas(bmp)
@@ -224,9 +249,79 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
             groupActiveCount = groupActiveCount,
-            activeNotification = activeNotification
+            activeNotification = activeNotification,
+            gpxOffTrackTarget = gpxOffTrackTarget,
+            gpxOffTrackMeters = gpxOffTrackMeters
         )
         return bmp
+    }
+
+    fun renderBgraInts(
+        width: Int,
+        height: Int,
+        config: BikeMapConfig,
+        rider: RiderTelemetry,
+        layer: MapLayer,
+        activeRoute: GPXRoute?,
+        roadRouteCoordinates: List<GeoCoord>?,
+        isNavigating: Boolean,
+        remainingKm: Double?,
+        nextInstruction: String?,
+        waypoints: List<GPXWaypoint>,
+        intermediateStops: List<GeoCoord>,
+        remainingMinutes: Int? = null,
+        routeTypeLabel: String? = null,
+        groupMembers: List<GroupMember> = emptyList(),
+        groupActiveCount: Int = 0,
+        activeNotification: TftPhoneNotification? = null,
+        gpxOffTrackTarget: GeoCoord? = null,
+        gpxOffTrackMeters: Double? = null
+    ): IntArray = lock.withLock {
+        val cur = cachedBitmap
+        val bmp = if (cur != null && cur.width == width && cur.height == height) {
+            cur
+        } else {
+            ImageBitmap(width, height, ImageBitmapConfig.Argb8888).also {
+                cachedBitmap = it
+                cachedCanvas = Canvas(it)
+                intPixels = IntArray(width * height)
+                rgbaBuffer = ByteArray(width * height * 4)
+            }
+        }
+        val canvas = cachedCanvas ?: Canvas(bmp).also { cachedCanvas = it }
+        val pixels = intPixels ?: IntArray(width * height).also { intPixels = it }
+
+        drawScene(
+            canvas = canvas,
+            width = width.toFloat(),
+            height = height.toFloat(),
+            config = config,
+            rider = rider,
+            layer = layer,
+            activeRoute = activeRoute,
+            roadRouteCoordinates = roadRouteCoordinates,
+            isNavigating = isNavigating,
+            remainingKm = remainingKm,
+            nextInstruction = nextInstruction,
+            waypoints = waypoints,
+            intermediateStops = intermediateStops,
+            remainingMinutes = remainingMinutes,
+            routeTypeLabel = routeTypeLabel,
+            groupMembers = groupMembers,
+            groupActiveCount = groupActiveCount,
+            activeNotification = activeNotification,
+            gpxOffTrackTarget = gpxOffTrackTarget,
+            gpxOffTrackMeters = gpxOffTrackMeters
+        )
+
+        bmp.readPixels(
+            buffer = pixels,
+            startX = 0,
+            startY = 0,
+            width = width,
+            height = height
+        )
+        return pixels
     }
 
     fun renderRgba(
@@ -246,7 +341,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         routeTypeLabel: String? = null,
         groupMembers: List<GroupMember> = emptyList(),
         groupActiveCount: Int = 0,
-        activeNotification: TftPhoneNotification? = null
+        activeNotification: TftPhoneNotification? = null,
+        gpxOffTrackTarget: GeoCoord? = null,
+        gpxOffTrackMeters: Double? = null
     ): ByteArray = lock.withLock {
         val cur = cachedBitmap
         val bmp = if (cur != null && cur.width == width && cur.height == height) {
@@ -281,7 +378,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
             groupActiveCount = groupActiveCount,
-            activeNotification = activeNotification
+            activeNotification = activeNotification,
+            gpxOffTrackTarget = gpxOffTrackTarget,
+            gpxOffTrackMeters = gpxOffTrackMeters
         )
 
         bmp.readPixels(
@@ -321,7 +420,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
         groupActiveCount: Int,
-        activeNotification: TftPhoneNotification?
+        activeNotification: TftPhoneNotification?,
+        gpxOffTrackTarget: GeoCoord?,
+        gpxOffTrackMeters: Double?
     ) {
         val w = width
         val h = height
@@ -453,6 +554,23 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             )
             canvas.drawPath(approachPath, approachPaint)
             if (hasChevrons) drawBatchedChevrons(canvas, scale)
+        }
+
+        // 4a. Ruta en línea recta al punto más cercano del GPX cuando te sales del track
+        if (gpxOffTrackTarget != null && rider.coordinate != null) {
+            val (rx, ry) = geoToLocal(rider.coordinate)
+            val (tx, ty) = geoToLocal(gpxOffTrackTarget)
+            gpxReturnHaloPaint.strokeWidth = 8.5f * scale
+            gpxReturnLinePaint.strokeWidth = 4.8f * scale
+            gpxReturnLinePaint.pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f * scale, 9f * scale), 0f)
+            canvas.drawLine(Offset(rx, ry), Offset(tx, ty), gpxReturnHaloPaint)
+            canvas.drawLine(Offset(rx, ry), Offset(tx, ty), gpxReturnLinePaint)
+            waypointPinPaint.color = Color.Black
+            canvas.drawCircle(Offset(tx, ty), 9.5f * scale, waypointPinPaint)
+            waypointPinPaint.color = Color(255, 214, 10)
+            canvas.drawCircle(Offset(tx, ty), 7.0f * scale, waypointPinPaint)
+            waypointPinPaint.color = Color.White
+            canvas.drawCircle(Offset(tx, ty), 3.0f * scale, waypointPinPaint)
         }
 
         // 4b. Paradas intermedias
@@ -773,7 +891,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             )
         }
 
-        // 9c. Banner destacado de alerta rápida (SOS / Avería / Esperadme) + mensaje personalizado
+        // 9c. Banner de alerta/mensaje del grupo en 2 fases:
+        // - Fase 1 (primeros 5 s): grande y destacado arriba
+        // - Fase 2 (después de 5 s): compacto en la esquina superior izquierda hasta volver a "En ruta"
         val alertBanner = if (config.showGroupAlertsOnTft) groupPlan?.alertBanner else null
         var alertBannerBottomPx = 0f
         if (alertBanner != null) {
@@ -783,11 +903,20 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             } else {
                 w - 14f * scale
             }
-            val alertRight = minOf(maxAlertRight, alertLeft + 332f * scale)
+            val expanded = alertBanner.isExpanded
+            val alertRight = if (expanded) {
+                w - 14f * scale
+            } else {
+                minOf(maxAlertRight, alertLeft + 250f * scale)
+            }
             val alertTop = 62f * scale
-            val innerW = (alertRight - alertLeft - 20f * scale).coerceAtLeast(40f * scale)
-            val headerSize = 11.5f * scale
-            val msgSize = 10.5f * scale
+            val innerPadX = if (expanded) 12f * scale else 9f * scale
+            val innerW = (alertRight - alertLeft - innerPadX * 2f).coerceAtLeast(40f * scale)
+            val headerSize = if (expanded) 14.5f * scale else 10.2f * scale
+            val msgSize = if (expanded) 12.5f * scale else 9.4f * scale
+            val headerStroke = if (expanded) 2.25f * scale else 1.7f * scale
+            val msgStroke = if (expanded) 1.85f * scale else 1.45f * scale
+
             val headerText = TftNotificationTextLayout.truncateToWidth(
                 text = alertBanner.text,
                 maxWidth = innerW
@@ -801,53 +930,80 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             } else {
                 emptyList()
             }
-            val bannerHeight = when (msgLines.size) {
-                0 -> 28f
-                1 -> 47f
-                else -> 63f
-            } * scale
+
+            val bannerHeight = if (expanded) {
+                when (msgLines.size) {
+                    0 -> 40f
+                    1 -> 64f
+                    else -> 86f
+                } * scale
+            } else {
+                when (msgLines.size) {
+                    0 -> 26f
+                    1 -> 44f
+                    else -> 58f
+                } * scale
+            }
             val alertBottom = alertTop + bannerHeight
             if (alertRight > alertLeft + 40f * scale) {
                 alertBannerBottomPx = alertBottom
+                val bgAlpha = if (expanded) 248 else 226
                 groupAlertBgPaint.color = when (alertBanner.status) {
-                    RiderStatus.SOS -> Color(198, 24, 24, 255)
-                    RiderStatus.MECHANICAL -> Color(204, 88, 0, 255)
-                    else -> Color(156, 110, 0, 255)
+                    RiderStatus.SOS -> Color(205, 24, 24, bgAlpha)
+                    RiderStatus.MECHANICAL -> Color(214, 88, 0, bgAlpha)
+                    RiderStatus.STOPPED_WAIT -> Color(172, 116, 0, bgAlpha)
+                    else -> Color(16, 98, 178, bgAlpha)
                 }
                 groupStrokePaint.color = Color.White
-                groupStrokePaint.strokeWidth = 1.8f * scale
-                canvas.drawRoundRect(alertLeft, alertTop, alertRight, alertBottom, 8f * scale, 8f * scale, groupAlertBgPaint)
-                canvas.drawRoundRect(alertLeft, alertTop, alertRight, alertBottom, 8f * scale, 8f * scale, groupStrokePaint)
+                groupStrokePaint.strokeWidth = (if (expanded) 2.3f else 1.4f) * scale
+                val cornerR = (if (expanded) 11f else 8f) * scale
+                canvas.drawRoundRect(alertLeft, alertTop, alertRight, alertBottom, cornerR, cornerR, groupAlertBgPaint)
+                canvas.drawRoundRect(alertLeft, alertTop, alertRight, alertBottom, cornerR, cornerR, groupStrokePaint)
+
                 TftVectorText.drawText(
                     canvas = canvas,
                     text = headerText,
-                    x = alertLeft + 10f * scale,
-                    y = alertTop + 19.5f * scale,
+                    x = alertLeft + innerPadX,
+                    y = alertTop + (if (expanded) 23f else 17.5f) * scale,
                     size = headerSize,
                     color = Color.White,
-                    strokeW = 1.9f * scale
+                    strokeW = headerStroke
                 )
                 if (msgLines.isNotEmpty()) {
                     TftVectorText.drawText(
                         canvas = canvas,
                         text = msgLines[0],
-                        x = alertLeft + 10f * scale,
-                        y = alertTop + 38f * scale,
+                        x = alertLeft + innerPadX,
+                        y = alertTop + (if (expanded) 45f else 33f) * scale,
                         size = msgSize,
                         color = Color(255, 250, 235, 255),
-                        strokeW = 1.65f * scale
+                        strokeW = msgStroke
                     )
                 }
                 if (msgLines.size >= 2) {
                     TftVectorText.drawText(
                         canvas = canvas,
                         text = msgLines[1],
-                        x = alertLeft + 10f * scale,
-                        y = alertTop + 54f * scale,
+                        x = alertLeft + innerPadX,
+                        y = alertTop + (if (expanded) 64f else 46f) * scale,
                         size = msgSize,
                         color = Color(255, 250, 235, 255),
-                        strokeW = 1.65f * scale
+                        strokeW = msgStroke
                     )
+                }
+
+                if (expanded && alertBanner.expandedProgress > 0f) {
+                    val trackL = alertLeft + 10f * scale
+                    val trackR = alertRight - 10f * scale
+                    val trackT = alertBottom - 6f * scale
+                    val trackB = alertBottom - 3f * scale
+                    val fillW = (trackR - trackL) * alertBanner.expandedProgress
+                    if (fillW > 2f * scale) {
+                        notifBgPaint.color = Color(255, 255, 255, 70)
+                        canvas.drawRoundRect(trackL, trackT, trackR, trackB, 1.5f * scale, 1.5f * scale, notifBgPaint)
+                        notifBgPaint.color = Color.White
+                        canvas.drawRoundRect(trackL, trackT, trackL + fillW, trackB, 1.5f * scale, 1.5f * scale, notifBgPaint)
+                    }
                 }
             }
         }
@@ -861,6 +1017,55 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                 notif = activeNotification,
                 alertBannerBottomPx = alertBannerBottomPx
             )
+        }
+
+        // 9e. Advertencia configurable de salida del track GPX activo (franja inferior central libre de HUD)
+        if (config.showGpxOffTrackWarning && gpxOffTrackMeters != null && gpxOffTrackMeters >= 35.0) {
+            val warnLeft = 160f * scale
+            val warnRight = w - 168f * scale
+            if (warnRight > warnLeft + 120f * scale) {
+                val warnTop = h - 64f * scale
+                val warnBottom = h - 14f * scale
+                val warnR = 10f * scale
+                canvas.drawRoundRect(warnLeft, warnTop, warnRight, warnBottom, warnR, warnR, gpxReturnWarnBgPaint)
+                gpxReturnWarnStrokePaint.strokeWidth = 1.8f * scale
+                canvas.drawRoundRect(warnLeft, warnTop, warnRight, warnBottom, warnR, warnR, gpxReturnWarnStrokePaint)
+
+                val distLabel = GroupTftLayout.formatCompactDistance(gpxOffTrackMeters)
+                val dirLabel = if (rider.coordinate != null && gpxOffTrackTarget != null) {
+                    val brg = RouteNavigator.compassBearing(rider.coordinate, gpxOffTrackTarget)
+                    val dirs = listOf("N", "NE", "E", "SE", "S", "SO", "O", "NO")
+                    " · ${dirs[((brg + 22.5) / 45.0).toInt() % 8]}"
+                } else {
+                    ""
+                }
+                val titleStr = "! FUERA DEL GPX"
+                val subStr = "A $distLabel$dirLabel"
+                val warnTitleSize = 11f * scale
+                val warnSubSize = 12f * scale
+                val titleW = TftVectorText.measureText(titleStr, warnTitleSize)
+                val subW = TftVectorText.measureText(subStr, warnSubSize)
+                val warnCenterX = (warnLeft + warnRight) * 0.5f
+
+                TftVectorText.drawText(
+                    canvas = canvas,
+                    text = titleStr,
+                    x = warnCenterX - titleW * 0.5f,
+                    y = warnTop + 20f * scale,
+                    size = warnTitleSize,
+                    color = Color(255, 224, 90),
+                    strokeW = 1.7f * scale
+                )
+                TftVectorText.drawText(
+                    canvas = canvas,
+                    text = subStr,
+                    x = warnCenterX - subW * 0.5f,
+                    y = warnBottom - 10f * scale,
+                    size = warnSubSize,
+                    color = Color.White,
+                    strokeW = 1.85f * scale
+                )
+            }
         }
 
         // 10. BlackEdges (4px arriba y abajo requeridos por Carbit EasyConn)

@@ -11,6 +11,7 @@ import com.oscar.endulink.bike.PictureRequest
 expect class PlatformH264Encoder(
     customBitrateKbps: () -> Int = { 0 },
     renderFrameRgba: (width: Int, height: Int) -> ByteArray?,
+    renderFrameBgraInts: ((width: Int, height: Int) -> IntArray?)? = null,
     onStats: ((EncoderStats) -> Unit)? = null,
     log: (String) -> Unit = {}
 ) : BikePicture {

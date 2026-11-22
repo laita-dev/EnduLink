@@ -61,6 +61,7 @@ fun InteractiveMap(
     quickMarkers: List<GPXWaypoint>,
     trackProgress: TrackProgress?,
     groupMembers: List<GroupMember> = emptyList(),
+    isOffGpxTrack: Boolean = false,
     isPickingOnMap: Boolean = false,
     onSelectWaypoint: (GPXWaypoint) -> Unit = {},
     onSelectRoute: (GPXRoute) -> Unit = {},
@@ -460,18 +461,42 @@ fun InteractiveMap(
                 )
             }
 
-            // 8. Flecha de reconexión DMD2 si estamos desviados del track
-            if (trackProgress != null && rider.coordinate != null && trackProgress.offTrackMeters > 35.0) {
-                val rPos = geoToScreen(rider.coordinate)
-                val targetPos = geoToScreen(trackProgress.reconnectCoordinate)
-                drawLine(
-                    color = EnduPalette.Warning,
-                    start = rPos,
-                    end = targetPos,
-                    strokeWidth = 4f,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f))
-                )
-                drawCircle(color = EnduPalette.Warning, radius = 6f, center = targetPos)
+            // 8. Ruta en línea recta al punto más cercano del GPX o flecha DMD2 de reconexión
+            if (trackProgress != null && rider.coordinate != null) {
+                val isGpxOnly = activeRoute != null && activeRoute.isVisible && activeRoad == null && curApproachRoad == null
+                if (isGpxOnly && (isOffGpxTrack || trackProgress.offTrackMeters >= 35.0)) {
+                    val rPos = geoToScreen(rider.coordinate)
+                    val targetPos = geoToScreen(trackProgress.projectedCoordinate)
+                    drawLine(
+                        color = Color(0xF00E1117),
+                        start = rPos,
+                        end = targetPos,
+                        strokeWidth = 7.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                    drawLine(
+                        color = Color(0xFFFFD60A),
+                        start = rPos,
+                        end = targetPos,
+                        strokeWidth = 4.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(16f, 10f))
+                    )
+                    drawCircle(color = Color.Black, radius = 8.5.dp.toPx(), center = targetPos)
+                    drawCircle(color = Color(0xFFFFD60A), radius = 6.2.dp.toPx(), center = targetPos)
+                    drawCircle(color = Color.White, radius = 2.6.dp.toPx(), center = targetPos)
+                } else if (!isGpxOnly && trackProgress.offTrackMeters > 35.0) {
+                    val rPos = geoToScreen(rider.coordinate)
+                    val targetPos = geoToScreen(trackProgress.reconnectCoordinate)
+                    drawLine(
+                        color = EnduPalette.Warning,
+                        start = rPos,
+                        end = targetPos,
+                        strokeWidth = 4f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f))
+                    )
+                    drawCircle(color = EnduPalette.Warning, radius = 6f, center = targetPos)
+                }
             }
 
             // 9. Modo Rumbo Directo («As the Crow Flies»)

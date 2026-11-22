@@ -35,3 +35,7 @@ fun postIosIncomingNotification(appName: String, title: String, body: String) {
     )
 }
 
+fun onIosAppWillTerminate() {
+    EnduController.shared.stop()
+}
+

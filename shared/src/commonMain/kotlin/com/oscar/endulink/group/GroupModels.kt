@@ -84,6 +84,7 @@ data class GroupMember(
     val batteryPct: Int = -1,
     val status: RiderStatus = RiderStatus.RIDING,
     val statusMessage: String = "",
+    val statusChangedAtEpochMs: Long = 0L,
     val seq: Long = 0L,
     val sentAtEpochMs: Long = 0L,
     val receivedAtEpochMs: Long = 0L,
@@ -91,6 +92,9 @@ data class GroupMember(
 ) {
     val coordinate: GeoCoord
         get() = GeoCoord(latitude, longitude)
+
+    val hasActiveTftAlert: Boolean
+        get() = status.isAlert || statusMessage.isNotBlank()
 
     fun ageSeconds(nowMs: Long = Clock.System.now().toEpochMilliseconds()): Long {
         return ((nowMs - receivedAtEpochMs).coerceAtLeast(0L)) / 1000L
@@ -188,16 +192,15 @@ object GroupInvite {
 
     fun buildShareMessage(code: String, inviterName: String): String {
         val formatted = formatForDisplay(code)
-        val webUrl = buildWebInviteUrl(code)
         val who = inviterName.trim().ifBlank { "Un compañero" }
-        return "$who te invita a su grupo de ruta en EnduLink.\nCódigo: $formatted\nÚnete pulsando aquí: $webUrl"
+        return "$who te invita a su grupo de ruta en EnduLink.\nCódigo de sala: $formatted\nIntroduce este código en EnduLink → Grupo para unirte."
     }
 
     fun parseRoomCode(raw: String): String? {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return null
 
-        // Si el usuario pegó el mensaje completo de WhatsApp, extraer primero la URL de invitación
+        // Si el usuario pegó el mensaje completo, extraer enlace antiguo (si lo hubiera) o código tras etiqueta
         val embeddedHttps = extractEmbeddedUrl(trimmed, "https://$WEB_INVITE_HOST$WEB_INVITE_PATH")
             ?: extractEmbeddedUrl(trimmed, "http://$WEB_INVITE_HOST$WEB_INVITE_PATH")
             ?: extractEmbeddedUrl(trimmed, SCHEME_PREFIX)
@@ -219,8 +222,10 @@ object GroupInvite {
                 else -> return null
             }
         } else {
-            if (candidate.contains(':')) return null
-            candidate
+            extractLabeledCode(candidate) ?: run {
+                if (candidate.contains(':')) return null
+                candidate
+            }
         }
 
         val clean = normalizeRawToken(extracted)
@@ -252,6 +257,23 @@ object GroupInvite {
         }
         val clean = normalizeRawToken(trimmed)
         return if (clean.length == 6 && clean.all { it in 'A'..'Z' || it in '0'..'9' }) clean else null
+    }
+
+    private fun extractLabeledCode(text: String): String? {
+        val lower = text.lowercase()
+        if (lower.startsWith("wifi:") || lower.startsWith("http:") || lower.startsWith("https:") || lower.startsWith("hj-")) {
+            return null
+        }
+        val labels = listOf("código de sala:", "codigo de sala:", "código:", "codigo:")
+        for (label in labels) {
+            val idx = lower.indexOf(label)
+            if (idx >= 0) {
+                val after = text.substring(idx + label.length).trimStart()
+                val token = after.split(' ', '\n', '\r', '\t').firstOrNull()?.trim()
+                if (!token.isNullOrBlank()) return token
+            }
+        }
+        return null
     }
 
     private fun extractEmbeddedUrl(text: String, prefix: String): String? {

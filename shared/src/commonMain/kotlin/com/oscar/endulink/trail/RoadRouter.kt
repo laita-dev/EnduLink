@@ -42,25 +42,96 @@ data class CalculatedRoadRoute(
     val asGPXRoute: GPXRoute,
     val isOfflineFallback: Boolean = false
 ) {
+    private fun projectProgress(
+        point: GeoCoord,
+        startSeg: Int = 0,
+        earlyStopDistM: Double? = null
+    ): Double {
+        if (coordinates.size < 2) return 0.0
+        val cosLat = cos(point.latitude * PI / 180.0).coerceAtLeast(0.05)
+        val scaleX = 111_320.0 * cosLat
+        val scaleY = 110_574.0
+        val maxSeg = coordinates.lastIndex - 1
+        val from = startSeg.coerceIn(0, maxSeg)
+        var bestProgress = from.toDouble()
+        var bestDistSq = Double.MAX_VALUE
+        val earlyStopSq = earlyStopDistM?.let { it * it }
+
+        for (i in from..maxSeg) {
+            val a = coordinates[i]
+            val b = coordinates[i + 1]
+            val dx = (b.longitude - a.longitude) * scaleX
+            val dy = (b.latitude - a.latitude) * scaleY
+            val lenSq = dx * dx + dy * dy
+            val t = if (lenSq < 1e-6) {
+                0.0
+            } else {
+                (((point.longitude - a.longitude) * scaleX * dx +
+                    (point.latitude - a.latitude) * scaleY * dy) / lenSq).coerceIn(0.0, 1.0)
+            }
+            val projLat = a.latitude + (b.latitude - a.latitude) * t
+            val projLon = a.longitude + (b.longitude - a.longitude) * t
+            val ex = (point.longitude - projLon) * scaleX
+            val ey = (point.latitude - projLat) * scaleY
+            val distSq = ex * ex + ey * ey
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq
+                bestProgress = i.toDouble() + t
+                if (earlyStopSq != null && distSq <= earlyStopSq) break
+            }
+        }
+        return bestProgress
+    }
+
+    private val stepProgressPositions: DoubleArray by lazy {
+        if (steps.isEmpty() || coordinates.size < 2) {
+            DoubleArray(steps.size)
+        } else {
+            val out = DoubleArray(steps.size)
+            var searchFrom = 0
+            val maxSeg = (coordinates.lastIndex - 1).coerceAtLeast(0)
+            for (k in steps.indices) {
+                val pos = projectProgress(
+                    point = steps[k].coordinate,
+                    startSeg = searchFrom,
+                    earlyStopDistM = 1.5
+                )
+                out[k] = pos
+                searchFrom = pos.toInt().coerceIn(0, maxSeg)
+            }
+            out
+        }
+    }
+
     /**
      * Devuelve la instrucción de giro activa o más próxima por delante del piloto,
-     * actualizándose en tiempo real a lo largo de todos los tramos y paradas.
+     * actualizándose en tiempo real a lo largo de todos los tramos y paradas sin retroceder a giros ya pasados.
      */
     fun currentInstruction(riderCoord: GeoCoord?): String? {
         if (steps.isEmpty()) return firstInstruction
         if (riderCoord == null) return firstInstruction ?: steps.firstOrNull()?.instruction
 
-        var bestIdx = 0
-        var bestDist = Double.MAX_VALUE
-        for (i in steps.indices) {
-            val d = riderCoord.distanceTo(steps[i].coordinate)
-            if (d < bestDist) {
-                bestDist = d
-                bestIdx = i
+        val riderProgress = projectProgress(riderCoord)
+        val positions = stepProgressPositions
+
+        val targetStep = if (isOfflineFallback) {
+            // En rutas offline cada step representa el inicio de un tramo entre paradas
+            var legIdx = 0
+            for (k in positions.indices) {
+                if (positions[k] <= riderProgress + 1e-4) legIdx = k else break
             }
+            return steps[legIdx].instruction
+        } else {
+            var chosen = steps.lastIndex
+            for (k in steps.indices) {
+                if (positions[k] >= riderProgress - 1e-4) {
+                    chosen = k
+                    break
+                }
+            }
+            steps[chosen]
         }
-        val targetIdx = if (bestDist < 28.0 && bestIdx + 1 < steps.size) bestIdx + 1 else bestIdx
-        val targetStep = steps[targetIdx]
+
         val distToTurn = riderCoord.distanceTo(targetStep.coordinate)
         val distPrefix = when {
             distToTurn < 35.0 -> "Ahora: "

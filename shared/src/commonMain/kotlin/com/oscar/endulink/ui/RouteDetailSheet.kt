@@ -34,6 +34,8 @@ fun RouteDetailSheet(
     route: GPXRoute,
     isActive: Boolean,
     riderCoord: GeoCoord?,
+    showGpxOffTrackWarning: Boolean = true,
+    onToggleGpxOffTrackWarning: (Boolean) -> Unit = {},
     onStartNavigation: (GPXRoute) -> Unit,
     onCenterOnMap: (GPXRoute) -> Unit,
     onOpenElevation: (GPXRoute) -> Unit,
@@ -345,6 +347,40 @@ fun RouteDetailSheet(
                 ) {
                     TrashDeleteIcon(color = EnduPalette.Danger, size = 13.dp)
                 }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(EnduPalette.SurfaceHigh.copy(alpha = 0.7f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text(
+                        text = "Aviso si te sales del GPX",
+                        color = EnduPalette.TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Advertencia en móvil y TFT + línea al punto más cercano",
+                        color = EnduPalette.TextMuted,
+                        fontSize = 10.sp
+                    )
+                }
+                Switch(
+                    checked = showGpxOffTrackWarning,
+                    onCheckedChange = onToggleGpxOffTrackWarning,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = EnduPalette.Accent,
+                        uncheckedThumbColor = EnduPalette.TextMuted,
+                        uncheckedTrackColor = EnduPalette.Surface
+                    )
+                )
             }
         }
     }

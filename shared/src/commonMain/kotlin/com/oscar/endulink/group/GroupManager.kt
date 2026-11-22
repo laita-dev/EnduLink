@@ -64,8 +64,14 @@ object GroupTxPolicy {
 }
 
 class GroupManager(
-    private val onConfigChanged: (GroupConfig) -> Unit = {}
+    private val onConfigChanged: (GroupConfig) -> Unit = {},
+    private val onAutoStoppedAlone: () -> Unit = {}
 ) {
+    companion object {
+        const val ALONE_AUTO_STOP_TIMEOUT_MS = 180_000L
+        const val MEMBER_EXPIRY_MS = 300_000L
+    }
+
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val stateLock = SynchronizedLock()
 
@@ -74,6 +80,9 @@ class GroupManager(
 
     private val _activeRoomCode = MutableStateFlow<String?>(null)
     val activeRoomCode: StateFlow<String?> = _activeRoomCode.asStateFlow()
+
+    private val _aloneRemainingSeconds = MutableStateFlow<Int?>(null)
+    val aloneRemainingSeconds: StateFlow<Int?> = _aloneRemainingSeconds.asStateFlow()
 
     private val _onlineConnected = MutableStateFlow(false)
     val onlineConnected: StateFlow<Boolean> = _onlineConnected.asStateFlow()
@@ -107,9 +116,11 @@ class GroupManager(
     private var lastSentMs: Long = 0L
     private var lastSentCoord: GeoCoord? = null
     private var lastTelemetry: RiderTelemetry = RiderTelemetry()
+    private var fallbackCoord: GeoCoord = GeoCoord(40.4168, -3.7038)
     private var lastBatteryPct: Int = -1
     private var maintenanceJob: Job? = null
     private var lastHandledTrackId: String? = null
+    private var aloneSinceMs: Long = 0L
 
     private val mqttTransport = MqttWebSocketTransport(
         customBrokerUrlProvider = { _config.value.customBrokerUrl },
@@ -225,8 +236,10 @@ class GroupManager(
             lastSentMs = 0L
             lastSentCoord = null
             lastHandledTrackId = null
+            aloneSinceMs = Clock.System.now().toEpochMilliseconds()
         }
         _members.value = emptyList()
+        _aloneRemainingSeconds.value = (ALONE_AUTO_STOP_TIMEOUT_MS / 1000L).toInt()
         _sharedTrack.value = null
         _sharedTrackBannerVisible.value = false
         _myStatus.value = RiderStatus.RIDING
@@ -243,25 +256,53 @@ class GroupManager(
         refreshConnectionState()
 
         maintenanceJob = scope.launch {
+            var tick = 0
             while (isActive && _activeRoomCode.value == roomCode) {
-                delay(5_000L)
+                delay(1_000L)
+                tick++
                 val nowMs = Clock.System.now().toEpochMilliseconds()
-                // Refrescar para actualizar indicadores "hace X s" y limpiar desconectados de hace > 2 horas
+                var autoStopAlone = false
+                var remainingSecToEmit: Int? = null
                 var changed = false
+
                 stateLock.withLock {
                     val it = memberMap.entries.iterator()
                     while (it.hasNext()) {
                         val entry = it.next()
-                        if (nowMs - entry.value.receivedAtEpochMs > 7_200_000L) {
+                        if (nowMs - entry.value.receivedAtEpochMs > MEMBER_EXPIRY_MS) {
                             it.remove()
                             changed = true
                         }
                     }
-                    if (changed || memberMap.isNotEmpty()) {
+                    if (memberMap.isEmpty()) {
+                        if (aloneSinceMs <= 0L) aloneSinceMs = nowMs
+                        val elapsedAlone = (nowMs - aloneSinceMs).coerceAtLeast(0L)
+                        if (elapsedAlone >= ALONE_AUTO_STOP_TIMEOUT_MS) {
+                            autoStopAlone = true
+                            remainingSecToEmit = null
+                        } else {
+                            remainingSecToEmit = ((ALONE_AUTO_STOP_TIMEOUT_MS - elapsedAlone + 999L) / 1000L)
+                                .toInt()
+                                .coerceAtLeast(1)
+                        }
+                    } else {
+                        aloneSinceMs = 0L
+                        remainingSecToEmit = null
+                    }
+                    if (changed || (tick % 5 == 0 && memberMap.isNotEmpty())) {
                         publishSortedMembersLocked()
                     }
                 }
-                publishCurrentPosition(forceImmediate = false)
+
+                _aloneRemainingSeconds.value = remainingSecToEmit
+                if (autoStopAlone) {
+                    leaveGroup()
+                    onAutoStoppedAlone()
+                    break
+                }
+                if (tick % 5 == 0) {
+                    publishCurrentPosition(forceImmediate = false)
+                }
             }
         }
 
@@ -274,12 +315,14 @@ class GroupManager(
         maintenanceJob?.cancel()
         maintenanceJob = null
         _activeRoomCode.value = null
+        _aloneRemainingSeconds.value = null
         _myStatus.value = RiderStatus.RIDING
         _myStatusMessage.value = ""
         _sharedTrack.value = null
         _sharedTrackBannerVisible.value = false
         stateLock.withLock {
             memberMap.clear()
+            aloneSinceMs = 0L
         }
         _members.value = emptyList()
         _onlineConnected.value = false
@@ -293,11 +336,16 @@ class GroupManager(
     }
 
     fun shutdown() {
+        if (_activeRoomCode.value != null) {
+            leaveGroup()
+            return
+        }
         maintenanceJob?.cancel()
         maintenanceJob = null
         mqttTransport.stop()
         lanTransport.stop()
         _activeRoomCode.value = null
+        _aloneRemainingSeconds.value = null
         _onlineConnected.value = false
         _lanActive.value = false
         _connectionState.value = GroupConnectionState.DISCONNECTED
@@ -348,10 +396,17 @@ class GroupManager(
         _sharedTrack.value = null
     }
 
+    fun updateFallbackCoordinate(coord: GeoCoord) {
+        stateLock.withLock {
+            fallbackCoord = coord
+        }
+    }
+
     fun onLocationUpdate(telemetry: RiderTelemetry, batteryPct: Int) {
         stateLock.withLock {
             lastTelemetry = telemetry
             lastBatteryPct = batteryPct
+            telemetry.coordinate?.let { fallbackCoord = it }
         }
         if (_activeRoomCode.value != null) {
             publishCurrentPosition(forceImmediate = false)
@@ -364,7 +419,8 @@ class GroupManager(
         val cfg = _config.value
 
         val snapshot = stateLock.withLock {
-            val coord = lastTelemetry.coordinate ?: return
+            val coord = lastTelemetry.coordinate
+                ?: if (forceImmediate) (lastSentCoord ?: fallbackCoord) else return
             val nowMs = Clock.System.now().toEpochMilliseconds()
             val shouldSend = GroupTxPolicy.shouldTransmitPosition(
                 nowMs = nowMs,
@@ -412,6 +468,12 @@ class GroupManager(
         }
 
         val nowMs = Clock.System.now().toEpochMilliseconds()
+        // Descartar mensajes retenidos obsoletos de sesiones ya cerradas
+        if (payload.ts > 0L && (nowMs - payload.ts) > MEMBER_EXPIRY_MS) {
+            return
+        }
+
+        val cleanMessage = payload.sm.trim().take(60)
         stateLock.withLock {
             val existing = memberMap[payload.id]
             val restarted = payload.sq in 1L..2L && (existing?.seq ?: 0L) > 4L
@@ -420,6 +482,18 @@ class GroupManager(
                 if (payload.sq == existing.seq && nowMs - existing.receivedAtEpochMs < 2500L) return
             }
 
+            val isActiveAlertOrMsg = status.isAlert || cleanMessage.isNotBlank()
+            val statusOrMsgChanged = existing == null ||
+                existing.status != status ||
+                existing.statusMessage != cleanMessage
+            val statusChangedAt = when {
+                !isActiveAlertOrMsg -> 0L
+                statusOrMsgChanged -> nowMs
+                existing != null && existing.statusChangedAtEpochMs > 0L -> existing.statusChangedAtEpochMs
+                else -> nowMs
+            }
+
+            aloneSinceMs = 0L
             memberMap[payload.id] = GroupMember(
                 id = payload.id,
                 name = payload.n.ifBlank { "Compañero" }.take(24),
@@ -431,7 +505,8 @@ class GroupManager(
                 headingDegrees = payload.hd,
                 batteryPct = payload.bt,
                 status = status,
-                statusMessage = payload.sm.take(60),
+                statusMessage = cleanMessage,
+                statusChangedAtEpochMs = statusChangedAt,
                 seq = payload.sq,
                 sentAtEpochMs = payload.ts,
                 receivedAtEpochMs = nowMs,
@@ -439,11 +514,16 @@ class GroupManager(
             )
             publishSortedMembersLocked()
         }
+        _aloneRemainingSeconds.value = null
     }
 
     private fun removeMember(memberId: String) {
+        val nowMs = Clock.System.now().toEpochMilliseconds()
         stateLock.withLock {
             if (memberMap.remove(memberId) != null) {
+                if (memberMap.isEmpty() && aloneSinceMs <= 0L) {
+                    aloneSinceMs = nowMs
+                }
                 publishSortedMembersLocked()
             }
         }

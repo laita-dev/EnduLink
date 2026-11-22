@@ -19,6 +19,15 @@ import kotlinx.datetime.Clock
 interface IosH264HardwareBridge {
     fun startSession(width: Int, height: Int, fps: Int, bitrateBps: Int): Boolean
     fun encodeRgbaPtr(rgbaPtr: Long, width: Int, height: Int, ptsMs: Long, forceKeyFrame: Boolean): String?
+    fun encodeBgraInto(
+        bgraPtr: Long,
+        width: Int,
+        height: Int,
+        ptsMs: Long,
+        forceKeyFrame: Boolean,
+        outPtr: Long,
+        outCapacity: Int
+    ): Int
     fun stopSession()
     fun setKeepAlive(active: Boolean)
 }
@@ -32,6 +41,7 @@ object IosH264BridgeHolder {
 actual class PlatformH264Encoder actual constructor(
     private val customBitrateKbps: () -> Int,
     private val renderFrameRgba: (width: Int, height: Int) -> ByteArray?,
+    private val renderFrameBgraInts: ((width: Int, height: Int) -> IntArray?)?,
     private val onStats: ((EncoderStats) -> Unit)?,
     private val log: (String) -> Unit
 ) : BikePicture {
@@ -48,9 +58,10 @@ actual class PlatformH264Encoder actual constructor(
     private val queueLock = SynchronizedLock()
     private val chunkQueue = ArrayDeque<ByteArray>()
     private var encoderJob: Job? = null
+    private var encodedOutBuffer = ByteArray(1024 * 1024)
 
     companion object {
-        private const val MAX_BACKLOG = 15
+        private const val MAX_BACKLOG = 2
     }
 
     actual override fun start(request: PictureRequest): Boolean {
@@ -132,39 +143,87 @@ actual class PlatformH264Encoder actual constructor(
 
         while (isRunning && currentCoroutineContext().isActive) {
             try {
-                val rgba = renderFrameRgba(width, height)
+                // Evitar acumular fotogramas obsoletos si el enlace Wi-Fi se frena:
+                // vaciamos la cola ANTES de codificar para que este frame salga como KeyFrame completo.
+                val hadBacklog = queueLock.withLock {
+                    if (chunkQueue.size >= MAX_BACKLOG) {
+                        chunkQueue.clear()
+                        waitingForWholeFrame = true
+                        true
+                    } else {
+                        false
+                    }
+                }
+                if (hadBacklog) {
+                    forceNextKeyFrame = true
+                }
 
-                if (rgba != null && rgba.size >= width * height * 4) {
+                val bgraInts = renderFrameBgraInts?.invoke(width, height)
+                var chunk: ByteArray? = null
+
+                if (bgraInts != null && bgraInts.size >= width * height) {
                     val ptsMs = frameIndex * 1000L / fps
                     val wantKey = forceNextKeyFrame || waitingForWholeFrame || (frameIndex % (fps * 2L) == 0L)
                     forceNextKeyFrame = false
 
-                    val encodedB64 = rgba.usePinned { pinned ->
-                        val ptrAddr = pinned.addressOf(0).toLong()
-                        hwBridge.encodeRgbaPtr(ptrAddr, width, height, ptsMs, wantKey)
-                    }
-
-                    if (!encodedB64.isNullOrEmpty()) {
-                        val chunk = decodeBase64Fast(encodedB64)
-                        if (chunk.isNotEmpty()) {
-                            queueLock.withLock {
-                                if (chunkQueue.size >= MAX_BACKLOG) {
-                                    chunkQueue.clear()
-                                    waitingForWholeFrame = true
-                                    forceNextKeyFrame = true
-                                }
-                                waitingForWholeFrame = false
-                                chunkQueue.addLast(chunk)
-                            }
-                            if (!loggedFirstFrame) {
-                                loggedFirstFrame = true
-                                log("VideoToolbox: primera trama H.264 codificada (${chunk.size} bytes)")
-                            }
-                            bytesEncodedWindow += chunk.size
-                            framesEncodedWindow++
+                    val written = bgraInts.usePinned { pinnedBg ->
+                        val bgraPtr = pinnedBg.addressOf(0).toLong()
+                        encodedOutBuffer.usePinned { pinnedOut ->
+                            val outPtr = pinnedOut.addressOf(0).toLong()
+                            hwBridge.encodeBgraInto(
+                                bgraPtr = bgraPtr,
+                                width = width,
+                                height = height,
+                                ptsMs = ptsMs,
+                                forceKeyFrame = wantKey,
+                                outPtr = outPtr,
+                                outCapacity = encodedOutBuffer.size
+                            )
                         }
                     }
+                    if (written > 0) {
+                        chunk = encodedOutBuffer.copyOf(written)
+                    } else if (written < 0) {
+                        // Si un I-frame excepcional excediera 1 MB, redimensionamos el buffer para el siguiente frame
+                        val needed = (-written).coerceAtMost(4 * 1024 * 1024)
+                        if (needed > encodedOutBuffer.size) {
+                            encodedOutBuffer = ByteArray(needed)
+                        }
+                        forceNextKeyFrame = true
+                    }
                     frameIndex++
+                } else {
+                    val rgba = renderFrameRgba(width, height)
+                    if (rgba != null && rgba.size >= width * height * 4) {
+                        val ptsMs = frameIndex * 1000L / fps
+                        val wantKey = forceNextKeyFrame || waitingForWholeFrame || (frameIndex % (fps * 2L) == 0L)
+                        forceNextKeyFrame = false
+
+                        val encodedB64 = rgba.usePinned { pinned ->
+                            val ptrAddr = pinned.addressOf(0).toLong()
+                            hwBridge.encodeRgbaPtr(ptrAddr, width, height, ptsMs, wantKey)
+                        }
+                        if (!encodedB64.isNullOrEmpty()) {
+                            chunk = decodeBase64Fast(encodedB64)
+                        }
+                        frameIndex++
+                    }
+                }
+
+                if (chunk != null && chunk.isNotEmpty()) {
+                    queueLock.withLock {
+                        if (chunkQueue.size >= MAX_BACKLOG) {
+                            chunkQueue.clear()
+                        }
+                        waitingForWholeFrame = false
+                        chunkQueue.addLast(chunk)
+                    }
+                    if (!loggedFirstFrame) {
+                        loggedFirstFrame = true
+                        log("VideoToolbox: primera trama H.264 codificada (${chunk.size} bytes)")
+                    }
+                    bytesEncodedWindow += chunk.size
+                    framesEncodedWindow++
                 }
             } catch (ce: CancellationException) {
                 throw ce

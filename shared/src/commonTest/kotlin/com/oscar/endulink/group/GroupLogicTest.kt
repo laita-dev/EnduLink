@@ -40,6 +40,12 @@ class GroupLogicTest {
         assertNull(GroupInvite.parseQrInvite("WIFI:T:WPA;S:DIRECT-HJ-123;P:12345678;;"))
         assertEquals("K7M9P2", GroupInvite.parseQrInvite("endulink://group/K7M9P2"))
         assertEquals("6KV7H6", GroupInvite.parseQrInvite("https://laita-dev.github.io/EnduLink/group/?c=6KV7H6"))
+
+        val shareMsg = GroupInvite.buildShareMessage("6KV7H6", "Nestor")
+        assertTrue(shareMsg.contains("6KV-7H6"))
+        assertFalse(shareMsg.contains("http", ignoreCase = true))
+        assertFalse(shareMsg.contains("github.io", ignoreCase = true))
+        assertEquals("6KV7H6", GroupInvite.parseRoomCode(shareMsg))
     }
 
     @Test
@@ -166,6 +172,77 @@ class GroupLogicTest {
         assertNotNull(plan.alertBanner)
         assertTrue(plan.alertBanner!!.text.startsWith("SOS: CARLOS"))
         assertEquals("PINCHAZO EN LA BAJADA DEL RIO", plan.alertBanner!!.subtext)
+        assertFalse(plan.alertBanner!!.isExpanded)
+    }
+
+    @Test
+    fun testTftGroupAlertBannerTwoPhaseAndCustomMessageWithRiding() {
+        val center = GeoCoord(40.4168, -3.7038)
+        val msgMember = GroupMember(
+            id = "m_msg",
+            name = "Ana",
+            color = RiderColor.CYAN,
+            latitude = 40.4175,
+            longitude = -3.7030,
+            status = RiderStatus.RIDING,
+            statusMessage = "Paramos en el bar de arriba",
+            statusChangedAtEpochMs = 100_000L,
+            receivedAtEpochMs = 100_000L
+        )
+
+        // Fase 1 (< 5 s): grande y expandido aunque el estado sea En ruta con mensaje personalizado
+        val phase1 = GroupTftLayout.compute(
+            members = listOf(msgMember),
+            mapCenter = center,
+            zoom = 15,
+            tileSizePx = 256f * 1.45f,
+            mapHeadingDeg = 0.0,
+            anchorX = 296f,
+            anchorY = 546f,
+            width = 592f,
+            height = 816f,
+            scale = 1f,
+            nowMs = 102_000L
+        )
+        assertNotNull(phase1.alertBanner)
+        assertTrue(phase1.alertBanner!!.isExpanded)
+        assertTrue(phase1.alertBanner!!.expandedProgress > 0.5f)
+        assertTrue(phase1.alertBanner!!.text.startsWith("MSG: ANA"))
+        assertEquals("PARAMOS EN EL BAR DE ARRIBA", phase1.alertBanner!!.subtext)
+
+        // Fase 2 (>= 5 s): pasa a compacto en esquina y permanece hasta volver a "En ruta" sin mensaje
+        val phase2 = GroupTftLayout.compute(
+            members = listOf(msgMember),
+            mapCenter = center,
+            zoom = 15,
+            tileSizePx = 256f * 1.45f,
+            mapHeadingDeg = 0.0,
+            anchorX = 296f,
+            anchorY = 546f,
+            width = 592f,
+            height = 816f,
+            scale = 1f,
+            nowMs = 106_000L
+        )
+        assertNotNull(phase2.alertBanner)
+        assertFalse(phase2.alertBanner!!.isExpanded)
+        assertEquals("PARAMOS EN EL BAR DE ARRIBA", phase2.alertBanner!!.subtext)
+
+        // Vuelve a "En ruta" sin mensaje -> desaparece el banner
+        val cleared = GroupTftLayout.compute(
+            members = listOf(msgMember.copy(status = RiderStatus.RIDING, statusMessage = "", statusChangedAtEpochMs = 0L)),
+            mapCenter = center,
+            zoom = 15,
+            tileSizePx = 256f * 1.45f,
+            mapHeadingDeg = 0.0,
+            anchorX = 296f,
+            anchorY = 546f,
+            width = 592f,
+            height = 816f,
+            scale = 1f,
+            nowMs = 107_000L
+        )
+        assertNull(cleared.alertBanner)
     }
 
     @Test
@@ -184,6 +261,7 @@ class GroupLogicTest {
         assertTrue(decoded.bikeMapConfig.showGroupEdgeRadarOnTft)
         assertTrue(decoded.bikeMapConfig.showGroupHudBadgeOnTft)
         assertTrue(decoded.bikeMapConfig.showGroupAlertsOnTft)
+        assertTrue(decoded.bikeMapConfig.showGpxOffTrackWarning)
         assertTrue(decoded.groupConfig.enableOnlineSync)
         assertTrue(decoded.groupConfig.enableOfflineLanSync)
         assertFalse(decoded.groupConfig.batterySaverMode)

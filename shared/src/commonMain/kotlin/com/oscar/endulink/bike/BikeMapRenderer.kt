@@ -58,7 +58,8 @@ data class BikeMapConfig(
     val showGroupHudBadgeOnTft: Boolean = true,
     val showGroupAlertsOnTft: Boolean = true,
     val showPhoneNotificationsOnTft: Boolean = true,
-    val tftNotificationDurationSeconds: Int = 6
+    val tftNotificationDurationSeconds: Int = 6,
+    val showGpxOffTrackWarning: Boolean = true
 ) {
     fun resolveEffectiveZoom(speedKmh: Double): Int {
         if (!autoZoomBySpeed) return zoom.coerceIn(5, 18)
@@ -126,8 +127,32 @@ expect class BikeMapRenderer(tileStore: TileStore) {
         routeTypeLabel: String? = null,
         groupMembers: List<GroupMember> = emptyList(),
         groupActiveCount: Int = 0,
-        activeNotification: TftPhoneNotification? = null
+        activeNotification: TftPhoneNotification? = null,
+        gpxOffTrackTarget: GeoCoord? = null,
+        gpxOffTrackMeters: Double? = null
     ): ByteArray?
+
+    fun renderBgraInts(
+        width: Int,
+        height: Int,
+        config: BikeMapConfig,
+        rider: RiderTelemetry,
+        layer: MapLayer,
+        activeRoute: GPXRoute?,
+        roadRouteCoordinates: List<GeoCoord>?,
+        isNavigating: Boolean,
+        remainingKm: Double?,
+        nextInstruction: String?,
+        waypoints: List<GPXWaypoint> = emptyList(),
+        intermediateStops: List<GeoCoord> = emptyList(),
+        remainingMinutes: Int? = null,
+        routeTypeLabel: String? = null,
+        groupMembers: List<GroupMember> = emptyList(),
+        groupActiveCount: Int = 0,
+        activeNotification: TftPhoneNotification? = null,
+        gpxOffTrackTarget: GeoCoord? = null,
+        gpxOffTrackMeters: Double? = null
+    ): IntArray?
 
     fun renderPreview(
         width: Int,
@@ -146,6 +171,8 @@ expect class BikeMapRenderer(tileStore: TileStore) {
         routeTypeLabel: String? = null,
         groupMembers: List<GroupMember> = emptyList(),
         groupActiveCount: Int = 0,
-        activeNotification: TftPhoneNotification? = null
+        activeNotification: TftPhoneNotification? = null,
+        gpxOffTrackTarget: GeoCoord? = null,
+        gpxOffTrackMeters: Double? = null
     ): ImageBitmap?
 }

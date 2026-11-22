@@ -82,6 +82,18 @@ class BikeForegroundService : Service() {
         wifiLock?.acquire()
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_NOT_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        try {
+            com.oscar.endulink.ui.EnduController.shared.stop()
+        } catch (_: Exception) {}
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         try {
             if (wakeLock?.isHeld == true) wakeLock?.release()

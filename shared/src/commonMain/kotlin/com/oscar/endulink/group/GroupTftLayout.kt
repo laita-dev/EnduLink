@@ -34,7 +34,9 @@ data class TftGroupAlertBanner(
     val member: GroupMember,
     val text: String,
     val subtext: String = "",
-    val status: RiderStatus
+    val status: RiderStatus,
+    val isExpanded: Boolean = false,
+    val expandedProgress: Float = 0f
 )
 
 data class TftGroupOverlayPlan(
@@ -48,6 +50,7 @@ data class TftGroupOverlayPlan(
  * y alertas rápidas sobre el lienzo TFT (`592x816` o preview escalada).
  */
 object GroupTftLayout {
+    const val ALERT_EXPANDED_DURATION_MS = 5_000L
 
     fun formatCompactDistance(meters: Double): String {
         if (meters < 1000.0) {
@@ -174,6 +177,7 @@ object GroupTftLayout {
         val prioritizedOffScreen = offScreen
             .sortedWith(
                 compareByDescending<TftProjectedMember> { it.member.status.alertPriority }
+                    .thenByDescending { it.member.hasActiveTftAlert }
                     .thenBy { it.distanceMeters }
             )
             .take(6)
@@ -202,8 +206,9 @@ object GroupTftLayout {
             val ey = (anchorY + dy * tMin).coerceIn(safeTop, safeBottom)
             val angle = atan2(dy, dx)
             val distStr = formatCompactDistance(proj.distanceMeters)
-            val label = if (proj.member.status.isAlert) {
-                "!${proj.member.status.tftTag} ${proj.member.initials()}"
+            val label = if (proj.member.hasActiveTftAlert) {
+                val tag = proj.member.status.tftTag.ifBlank { "MSG" }
+                "!$tag ${proj.member.initials()}"
             } else {
                 "${proj.member.initials()} $distStr"
             }
@@ -214,29 +219,54 @@ object GroupTftLayout {
                 angleRad = angle,
                 label = label,
                 distanceMeters = proj.distanceMeters,
-                isAlert = proj.member.status.isAlert,
+                isAlert = proj.member.hasActiveTftAlert,
                 isStale = proj.isStale
             )
         }
 
         val resolvedIndicators = separateCloseIndicators(rawIndicators, safeTop, safeBottom, 26f * scale)
 
-        // Banner destacado solo si algún compañero tiene alerta activa
-        val topAlert = (inView + offScreen)
-            .filter { it.member.status.isAlert }
+        // Banner en 2 fases:
+        // - Primeros 5 s tras cambiar estado o recibir mensaje nuevo -> grande y destacado (`isExpanded = true`)
+        // - Pasados 5 s -> pequeño en la esquina superior izquierda hasta volver a "En ruta" sin mensaje
+        val alertCandidates = (inView + offScreen).filter { it.member.hasActiveTftAlert }
+        val recentlyChanged = alertCandidates
+            .filter {
+                it.member.statusChangedAtEpochMs > 0L &&
+                    (nowMs - it.member.statusChangedAtEpochMs) in 0L until ALERT_EXPANDED_DURATION_MS
+            }
             .maxWithOrNull(
-                compareBy<TftProjectedMember> { it.member.status.alertPriority }
+                compareBy<TftProjectedMember> { it.member.statusChangedAtEpochMs }
+                    .thenBy { it.member.status.alertPriority }
                     .thenBy { -it.distanceMeters }
             )
+        val topAlert = recentlyChanged ?: alertCandidates.maxWithOrNull(
+            compareBy<TftProjectedMember> { it.member.status.alertPriority }
+                .thenBy { it.member.statusChangedAtEpochMs }
+                .thenBy { -it.distanceMeters }
+        )
         val banner = topAlert?.let {
-            val tag = it.member.status.tftTag.ifBlank { "AVISO" }
+            val tag = it.member.status.tftTag.ifBlank { "MSG" }
             val who = formatShortName(it.member.name)
             val dist = formatCompactDistance(it.distanceMeters)
+            val elapsed = if (it.member.statusChangedAtEpochMs > 0L) {
+                nowMs - it.member.statusChangedAtEpochMs
+            } else {
+                Long.MAX_VALUE
+            }
+            val expanded = elapsed in 0L until ALERT_EXPANDED_DURATION_MS
+            val progress = if (expanded) {
+                (1f - elapsed.toFloat() / ALERT_EXPANDED_DURATION_MS.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
             TftGroupAlertBanner(
                 member = it.member,
                 text = "$tag: $who - $dist",
                 subtext = formatBannerMessage(it.member.statusMessage),
-                status = it.member.status
+                status = it.member.status,
+                isExpanded = expanded,
+                expandedProgress = progress
             )
         }
 

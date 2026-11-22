@@ -58,6 +58,52 @@ class RouteNavigatorTest {
 
         // El punto de reconexión debe estar adelantado sobre la traza en sentido de avance (latitud > 40.005)
         assertTrue(progress.reconnectCoordinate.latitude > 40.005)
+        // El rumbo directo al punto más cercano debe apuntar al oeste (~270°) desde lon 0.001 hacia 0.000
+        assertTrue(abs(progress.bearingToNearestDeg - 270.0) < 3.0)
+    }
+
+    @Test
+    fun testRoadInstructionNeverRevertsToPassedTurn() {
+        val route = CalculatedRoadRoute(
+            destinationName = "Destino",
+            routeLabel = "Principal",
+            destinationCoordinate = GeoCoord(40.020, 0.000),
+            coordinates = listOf(
+                GeoCoord(40.000, 0.000),
+                GeoCoord(40.005, 0.000),
+                GeoCoord(40.010, 0.000),
+                GeoCoord(40.015, 0.000),
+                GeoCoord(40.020, 0.000)
+            ),
+            distanceKm = 2.2,
+            expectedMinutes = 5,
+            hasTolls = false,
+            firstInstruction = "Gira a la derecha por Calle 1",
+            steps = listOf(
+                RoadStep(GeoCoord(40.005, 0.000), "Gira a la derecha por Calle 1", 550.0),
+                RoadStep(GeoCoord(40.015, 0.000), "Gira a la izquierda por Calle 2", 550.0)
+            ),
+            asGPXRoute = GPXRoute.fromCoordinates("Destino", listOf(GeoCoord(40.000, 0.000), GeoCoord(40.020, 0.000)))
+        )
+
+        // Antes de llegar a Calle 1 (40.004) debe mantener Calle 1
+        val beforeFirstTurn = route.currentInstruction(GeoCoord(40.004, 0.000))
+        assertNotNull(beforeFirstTurn)
+        assertTrue(beforeFirstTurn.contains("Calle 1"), "Antes del cruce debe mantener Calle 1: $beforeFirstTurn")
+
+        // Piloto a 40.006 (ya ha pasado Calle 1 en 40.005 por ~110 m, aunque Calle 1 sigue más cerca que Calle 2 en 40.015)
+        val instruction = route.currentInstruction(GeoCoord(40.006, 0.000))
+        assertNotNull(instruction)
+        assertTrue(instruction.contains("Calle 2"), "Se esperaba la maniobra siguiente (Calle 2) y no volver atrás: $instruction")
+
+        // Offline multi-parada debe avanzar al segundo tramo tras superar la parada 1
+        val offline = RoadRouter.buildOfflineRoute(
+            stops = listOf(GeoCoord(40.000, 0.000), GeoCoord(40.010, 0.000), GeoCoord(40.020, 0.000)),
+            destinationName = "Destino"
+        )
+        assertNotNull(offline)
+        assertTrue(offline.currentInstruction(GeoCoord(40.003, 0.000))?.contains("parada 1") == true)
+        assertTrue(offline.currentInstruction(GeoCoord(40.014, 0.000))?.contains("destino") == true)
     }
 
     @Test

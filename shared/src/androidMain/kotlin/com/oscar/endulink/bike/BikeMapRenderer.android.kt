@@ -21,6 +21,7 @@ import com.oscar.endulink.tiles.TileStore
 import com.oscar.endulink.trail.GPXRoute
 import com.oscar.endulink.trail.GPXWaypoint
 import com.oscar.endulink.trail.GeoCoord
+import com.oscar.endulink.trail.RouteNavigator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -305,6 +306,44 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
     private val notifRect = RectF()
     private val notifTrackRect = RectF()
     private val notifProgressRect = RectF()
+    private val gpxReturnHaloPaint = Paint().apply {
+        color = android.graphics.Color.argb(240, 14, 17, 23)
+        style = Paint.Style.STROKE
+        strokeWidth = 8.5f
+        strokeCap = Paint.Cap.ROUND
+        isAntiAlias = true
+    }
+    private val gpxReturnLinePaint = Paint().apply {
+        color = android.graphics.Color.rgb(255, 214, 10)
+        style = Paint.Style.STROKE
+        strokeWidth = 4.8f
+        strokeCap = Paint.Cap.ROUND
+        pathEffect = DashPathEffect(floatArrayOf(15f, 9f), 0f)
+        isAntiAlias = true
+    }
+    private val gpxReturnWarnBgPaint = Paint().apply {
+        color = android.graphics.Color.argb(244, 180, 96, 0)
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val gpxReturnWarnStrokePaint = Paint().apply {
+        color = android.graphics.Color.rgb(255, 214, 10)
+        style = Paint.Style.STROKE
+        strokeWidth = 1.8f
+        isAntiAlias = true
+    }
+    private val gpxReturnWarnTextPaint = Paint().apply {
+        color = android.graphics.Color.WHITE
+        textSize = 13f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+        isAntiAlias = true
+    }
+    private val groupSubtextPaint = Paint().apply {
+        color = android.graphics.Color.rgb(255, 250, 235)
+        textSize = 11.5f
+        isAntiAlias = true
+    }
 
     private var lastBatteryCheckMs: Long = 0L
     private var cachedBatteryStatus: BatteryStatus = BatteryStatus()
@@ -336,7 +375,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
         groupActiveCount: Int,
-        activeNotification: TftPhoneNotification?
+        activeNotification: TftPhoneNotification?,
+        gpxOffTrackTarget: GeoCoord?,
+        gpxOffTrackMeters: Double?
     ): ByteArray? {
         val bmp = getOrCreateBitmap(width, height)
         val canvas = cachedCanvas ?: Canvas(bmp).also { cachedCanvas = it }
@@ -360,12 +401,36 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
             groupActiveCount = groupActiveCount,
-            activeNotification = activeNotification
+            activeNotification = activeNotification,
+            gpxOffTrackTarget = gpxOffTrackTarget,
+            gpxOffTrackMeters = gpxOffTrackMeters
         )
 
         bmp.copyPixelsToBuffer(ByteBuffer.wrap(buffer))
         return buffer
     }
+
+    actual fun renderBgraInts(
+        width: Int,
+        height: Int,
+        config: BikeMapConfig,
+        rider: RiderTelemetry,
+        layer: MapLayer,
+        activeRoute: GPXRoute?,
+        roadRouteCoordinates: List<GeoCoord>?,
+        isNavigating: Boolean,
+        remainingKm: Double?,
+        nextInstruction: String?,
+        waypoints: List<GPXWaypoint>,
+        intermediateStops: List<GeoCoord>,
+        remainingMinutes: Int?,
+        routeTypeLabel: String?,
+        groupMembers: List<GroupMember>,
+        groupActiveCount: Int,
+        activeNotification: TftPhoneNotification?,
+        gpxOffTrackTarget: GeoCoord?,
+        gpxOffTrackMeters: Double?
+    ): IntArray? = null
 
     @Synchronized
     actual fun renderPreview(
@@ -385,7 +450,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
         groupActiveCount: Int,
-        activeNotification: TftPhoneNotification?
+        activeNotification: TftPhoneNotification?,
+        gpxOffTrackTarget: GeoCoord?,
+        gpxOffTrackMeters: Double?
     ): ImageBitmap? {
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
@@ -407,7 +474,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
             groupActiveCount = groupActiveCount,
-            activeNotification = activeNotification
+            activeNotification = activeNotification,
+            gpxOffTrackTarget = gpxOffTrackTarget,
+            gpxOffTrackMeters = gpxOffTrackMeters
         )
         return bmp.asImageBitmap()
     }
@@ -430,7 +499,9 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
         groupActiveCount: Int,
-        activeNotification: TftPhoneNotification?
+        activeNotification: TftPhoneNotification?,
+        gpxOffTrackTarget: GeoCoord?,
+        gpxOffTrackMeters: Double?
     ) {
         val w = width
         val h = height
@@ -558,6 +629,20 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             )
             canvas.drawPath(approachPath, approachPaint)
             if (hasChevrons) drawBatchedChevrons(canvas, scale)
+        }
+
+        // 4a. Ruta en línea recta al punto más cercano del GPX cuando te sales del track
+        if (gpxOffTrackTarget != null && rider.coordinate != null) {
+            val (rx, ry) = geoToLocal(rider.coordinate)
+            val (tx, ty) = geoToLocal(gpxOffTrackTarget)
+            canvas.drawLine(rx, ry, tx, ty, gpxReturnHaloPaint)
+            canvas.drawLine(rx, ry, tx, ty, gpxReturnLinePaint)
+            waypointPinPaint.color = android.graphics.Color.BLACK
+            canvas.drawCircle(tx, ty, 9.5f, waypointPinPaint)
+            waypointPinPaint.color = android.graphics.Color.rgb(255, 214, 10)
+            canvas.drawCircle(tx, ty, 7.0f, waypointPinPaint)
+            waypointPinPaint.color = android.graphics.Color.WHITE
+            canvas.drawCircle(tx, ty, 3.0f, waypointPinPaint)
         }
 
         // 4b. Paradas intermedias en el cuadro TFT
@@ -810,28 +895,104 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             canvas.drawText("GRP $groupActiveCount", grpBox.left + 21f, grpBox.bottom - 8f, groupTextPaint)
         }
 
-        // 9c. Banner destacado de alerta rápida (SOS / Avería / Esperadme)
+        // 9c. Banner de alerta/mensaje del grupo en 2 fases:
+        // - Fase 1 (primeros 5 s): grande y destacado arriba
+        // - Fase 2 (después de 5 s): compacto en la esquina superior izquierda hasta volver a "En ruta"
         val alertBanner = if (config.showGroupAlertsOnTft) groupPlan?.alertBanner else null
+        var alertBannerBottomVw = 0f
         if (alertBanner != null) {
             val maxAlertRight = if (groupActiveCount > 0 && config.showGroupHudBadgeOnTft) {
                 grpBox.left - 8f
             } else {
                 vw - 14f
             }
-            val alertRight = minOf(maxAlertRight, 14f + 286f)
+            val expanded = alertBanner.isExpanded
+            val alertRight = if (expanded) vw - 14f else minOf(maxAlertRight, 14f + 250f)
             if (alertRight > 54f) {
-                groupRect.set(14f, 62f, alertRight, 90f)
+                val alertTop = 62f
+                val innerPadX = if (expanded) 12f else 9f
+                val innerW = (alertRight - 14f - innerPadX * 2f).coerceAtLeast(40f)
+                groupTextPaint.textSize = if (expanded) 15f else 11.2f
+                groupSubtextPaint.textSize = if (expanded) 13f else 10.2f
+
+                val headerText = TftNotificationTextLayout.truncateToWidth(
+                    text = alertBanner.text,
+                    maxWidth = innerW
+                ) { groupTextPaint.measureText(it) }
+                val msgLines = if (alertBanner.subtext.isNotBlank()) {
+                    TftNotificationTextLayout.wrapLines(
+                        text = alertBanner.subtext,
+                        maxWidth = innerW,
+                        maxLines = 2
+                    ) { groupSubtextPaint.measureText(it) }
+                } else {
+                    emptyList()
+                }
+                val bannerHeight = if (expanded) {
+                    when (msgLines.size) {
+                        0 -> 38f
+                        1 -> 62f
+                        else -> 82f
+                    }
+                } else {
+                    when (msgLines.size) {
+                        0 -> 26f
+                        1 -> 44f
+                        else -> 58f
+                    }
+                }
+                val alertBottom = alertTop + bannerHeight
+                alertBannerBottomVw = alertBottom
+                groupRect.set(14f, alertTop, alertRight, alertBottom)
+                val bgAlpha = if (expanded) 248 else 226
                 groupAlertBgPaint.color = when (alertBanner.status) {
-                    RiderStatus.SOS -> android.graphics.Color.argb(240, 215, 38, 38)
-                    RiderStatus.MECHANICAL -> android.graphics.Color.argb(240, 225, 105, 0)
-                    else -> android.graphics.Color.argb(240, 195, 145, 0)
+                    RiderStatus.SOS -> android.graphics.Color.argb(bgAlpha, 205, 24, 24)
+                    RiderStatus.MECHANICAL -> android.graphics.Color.argb(bgAlpha, 214, 88, 0)
+                    RiderStatus.STOPPED_WAIT -> android.graphics.Color.argb(bgAlpha, 172, 116, 0)
+                    else -> android.graphics.Color.argb(bgAlpha, 16, 98, 178)
                 }
                 groupStrokePaint.color = android.graphics.Color.WHITE
-                groupStrokePaint.strokeWidth = 1.6f
-                canvas.drawRoundRect(groupRect, 8f, 8f, groupAlertBgPaint)
-                canvas.drawRoundRect(groupRect, 8f, 8f, groupStrokePaint)
-                groupTextPaint.textSize = 13f
-                canvas.drawText(alertBanner.text, groupRect.left + 10f, groupRect.bottom - 8f, groupTextPaint)
+                groupStrokePaint.strokeWidth = if (expanded) 2.2f else 1.4f
+                val cornerR = if (expanded) 11f else 8f
+                canvas.drawRoundRect(groupRect, cornerR, cornerR, groupAlertBgPaint)
+                canvas.drawRoundRect(groupRect, cornerR, cornerR, groupStrokePaint)
+                canvas.drawText(
+                    headerText,
+                    groupRect.left + innerPadX,
+                    alertTop + (if (expanded) 23f else 17.5f),
+                    groupTextPaint
+                )
+                if (msgLines.isNotEmpty()) {
+                    canvas.drawText(
+                        msgLines[0],
+                        groupRect.left + innerPadX,
+                        alertTop + (if (expanded) 44f else 33f),
+                        groupSubtextPaint
+                    )
+                }
+                if (msgLines.size >= 2) {
+                    canvas.drawText(
+                        msgLines[1],
+                        groupRect.left + innerPadX,
+                        alertTop + (if (expanded) 62f else 46f),
+                        groupSubtextPaint
+                    )
+                }
+                if (expanded && alertBanner.expandedProgress > 0f) {
+                    val trackL = groupRect.left + 10f
+                    val trackR = groupRect.right - 10f
+                    val trackT = groupRect.bottom - 6f
+                    val trackB = groupRect.bottom - 3f
+                    val fillW = (trackR - trackL) * alertBanner.expandedProgress
+                    if (fillW > 2f) {
+                        notifTrackRect.set(trackL, trackT, trackR, trackB)
+                        notifBgPaint.color = android.graphics.Color.argb(70, 255, 255, 255)
+                        canvas.drawRoundRect(notifTrackRect, 1.5f, 1.5f, notifBgPaint)
+                        notifProgressRect.set(trackL, trackT, trackL + fillW, trackB)
+                        notifBgPaint.color = android.graphics.Color.WHITE
+                        canvas.drawRoundRect(notifProgressRect, 1.5f, 1.5f, notifBgPaint)
+                    }
+                }
             }
         }
 
@@ -841,8 +1002,35 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                 canvas = canvas,
                 vw = vw,
                 notif = activeNotification,
-                hasAlertBanner = (alertBanner != null)
+                alertBannerBottomVw = alertBannerBottomVw
             )
+        }
+
+        // 9e. Advertencia configurable de salida del track GPX activo
+        if (config.showGpxOffTrackWarning && gpxOffTrackMeters != null && gpxOffTrackMeters >= 35.0) {
+            val warnLeft = 160f
+            val warnRight = vw - 168f
+            if (warnRight > warnLeft + 120f) {
+                groupRect.set(warnLeft, vh - 64f, warnRight, vh - 14f)
+                canvas.drawRoundRect(groupRect, 10f, 10f, gpxReturnWarnBgPaint)
+                canvas.drawRoundRect(groupRect, 10f, 10f, gpxReturnWarnStrokePaint)
+
+                val distLabel = GroupTftLayout.formatCompactDistance(gpxOffTrackMeters)
+                val dirLabel = if (rider.coordinate != null && gpxOffTrackTarget != null) {
+                    val brg = RouteNavigator.compassBearing(rider.coordinate, gpxOffTrackTarget)
+                    val dirs = listOf("N", "NE", "E", "SE", "S", "SO", "O", "NO")
+                    " · ${dirs[((brg + 22.5) / 45.0).toInt() % 8]}"
+                } else {
+                    ""
+                }
+                val warnCenterX = groupRect.centerX()
+                gpxReturnWarnTextPaint.color = android.graphics.Color.rgb(255, 224, 90)
+                gpxReturnWarnTextPaint.textSize = 11.5f
+                canvas.drawText("⚠ FUERA DEL GPX", warnCenterX, groupRect.top + 20f, gpxReturnWarnTextPaint)
+                gpxReturnWarnTextPaint.color = android.graphics.Color.WHITE
+                gpxReturnWarnTextPaint.textSize = 13.5f
+                canvas.drawText("A $distLabel$dirLabel", warnCenterX, groupRect.bottom - 10f, gpxReturnWarnTextPaint)
+            }
         }
 
         canvas.restore()
@@ -856,7 +1044,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         canvas: Canvas,
         vw: Float,
         notif: TftPhoneNotification,
-        hasAlertBanner: Boolean
+        alertBannerBottomVw: Float
     ) {
         val nowMs = System.currentTimeMillis()
         if (!notif.isActive(nowMs)) return
@@ -878,7 +1066,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         val right = vw - 14f
         if (right <= left + 120f) return
 
-        val top = (if (hasAlertBanner) 94f else 58f) + slideOffsetY
+        val top = (if (alertBannerBottomVw > 0f) alertBannerBottomVw + 6f else 58f) + slideOffsetY
         val textLeft = left + 54f
         val textMaxW = (right - 14f - textLeft).coerceAtLeast(60f)
 

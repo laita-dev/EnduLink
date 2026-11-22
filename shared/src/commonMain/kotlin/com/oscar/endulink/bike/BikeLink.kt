@@ -489,7 +489,7 @@ class BikeLink(
 
             val chunk = picture.next(waitMs)
             if (chunk != null) {
-                val packet = ByteArrayOutput()
+                val packet = ByteArrayOutput(4 + chunk.size)
                 packet.writeInt32LE(chunk.size)
                 packet.writeBytes(chunk)
                 socket.writeAll(packet.toByteArray())

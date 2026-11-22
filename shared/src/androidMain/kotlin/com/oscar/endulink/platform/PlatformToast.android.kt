@@ -18,6 +18,9 @@ actual fun showPlatformToast(message: String) {
 }
 
 actual fun closeApp() {
+    try {
+        com.oscar.endulink.ui.EnduController.shared.stop()
+    } catch (_: Exception) {}
     val ctx = AndroidBikeKeysStorage.appContext ?: return
     val intent = Intent(Intent.ACTION_MAIN).apply {
         addCategory(Intent.CATEGORY_HOME)

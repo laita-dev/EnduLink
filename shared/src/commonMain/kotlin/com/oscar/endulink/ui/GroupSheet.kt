@@ -51,6 +51,7 @@ fun GroupSheet(
     activeShareableRouteName: String?,
     bikeMapConfig: BikeMapConfig,
     riderCoord: GeoCoord?,
+    aloneRemainingSeconds: Int? = null,
     onCreateGroup: () -> Unit,
     onJoinGroup: (String) -> Boolean,
     onLeaveGroup: () -> Unit,
@@ -294,7 +295,14 @@ fun GroupSheet(
                             ) {
                                 OutlinedTextField(
                                     value = joinCodeInput,
-                                    onValueChange = { joinCodeInput = it.uppercase().take(28) },
+                                    onValueChange = { raw ->
+                                        val parsed = if (raw.length > 10) GroupInvite.parseRoomCode(raw) else null
+                                        joinCodeInput = if (parsed != null) {
+                                            GroupInvite.formatForDisplay(parsed)
+                                        } else {
+                                            raw.uppercase().take(28)
+                                        }
+                                    },
                                     placeholder = { Text("Ej: K7M-9P2", color = EnduPalette.TextMuted, fontSize = 13.sp) },
                                     singleLine = true,
                                     colors = OutlinedTextFieldDefaults.colors(
@@ -597,7 +605,14 @@ fun GroupSheet(
                                                 if (selected) clr else Color.Transparent,
                                                 RoundedCornerShape(9.dp)
                                             )
-                                            .clickable { onSetMyStatus(st, statusNoteInput) }
+                                            .clickable {
+                                                if (st == RiderStatus.RIDING) {
+                                                    statusNoteInput = ""
+                                                    onSetMyStatus(RiderStatus.RIDING, "")
+                                                } else {
+                                                    onSetMyStatus(st, statusNoteInput)
+                                                }
+                                            }
                                     ) {
                                         Text(
                                             text = when (st) {
@@ -615,41 +630,48 @@ fun GroupSheet(
                                 }
                             }
 
-                            if (myStatus.isAlert) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = statusNoteInput,
+                                    onValueChange = { statusNoteInput = it.take(60) },
+                                    placeholder = {
+                                        Text(
+                                            "Mensaje personalizado al TFT (ej: pinchazo / paramos)",
+                                            color = EnduPalette.TextMuted,
+                                            fontSize = 11.5.sp
+                                        )
+                                    },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = EnduPalette.TextPrimary,
+                                        unfocusedTextColor = EnduPalette.TextPrimary,
+                                        focusedBorderColor = EnduPalette.Accent,
+                                        unfocusedBorderColor = EnduPalette.Outline,
+                                        focusedContainerColor = EnduPalette.SurfaceHigh,
+                                        unfocusedContainerColor = EnduPalette.SurfaceHigh
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .background(EnduPalette.Accent)
+                                        .clickable {
+                                            onSetMyStatus(myStatus, statusNoteInput)
+                                            showPlatformToast(
+                                                if (statusNoteInput.isBlank()) "Estado actualizado"
+                                                else "Mensaje enviado al grupo y TFT"
+                                            )
+                                        }
+                                        .padding(horizontal = 12.dp)
                                 ) {
-                                    OutlinedTextField(
-                                        value = statusNoteInput,
-                                        onValueChange = { statusNoteInput = it.take(50) },
-                                        placeholder = { Text("Nota breve (ej: pinchazo rueda trasera)", color = EnduPalette.TextMuted, fontSize = 12.sp) },
-                                        singleLine = true,
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = EnduPalette.TextPrimary,
-                                            unfocusedTextColor = EnduPalette.TextPrimary,
-                                            focusedBorderColor = EnduPalette.Accent,
-                                            unfocusedBorderColor = EnduPalette.Outline,
-                                            focusedContainerColor = EnduPalette.SurfaceHigh,
-                                            unfocusedContainerColor = EnduPalette.SurfaceHigh
-                                        ),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier
-                                            .height(48.dp)
-                                            .clip(RoundedCornerShape(9.dp))
-                                            .background(EnduPalette.Accent)
-                                            .clickable {
-                                                onSetMyStatus(myStatus, statusNoteInput)
-                                                showPlatformToast("Nota actualizada")
-                                            }
-                                            .padding(horizontal = 12.dp)
-                                    ) {
-                                        Text("Enviar", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
+                                    Text("Enviar", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -797,8 +819,13 @@ fun GroupSheet(
                             }
 
                             if (members.isEmpty()) {
+                                val autoStopNote = aloneRemainingSeconds?.let { sec ->
+                                    val m = sec / 60
+                                    val s = (sec % 60).toString().padStart(2, '0')
+                                    "\nAuto-cierre en $m:$s si continúas solo."
+                                }.orEmpty()
                                 Text(
-                                    text = "Esperando a que se unan compañeros con el código ${GroupInvite.formatForDisplay(roomCode)}…",
+                                    text = "Esperando a que se unan compañeros con el código ${GroupInvite.formatForDisplay(roomCode)}…$autoStopNote",
                                     color = EnduPalette.TextMuted,
                                     fontSize = 12.sp
                                 )

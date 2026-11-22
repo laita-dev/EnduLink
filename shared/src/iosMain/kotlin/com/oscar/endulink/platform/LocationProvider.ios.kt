@@ -25,8 +25,9 @@ actual class LocationProvider actual constructor() : NSObject(), CLLocationManag
     actual val currentTelemetry: RiderTelemetry
         get() = _telemetryFlow.value
 
-    private val manager = CLLocationManager()
+    private var manager = CLLocationManager()
     private var currentHeading: Double = 0.0
+    private var smoothedHeading: Double = 0.0
     private var hasHeading: Boolean = false
     @Volatile
     private var highPowerMode: Boolean = false
@@ -55,8 +56,8 @@ actual class LocationProvider actual constructor() : NSObject(), CLLocationManag
     private fun applyPowerProfile() {
         if (highPowerMode) {
             manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
-            manager.distanceFilter = 1.5
-            manager.headingFilter = 3.0
+            manager.distanceFilter = kCLDistanceFilterNone
+            manager.headingFilter = 1.5
             manager.pausesLocationUpdatesAutomatically = false
             manager.allowsBackgroundLocationUpdates = true
             manager.showsBackgroundLocationIndicator = true
@@ -126,16 +127,22 @@ actual class LocationProvider actual constructor() : NSObject(), CLLocationManag
     override fun locationManager(manager: CLLocationManager, didUpdateHeading: CLHeading) {
         val h = if (didUpdateHeading.trueHeading >= 0.0) didUpdateHeading.trueHeading else didUpdateHeading.magneticHeading
         if (h >= 0.0) {
-            currentHeading = h
-            hasHeading = true
+            if (!hasHeading) {
+                smoothedHeading = h
+                hasHeading = true
+            } else {
+                val diff = ((h - smoothedHeading + 540.0) % 360.0) - 180.0
+                smoothedHeading = (smoothedHeading + diff * 0.45 + 360.0) % 360.0
+            }
+            currentHeading = smoothedHeading
             val cur = _telemetryFlow.value
             val nowMs = Clock.System.now().toEpochMilliseconds()
-            val angularDelta = if (lastEmittedHeading < 0.0) 999.0 else abs(((h - lastEmittedHeading + 540.0) % 360.0) - 180.0)
-            if (cur.speedKmh <= 3.0 && (!cur.hasValidHeading || (angularDelta >= 3.0 && nowMs - lastHeadingEmitMs >= 180L))) {
+            val angularDelta = if (lastEmittedHeading < 0.0) 999.0 else abs(((currentHeading - lastEmittedHeading + 540.0) % 360.0) - 180.0)
+            if (cur.speedKmh <= 5.0 && (!cur.hasValidHeading || (angularDelta >= 1.5 && nowMs - lastHeadingEmitMs >= 90L))) {
                 lastHeadingEmitMs = nowMs
-                lastEmittedHeading = h
+                lastEmittedHeading = currentHeading
                 _telemetryFlow.value = cur.copy(
-                    headingDegrees = h,
+                    headingDegrees = currentHeading,
                     hasValidHeading = true
                 )
             }

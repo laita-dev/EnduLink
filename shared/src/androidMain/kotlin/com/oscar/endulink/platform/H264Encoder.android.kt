@@ -15,6 +15,8 @@ import java.util.concurrent.TimeUnit
 actual class PlatformH264Encoder actual constructor(
     private val customBitrateKbps: () -> Int,
     private val renderFrameRgba: (width: Int, height: Int) -> ByteArray?,
+    @Suppress("unused")
+    private val renderFrameBgraInts: ((width: Int, height: Int) -> IntArray?)?,
     private val onStats: ((EncoderStats) -> Unit)?,
     private val log: (String) -> Unit
 ) : BikePicture {
@@ -32,7 +34,7 @@ actual class PlatformH264Encoder actual constructor(
 
     companion object {
         private const val MIME_TYPE = "video/avc"
-        private const val MAX_BACKLOG = 15
+        private const val MAX_BACKLOG = 3
         private const val FRAME_INTERVAL_MS = 66L // ~15 FPS
     }
 

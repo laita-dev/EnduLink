@@ -85,6 +85,7 @@ fun App() {
     val inAppToast by PlatformToastCenter.toast.collectAsState()
 
     val groupRoomCode by controller.groupRoomCode.collectAsState()
+    val groupAloneRemainingSeconds by controller.groupAloneRemainingSeconds.collectAsState()
     val groupConnectionState by controller.groupConnectionState.collectAsState()
     val groupOnlineConnected by controller.groupOnlineConnected.collectAsState()
     val groupLanActive by controller.groupLanActive.collectAsState()
@@ -95,6 +96,7 @@ fun App() {
     val groupSharedTrack by controller.groupSharedTrack.collectAsState()
     val groupSharedTrackBannerVisible by controller.groupSharedTrackBannerVisible.collectAsState()
     val pendingGroupJoinCode by controller.pendingGroupJoinCode.collectAsState()
+    val isOffGpxTrack by controller.isOffGpxTrack.collectAsState()
 
     LaunchedEffect(inAppToast?.id) {
         val current = inAppToast ?: return@LaunchedEffect
@@ -238,6 +240,7 @@ fun App() {
                     quickMarkers = quickMarkers,
                     trackProgress = trackProgress,
                     groupMembers = groupMembers,
+                    isOffGpxTrack = isOffGpxTrack,
                     isPickingOnMap = isPickingOnMap,
                     onSelectWaypoint = { wpt ->
                         selectedGroupMemberId = null
@@ -423,6 +426,12 @@ fun App() {
                     },
                     onDismissSharedTrack = {
                         controller.dismissSharedGroupTrackBanner()
+                    },
+                    isOffGpxTrack = isOffGpxTrack,
+                    showGpxOffTrackWarning = bikeMapConfig.showGpxOffTrackWarning,
+                    onDisableGpxOffTrackWarning = {
+                        controller.setGpxOffTrackWarningEnabled(false)
+                        showPlatformToast("Aviso fuera de GPX desactivado (reactívalo en Track o Moto)")
                     }
                 )
 
@@ -614,14 +623,16 @@ fun App() {
                 }
 
                 if (showBikeSheet) {
-                    LaunchedEffect(layer, bikeMapConfig, activeRoute, quickMarkers, intermediateWaypoints, groupRoomCode, groupMembers) {
+                    LaunchedEffect(layer, bikeMapConfig, activeRoute, quickMarkers, intermediateWaypoints, groupRoomCode, groupMembers, bikeState) {
                         while (true) {
-                            controller.refreshStaticPreview()
+                            if (bikeState != com.oscar.endulink.bike.BikeState.SHOWING) {
+                                controller.refreshStaticPreview()
+                            }
                             kotlinx.coroutines.delay(1000)
                         }
                     }
-                    LaunchedEffect(tileRevision) {
-                        if (tileRevision > 0) {
+                    LaunchedEffect(tileRevision, bikeState) {
+                        if (tileRevision > 0 && bikeState != com.oscar.endulink.bike.BikeState.SHOWING) {
                             kotlinx.coroutines.delay(120)
                             controller.refreshStaticPreview()
                         }
@@ -650,6 +661,9 @@ fun App() {
                         },
                         onSetBikePhoneNotificationsConfig = { enabled, durationSeconds ->
                             controller.setBikePhoneNotificationsConfig(enabled, durationSeconds)
+                        },
+                        onSetGpxOffTrackWarning = { enabled ->
+                            controller.setGpxOffTrackWarningEnabled(enabled)
                         },
                         onTriggerTestTftNotification = {
                             controller.triggerTestTftNotification()
@@ -718,6 +732,8 @@ fun App() {
                         route = selectedRouteForDetail,
                         isActive = selectedRouteForDetail.id == activeRoute?.id,
                         riderCoord = rider.coordinate,
+                        showGpxOffTrackWarning = bikeMapConfig.showGpxOffTrackWarning,
+                        onToggleGpxOffTrackWarning = { controller.setGpxOffTrackWarningEnabled(it) },
                         onStartNavigation = { route ->
                             routeForDetailId = null
                             activateRouteWithApproachPrompt(route)
@@ -913,6 +929,7 @@ fun App() {
                         activeShareableRouteName = shareableName,
                         bikeMapConfig = bikeMapConfig,
                         riderCoord = rider.coordinate,
+                        aloneRemainingSeconds = groupAloneRemainingSeconds,
                         onCreateGroup = { controller.createGroup() },
                         onJoinGroup = { controller.joinGroup(it) },
                         onLeaveGroup = { controller.leaveGroup() },

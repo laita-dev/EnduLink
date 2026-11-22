@@ -31,6 +31,13 @@ class MainActivity : ComponentActivity() {
         com.oscar.endulink.ui.EnduController.shared.restartLocation()
     }
 
+    override fun onDestroy() {
+        if (isFinishing && !isChangingConfigurations) {
+            com.oscar.endulink.ui.EnduController.shared.stop()
+        }
+        super.onDestroy()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

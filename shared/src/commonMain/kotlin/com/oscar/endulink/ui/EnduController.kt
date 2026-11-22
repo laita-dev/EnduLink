@@ -162,8 +162,18 @@ class EnduController {
     private val bikeMapRenderer = BikeMapRenderer(tileStore)
 
     // Grupos en Tiempo Real (Móvil + Pantalla TFT)
-    val groupManager = GroupManager(onConfigChanged = { persistSettings() })
+    val groupManager = GroupManager(
+        onConfigChanged = { persistSettings() },
+        onAutoStoppedAlone = {
+            updateBackgroundKeepAlive()
+            refreshStaticPreview()
+            val msg = "Grupo cerrado automáticamente tras 3 min sin compañeros"
+            _statusBannerMessage.value = msg
+            showPlatformToast(msg)
+        }
+    )
     val groupRoomCode: StateFlow<String?> = groupManager.activeRoomCode
+    val groupAloneRemainingSeconds: StateFlow<Int?> = groupManager.aloneRemainingSeconds
     val groupConnectionState: StateFlow<GroupConnectionState> = groupManager.connectionState
     val groupOnlineConnected: StateFlow<Boolean> = groupManager.onlineConnected
     val groupLanActive: StateFlow<Boolean> = groupManager.lanActive
@@ -219,6 +229,12 @@ class EnduController {
     private var forceImmediateKnock: Boolean = false
     @kotlin.concurrent.Volatile
     private var manuallyStoppedOnCurrentBikeWifi: Boolean = false
+    private val _isOffGpxTrack = MutableStateFlow(false)
+    val isOffGpxTrack: StateFlow<Boolean> = _isOffGpxTrack.asStateFlow()
+
+    private var consecutiveOffRoadSamples = 0
+    private var lastAutoRecalcMs = 0L
+    private var consecutiveOffGpxSamples = 0
     private var lastApproachTarget = ApproachTarget.NEAREST
 
     // Compatibilidad para búsqueda
@@ -235,6 +251,7 @@ class EnduController {
         _quickMarkers.value = WaypointStore.loadWaypoints()
         _routes.value = RouteStore.loadRoutes()
         groupManager.loadConfig(savedSettings.groupConfig)
+        groupManager.updateFallbackCoordinate(_mapCenter.value)
         if (!savedSettings.lanTestingDefaultApplied || !savedSettings.allowLocalLanTesting) {
             persistSettings()
         }
@@ -297,6 +314,7 @@ class EnduController {
                     groupManager.onLocationUpdate(telemetry, cachedGroupBattPct)
                 }
                 telemetry.coordinate?.let { pos ->
+                    groupManager.updateFallbackCoordinate(pos)
                     if (_followMode.value != MapFollowMode.FREE && _mapCenter.value.distanceTo(pos) >= 0.6) {
                         _mapCenter.value = pos
                     }
@@ -313,6 +331,14 @@ class EnduController {
                             _recordedCoords.value = trackRecorder.recordedPoints.map { it.coordinate }
                             _recordingStats.value = getRecordingStats()
                         }
+                    }
+
+                    // Marcar paradas intermedias completadas al pasar por ellas durante navegación activa
+                    val currentStops = _intermediateWaypoints.value
+                    if (_isNavigating.value && currentStops.isNotEmpty() && pos.distanceTo(currentStops.first().coordinate) <= 65.0) {
+                        val visited = currentStops.first()
+                        _intermediateWaypoints.value = currentStops.drop(1)
+                        _statusBannerMessage.value = "Parada completada: ${visited.title}"
                     }
 
                     // Transición automática del enlace por carretera al track GPX al llegar al punto de enlace
@@ -332,6 +358,7 @@ class EnduController {
                         if (distToApproachEnd <= 60.0 || minDistSq <= 45.0 * 45.0) {
                             _approachRoadRoute.value = null
                             _trackProgress.value = null
+                            consecutiveOffRoadSamples = 0
                             _statusBannerMessage.value = "Enlace completado · Siguiendo track ${gpxRoute.name}"
                         }
                     }
@@ -339,13 +366,89 @@ class EnduController {
                     // Progreso de navegación sobre la ruta activa (Destino buscado, Enlace o GPX)
                     val navRoute = activeNavigationRoute
                     if (navRoute != null) {
-                        _trackProgress.value = RouteNavigator.calculateProgress(
+                        val progress = RouteNavigator.calculateProgress(
                             route = navRoute,
                             coord = pos,
                             lastSegmentIndex = _trackProgress.value?.nearestIndex
                         )
+                        _trackProgress.value = progress
+
+                        val activeRoad = destinationRoadRoute
+                        val activeApproach = _approachRoadRoute.value
+                        val isRoadActive = (activeRoad != null || activeApproach != null)
+
+                        if (isRoadActive) {
+                            consecutiveOffGpxSamples = 0
+                            if (_isOffGpxTrack.value) _isOffGpxTrack.value = false
+
+                            // Recalcular automáticamente SOLO cuando vas en ruta activa
+                            if (_isNavigating.value) {
+                                val activeCalculated = activeRoad ?: activeApproach
+                                val baseThreshold = if (activeCalculated?.isOfflineFallback == true) 160.0 else 50.0
+                                val accAllowance = if (telemetry.horizontalAccuracyM in 1.0..120.0) {
+                                    telemetry.horizontalAccuracyM * 1.4
+                                } else {
+                                    0.0
+                                }
+                                val thresholdM = maxOf(baseThreshold, accAllowance)
+                                val nowMs = Clock.System.now().toEpochMilliseconds()
+                                val isCalcBusy = _isCalculatingDestinationRoute.value || _isCalculatingApproach.value
+                                if (!isCalcBusy && progress.offTrackMeters > thresholdM) {
+                                    consecutiveOffRoadSamples++
+                                    if (consecutiveOffRoadSamples >= 2 && nowMs - lastAutoRecalcMs >= 8_000L) {
+                                        consecutiveOffRoadSamples = 0
+                                        lastAutoRecalcMs = nowMs
+                                        if (activeRoad != null) {
+                                            _searchPin.value?.let { dest ->
+                                                calculateRouteToSearchPin(
+                                                    dest = dest,
+                                                    autoShareWithGroup = false,
+                                                    isAutoRecalculate = true
+                                                )
+                                            }
+                                        } else if (activeApproach != null) {
+                                            calculateApproachToGPX(
+                                                toNearestPoint = (lastApproachTarget == ApproachTarget.NEAREST),
+                                                autoStart = false,
+                                                target = lastApproachTarget,
+                                                isAutoRecalculate = true
+                                            )
+                                        }
+                                    }
+                                } else if (progress.offTrackMeters <= 32.0) {
+                                    consecutiveOffRoadSamples = 0
+                                }
+                            } else {
+                                consecutiveOffRoadSamples = 0
+                            }
+                        } else {
+                            // Track GPX activo (sin ruta de carretera ni enlace activo)
+                            consecutiveOffRoadSamples = 0
+                            val accGpxAllowance = if (telemetry.horizontalAccuracyM in 1.0..45.0) {
+                                telemetry.horizontalAccuracyM * 1.15
+                            } else {
+                                0.0
+                            }
+                            val enterThreshold = maxOf(35.0, accGpxAllowance)
+                            if (!_isOffGpxTrack.value) {
+                                if (progress.offTrackMeters >= enterThreshold) {
+                                    consecutiveOffGpxSamples++
+                                    if (consecutiveOffGpxSamples >= 2) {
+                                        _isOffGpxTrack.value = true
+                                    }
+                                } else {
+                                    consecutiveOffGpxSamples = 0
+                                }
+                            } else if (progress.offTrackMeters <= 22.0) {
+                                consecutiveOffGpxSamples = 0
+                                _isOffGpxTrack.value = false
+                            }
+                        }
                     } else {
                         _trackProgress.value = null
+                        consecutiveOffRoadSamples = 0
+                        consecutiveOffGpxSamples = 0
+                        if (_isOffGpxTrack.value) _isOffGpxTrack.value = false
                     }
                 }
             }
@@ -401,31 +504,34 @@ class EnduController {
                 for (member in membersList) {
                     activeIds.add(member.id)
                     val prev = lastNotifiedMemberAlerts[member.id]
-                    if (member.status.isAlert) {
+                    if (member.hasActiveTftAlert) {
                         val curPair = member.status to member.statusMessage
                         if (prev != curPair) {
                             lastNotifiedMemberAlerts[member.id] = curPair
-                            val category = when (member.status) {
-                                RiderStatus.SOS, RiderStatus.MECHANICAL -> TftNotificationCategory.ALERT
-                                else -> TftNotificationCategory.APP
+                            if (!_bikeMapConfig.value.showGroupAlertsOnTft) {
+                                val category = when (member.status) {
+                                    RiderStatus.SOS, RiderStatus.MECHANICAL -> TftNotificationCategory.ALERT
+                                    else -> TftNotificationCategory.APP
+                                }
+                                val accent = when (member.status) {
+                                    RiderStatus.SOS -> 0xFFFF3B30L
+                                    RiderStatus.MECHANICAL -> 0xFFFF6B00L
+                                    RiderStatus.STOPPED_WAIT -> 0xFFFFCC00L
+                                    else -> 0xFF00D4FFL
+                                }
+                                val distText = riderTelemetry.value.coordinate?.let {
+                                    " · a ${GroupTftLayout.formatCompactDistance(it.distanceTo(member.coordinate))}"
+                                }.orEmpty()
+                                val body = member.statusMessage.ifBlank { "${member.status.shortLabel}$distText" }
+                                PhoneNotificationCenter.postNotification(
+                                    appName = "Grupo · ${member.status.shortLabel}",
+                                    title = member.name,
+                                    text = body,
+                                    category = category,
+                                    accentArgb = accent,
+                                    key = "grp_alert_${member.id}_${member.status.raw}"
+                                )
                             }
-                            val accent = when (member.status) {
-                                RiderStatus.SOS -> 0xFFFF3B30L
-                                RiderStatus.MECHANICAL -> 0xFFFF6B00L
-                                else -> 0xFFFFCC00L
-                            }
-                            val distText = riderTelemetry.value.coordinate?.let {
-                                " · a ${GroupTftLayout.formatCompactDistance(it.distanceTo(member.coordinate))}"
-                            }.orEmpty()
-                            val body = member.statusMessage.ifBlank { "${member.status.shortLabel}$distText" }
-                            PhoneNotificationCenter.postNotification(
-                                appName = "Grupo · ${member.status.shortLabel}",
-                                title = member.name,
-                                text = body,
-                                category = category,
-                                accentArgb = accent,
-                                key = "grp_alert_${member.id}_${member.status.raw}"
-                            )
                         }
                     } else {
                         lastNotifiedMemberAlerts.remove(member.id)
@@ -680,11 +786,18 @@ class EnduController {
         }
     }
 
-    fun calculateRouteToSearchPin(dest: SearchResultItem, autoShareWithGroup: Boolean = true) {
+    fun calculateRouteToSearchPin(
+        dest: SearchResultItem,
+        autoShareWithGroup: Boolean = true,
+        isAutoRecalculate: Boolean = false
+    ) {
         routeCalcJob?.cancel()
         val origin = riderTelemetry.value.coordinate ?: _mapCenter.value
         val waypoints = _intermediateWaypoints.value.map { it.coordinate }
         _isCalculatingDestinationRoute.value = true
+        if (isAutoRecalculate) {
+            _statusBannerMessage.value = "Recalculando ruta..."
+        }
 
         routeCalcJob = scope.launch {
             try {
@@ -693,22 +806,27 @@ class EnduController {
                     waypoints = waypoints,
                     destination = dest.coordinate,
                     destinationName = dest.title,
-                    requestAlternatives = waypoints.isEmpty(), // Si hay paradas, calculamos la ruta precisa que las enlaza
+                    requestAlternatives = !isAutoRecalculate && waypoints.isEmpty(),
                     color = TrackColor.CYAN
                 )
                 _destinationRouteOptions.value = routes
                 _selectedDestinationOptionIndex.value = 0
                 _trackProgress.value = null
+                consecutiveOffRoadSamples = 0
                 _isCalculatingDestinationRoute.value = false
 
-                // Encuadrar la ruta en el mapa
                 val first = routes.firstOrNull()
                 if (first != null) {
-                    fitCoordinates(first.coordinates)
+                    if (!isAutoRecalculate) {
+                        fitCoordinates(first.coordinates)
+                    }
                     val stopsMsg = if (waypoints.isNotEmpty()) " (${waypoints.size} parada${if (waypoints.size > 1) "s" else ""})" else ""
                     val offlineNote = if (first.isOfflineFallback) " · Sin cobertura (Enlace directo offline)" else ""
-                    _statusBannerMessage.value = "Ruta a ${dest.title}$stopsMsg: ${(first.distanceKm * 10.0).roundToInt() / 10.0} km (~${first.expectedMinutes} min)$offlineNote"
-                    if (autoShareWithGroup && groupManager.activeRoomCode.value != null) {
+                    val prefix = if (isAutoRecalculate) "Ruta recalculada" else "Ruta a ${dest.title}$stopsMsg"
+                    if (!isAutoRecalculate || !first.isOfflineFallback) {
+                        _statusBannerMessage.value = "$prefix: ${(first.distanceKm * 10.0).roundToInt() / 10.0} km (~${first.expectedMinutes} min)$offlineNote"
+                    }
+                    if (!isAutoRecalculate && autoShareWithGroup && groupManager.activeRoomCode.value != null) {
                         groupManager.shareRoute(
                             route = first.asGPXRoute,
                             isDestination = true,
@@ -720,7 +838,9 @@ class EnduController {
                 throw e
             } catch (e: Exception) {
                 _isCalculatingDestinationRoute.value = false
-                _statusBannerMessage.value = "No se pudo calcular ruta: ${e.message}"
+                if (!isAutoRecalculate) {
+                    _statusBannerMessage.value = "No se pudo calcular ruta: ${e.message}"
+                }
             }
         }
     }
@@ -750,6 +870,9 @@ class EnduController {
         _destinationRouteOptions.value = emptyList()
         _selectedDestinationOptionIndex.value = 0
         _trackProgress.value = null
+        consecutiveOffRoadSamples = 0
+        consecutiveOffGpxSamples = 0
+        _isOffGpxTrack.value = false
         if (_isNavigating.value && selectedRoute == null) {
             stopNavigation()
         }
@@ -781,6 +904,7 @@ class EnduController {
 
     fun startNavigation() {
         _isNavigating.value = true
+        consecutiveOffRoadSamples = 0
         updateBackgroundKeepAlive()
         setFollowMode(MapFollowMode.FOLLOW)
         riderTelemetry.value.coordinate?.let {
@@ -791,6 +915,7 @@ class EnduController {
 
     fun stopNavigation() {
         _isNavigating.value = false
+        consecutiveOffRoadSamples = 0
         updateBackgroundKeepAlive()
         setFollowMode(MapFollowMode.FREE)
     }
@@ -800,7 +925,8 @@ class EnduController {
     fun calculateApproachToGPX(
         toNearestPoint: Boolean = true,
         autoStart: Boolean = false,
-        target: ApproachTarget = if (toNearestPoint) ApproachTarget.NEAREST else ApproachTarget.START
+        target: ApproachTarget = if (toNearestPoint) ApproachTarget.NEAREST else ApproachTarget.START,
+        isAutoRecalculate: Boolean = false
     ) {
         val route = selectedRoute ?: return
         if (route.points.isEmpty()) return
@@ -819,6 +945,9 @@ class EnduController {
 
         approachCalcJob?.cancel()
         _isCalculatingApproach.value = true
+        if (isAutoRecalculate) {
+            _statusBannerMessage.value = "Recalculando enlace..."
+        }
         approachCalcJob = scope.launch {
             try {
                 val waypoints = _intermediateWaypoints.value.map { it.coordinate }
@@ -834,24 +963,33 @@ class EnduController {
                 val firstApproach = routes.firstOrNull()
                 _approachRoadRoute.value = firstApproach
                 _trackProgress.value = null
+                consecutiveOffRoadSamples = 0
+                consecutiveOffGpxSamples = 0
+                _isOffGpxTrack.value = false
                 _isCalculatingApproach.value = false
 
-                if (firstApproach?.isOfflineFallback == true) {
+                if (!isAutoRecalculate && firstApproach?.isOfflineFallback == true) {
                     _statusBannerMessage.value = "Sin cobertura: enlace directo offline activado (${(firstApproach.distanceKm * 10.0).roundToInt() / 10.0} km)"
+                } else if (isAutoRecalculate && firstApproach != null && !firstApproach.isOfflineFallback) {
+                    _statusBannerMessage.value = "Enlace recalculado: ${(firstApproach.distanceKm * 10.0).roundToInt() / 10.0} km (~${firstApproach.expectedMinutes} min)"
                 }
 
-                if (autoStart) {
-                    startNavigation()
-                } else {
-                    val allCoords = (firstApproach?.coordinates ?: emptyList()) + route.points.map { it.coordinate }
-                    fitCoordinates(allCoords)
+                if (!isAutoRecalculate) {
+                    if (autoStart) {
+                        startNavigation()
+                    } else {
+                        val allCoords = (firstApproach?.coordinates ?: emptyList()) + route.points.map { it.coordinate }
+                        fitCoordinates(allCoords)
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _isCalculatingApproach.value = false
-                _statusBannerMessage.value = "Error al calcular enlace: ${e.message}"
-                if (autoStart) startNavigation()
+                if (!isAutoRecalculate) {
+                    _statusBannerMessage.value = "Error al calcular enlace: ${e.message}"
+                    if (autoStart) startNavigation()
+                }
             }
         }
     }
@@ -861,6 +999,7 @@ class EnduController {
         _isCalculatingApproach.value = false
         _approachRoadRoute.value = null
         _trackProgress.value = null
+        consecutiveOffRoadSamples = 0
     }
 
     // --- Rutas GPX ---
@@ -936,6 +1075,9 @@ class EnduController {
         _activeRouteFlow.value = null
         _approachRoadRoute.value = null
         _trackProgress.value = null
+        consecutiveOffRoadSamples = 0
+        consecutiveOffGpxSamples = 0
+        _isOffGpxTrack.value = false
         if (_isNavigating.value && destinationRoadRoute == null) {
             stopNavigation()
         }
@@ -1240,6 +1382,7 @@ class EnduController {
         val enc = PlatformH264Encoder(
             customBitrateKbps = { _bikeMapConfig.value.bitrateKbps },
             renderFrameRgba = { w, h -> renderTftFrame(w, h) },
+            renderFrameBgraInts = { w, h -> renderTftFrameBgraInts(w, h) },
             onStats = { stats -> _encoderStats.value = stats },
             log = { logBike(it) }
         )
@@ -1420,7 +1563,9 @@ class EnduController {
         val routeTypeLabel: String?,
         val nextInstruction: String?,
         val waypoints: List<GPXWaypoint>,
-        val intermediateStops: List<GeoCoord>
+        val intermediateStops: List<GeoCoord>,
+        val gpxOffTrackTarget: GeoCoord?,
+        val gpxOffTrackMeters: Double?
     )
 
     private fun buildTftRouteHudSnapshot(): TftRouteHudSnapshot {
@@ -1437,6 +1582,10 @@ class EnduController {
             selectedRoute != null -> "TRACK"
             else -> null
         }
+        val showOffGpx = _isOffGpxTrack.value &&
+            activeRoad == null &&
+            selectedRoute?.isVisible == true &&
+            _trackProgress.value != null
         return TftRouteHudSnapshot(
             roadRouteCoordinates = activeRoad?.coordinates,
             remainingKm = remKm,
@@ -1444,12 +1593,78 @@ class EnduController {
             routeTypeLabel = routeTypeLabel,
             nextInstruction = activeRoad?.currentInstruction(riderTelemetry.value.coordinate),
             waypoints = _quickMarkers.value,
-            intermediateStops = _intermediateWaypoints.value.map { it.coordinate }
+            intermediateStops = _intermediateWaypoints.value.map { it.coordinate },
+            gpxOffTrackTarget = if (showOffGpx) _trackProgress.value?.projectedCoordinate else null,
+            gpxOffTrackMeters = if (showOffGpx) _trackProgress.value?.offTrackMeters else null
         )
     }
 
     private val effectiveBikeLayer: MapLayer
         get() = _bikeMapConfig.value.mapLayerRaw?.let { MapLayer.fromRaw(it) } ?: _selectedLayer.value
+
+    private fun renderTftFrameBgraInts(width: Int, height: Int): IntArray? {
+        val snap = buildTftRouteHudSnapshot()
+        val bikeLayer = effectiveBikeLayer
+        val currentGroupMembers = groupManager.members.value
+        val activeGroupCount = if (groupManager.activeRoomCode.value != null) currentGroupMembers.size + 1 else 0
+        val activeNotif = if (_bikeMapConfig.value.showPhoneNotificationsOnTft) {
+            PhoneNotificationCenter.getActiveNotification()
+        } else {
+            null
+        }
+
+        val bgraInts = bikeMapRenderer.renderBgraInts(
+            width = width,
+            height = height,
+            config = _bikeMapConfig.value,
+            rider = riderTelemetry.value,
+            layer = bikeLayer,
+            activeRoute = selectedRoute,
+            roadRouteCoordinates = snap.roadRouteCoordinates,
+            isNavigating = _isNavigating.value,
+            remainingKm = snap.remainingKm,
+            nextInstruction = snap.nextInstruction,
+            waypoints = snap.waypoints,
+            intermediateStops = snap.intermediateStops,
+            remainingMinutes = snap.remainingMinutes,
+            routeTypeLabel = snap.routeTypeLabel,
+            groupMembers = currentGroupMembers,
+            groupActiveCount = activeGroupCount,
+            activeNotification = activeNotif,
+            gpxOffTrackTarget = snap.gpxOffTrackTarget,
+            gpxOffTrackMeters = snap.gpxOffTrackMeters
+        ) ?: return null
+
+        if (_isBikeSheetOpen.value && ++previewDecimator % 15 == 0) {
+            val preview = bikeMapRenderer.renderPreview(
+                width = 296,
+                height = 408,
+                config = _bikeMapConfig.value,
+                rider = riderTelemetry.value,
+                layer = bikeLayer,
+                activeRoute = selectedRoute,
+                roadRouteCoordinates = snap.roadRouteCoordinates,
+                isNavigating = _isNavigating.value,
+                remainingKm = snap.remainingKm,
+                nextInstruction = snap.nextInstruction,
+                waypoints = snap.waypoints,
+                intermediateStops = snap.intermediateStops,
+                remainingMinutes = snap.remainingMinutes,
+                routeTypeLabel = snap.routeTypeLabel,
+                groupMembers = currentGroupMembers,
+                groupActiveCount = activeGroupCount,
+                activeNotification = activeNotif,
+                gpxOffTrackTarget = snap.gpxOffTrackTarget,
+                gpxOffTrackMeters = snap.gpxOffTrackMeters
+            )
+            if (preview != null) {
+                previewSeqLock.withLock { ++previewRequestSeq }
+                _livePreviewBitmap.value = preview
+            }
+        }
+
+        return bgraInts
+    }
 
     private fun renderTftFrame(width: Int, height: Int): ByteArray? {
         val snap = buildTftRouteHudSnapshot()
@@ -1479,7 +1694,9 @@ class EnduController {
             routeTypeLabel = snap.routeTypeLabel,
             groupMembers = currentGroupMembers,
             groupActiveCount = activeGroupCount,
-            activeNotification = activeNotif
+            activeNotification = activeNotif,
+            gpxOffTrackTarget = snap.gpxOffTrackTarget,
+            gpxOffTrackMeters = snap.gpxOffTrackMeters
         )
 
         // Actualizar preview periódicamente en el mismo hilo tras renderRgba para evitar contención de lock
@@ -1501,7 +1718,9 @@ class EnduController {
                 routeTypeLabel = snap.routeTypeLabel,
                 groupMembers = currentGroupMembers,
                 groupActiveCount = activeGroupCount,
-                activeNotification = activeNotif
+                activeNotification = activeNotif,
+                gpxOffTrackTarget = snap.gpxOffTrackTarget,
+                gpxOffTrackMeters = snap.gpxOffTrackMeters
             )
             if (preview != null) {
                 previewSeqLock.withLock { ++previewRequestSeq }
@@ -1601,7 +1820,9 @@ class EnduController {
                 routeTypeLabel = snap.routeTypeLabel,
                 groupMembers = currentGroupMembers,
                 groupActiveCount = activeGroupCount,
-                activeNotification = activeNotif
+                activeNotification = activeNotif,
+                gpxOffTrackTarget = snap.gpxOffTrackTarget,
+                gpxOffTrackMeters = snap.gpxOffTrackMeters
             )
             if (preview != null) {
                 val shouldPublish = previewSeqLock.withLock { seq == previewRequestSeq }
@@ -1764,6 +1985,12 @@ class EnduController {
         if (coords.isNotEmpty()) {
             fitCoordinates(coords)
         }
+    }
+
+    fun setGpxOffTrackWarningEnabled(enabled: Boolean) {
+        _bikeMapConfig.value = _bikeMapConfig.value.copy(showGpxOffTrackWarning = enabled)
+        persistSettings()
+        refreshStaticPreview()
     }
 
     fun setBikeGroupDisplayConfig(

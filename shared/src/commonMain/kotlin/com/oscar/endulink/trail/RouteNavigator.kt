@@ -8,7 +8,8 @@ data class TrackProgress(
     val remainingKm: Double,
     val projectedCoordinate: GeoCoord,
     val reconnectCoordinate: GeoCoord,
-    val bearingToReconnectDeg: Double
+    val bearingToReconnectDeg: Double,
+    val bearingToNearestDeg: Double = bearingToReconnectDeg
 )
 
 data class CrowFliesDirectHeading(
@@ -143,6 +144,7 @@ object RouteNavigator {
         }
 
         val bearing = compassBearing(coord, reconnectCoord)
+        val bearingToNearest = compassBearing(coord, projCoord)
 
         return TrackProgress(
             nearestIndex = bestSegIdx,
@@ -150,7 +152,8 @@ object RouteNavigator {
             remainingKm = remaining,
             projectedCoordinate = projCoord,
             reconnectCoordinate = reconnectCoord,
-            bearingToReconnectDeg = bearing
+            bearingToReconnectDeg = bearing,
+            bearingToNearestDeg = bearingToNearest
         )
     }
 
