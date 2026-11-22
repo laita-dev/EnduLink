@@ -11,6 +11,11 @@ actual object PlatformAppUpdater {
         return info?.get("CFBundleShortVersionString") as? String ?: "0.1.0"
     }
 
+    actual fun isTestChannel(): Boolean {
+        val bundleIsTest = NSBundle.mainBundle.bundleIdentifier?.endsWith(".test") == true
+        return bundleIsTest || getAppVersionName().contains("-")
+    }
+
     actual fun openExternalUrl(url: String) {
         val nsUrl = NSURL.URLWithString(url) ?: return
         UIApplication.sharedApplication.openURL(nsUrl)

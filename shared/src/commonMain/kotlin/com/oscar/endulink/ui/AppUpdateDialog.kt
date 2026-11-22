@@ -41,6 +41,7 @@ fun AppUpdateDialog(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val currentVersion = remember { PlatformAppUpdater.getAppVersionName() }
+    val isTestChannel = remember { PlatformAppUpdater.isTestChannel() || currentVersion.contains("-") }
     val isAndroid = remember { getPlatformName().startsWith("Android", ignoreCase = true) }
 
     var state by remember { mutableStateOf(UpdateUiState.CHECKING) }
@@ -109,7 +110,12 @@ fun AppUpdateDialog(
                         }
                         Column {
                             Text(
-                                text = if (isAndroid) "EnduLink" else "motillOS",
+                                text = when {
+                                    isAndroid && isTestChannel -> "EnduLink-test"
+                                    isAndroid -> "EnduLink"
+                                    isTestChannel -> "motillOS-test"
+                                    else -> "motillOS"
+                                },
                                 color = EnduPalette.TextPrimary,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold

@@ -30,6 +30,33 @@ object AppUpdateManager {
             return clean.split(".").mapNotNull { it.toIntOrNull() }
         }
 
+        fun extractSuffix(v: String): String {
+            val noPrefix = v.trim().removePrefix("v").removePrefix("V").substringBefore("+")
+            return if (noPrefix.contains("-")) noPrefix.substringAfter("-").lowercase() else ""
+        }
+
+        fun tokenizeSuffix(s: String): List<String> {
+            val tokens = mutableListOf<String>()
+            var i = 0
+            while (i < s.length) {
+                val c = s[i]
+                if (c.isDigit()) {
+                    var j = i + 1
+                    while (j < s.length && s[j].isDigit()) j++
+                    tokens.add(s.substring(i, j))
+                    i = j
+                } else if (c.isLetter()) {
+                    var j = i + 1
+                    while (j < s.length && s[j].isLetter()) j++
+                    tokens.add(s.substring(i, j))
+                    i = j
+                } else {
+                    i++
+                }
+            }
+            return tokens
+        }
+
         val p1 = parseParts(v1)
         val p2 = parseParts(v2)
 
@@ -40,11 +67,55 @@ object AppUpdateManager {
             if (r1 > r2) return 1
             if (r1 < r2) return -1
         }
+
+        val s1 = extractSuffix(v1)
+        val s2 = extractSuffix(v2)
+        if (s1 == s2) return 0
+        if (s1.isEmpty()) return 1
+        if (s2.isEmpty()) return -1
+
+        val t1 = tokenizeSuffix(s1)
+        val t2 = tokenizeSuffix(s2)
+        val maxTok = maxOf(t1.size, t2.size)
+        for (i in 0 until maxTok) {
+            val a = t1.getOrNull(i) ?: return -1
+            val b = t2.getOrNull(i) ?: return 1
+            val aNum = a.toIntOrNull()
+            val bNum = b.toIntOrNull()
+            val cmp = when {
+                aNum != null && bNum != null -> aNum.compareTo(bNum)
+                else -> a.compareTo(b)
+            }
+            if (cmp != 0) return cmp
+        }
         return 0
     }
 
     fun isVersionNewer(remote: String, current: String): Boolean {
         return compareVersions(remote, current) > 0
+    }
+
+    internal fun selectReleaseForChannel(
+        releases: JsonArray,
+        isTestChannel: Boolean
+    ): JsonObject? {
+        val candidates = releases.mapNotNull { el ->
+            val obj = el.jsonObject
+            val isDraft = obj["draft"]?.jsonPrimitive?.booleanOrNull ?: false
+            if (isDraft) return@mapNotNull null
+
+            val isPrerelease = obj["prerelease"]?.jsonPrimitive?.booleanOrNull ?: false
+            val tag = obj["tag_name"]?.jsonPrimitive?.contentOrNull.orEmpty().trim()
+            val cleanTag = tag.removePrefix("v").removePrefix("V")
+            val entryIsTest = isPrerelease || cleanTag.contains("-")
+            if (entryIsTest == isTestChannel) obj else null
+        }
+
+        return candidates.maxWithOrNull { a, b ->
+            val tagA = a["tag_name"]?.jsonPrimitive?.contentOrNull ?: ""
+            val tagB = b["tag_name"]?.jsonPrimitive?.contentOrNull ?: ""
+            compareVersions(tagA, tagB)
+        }
     }
 
     suspend fun checkForUpdate(
@@ -53,6 +124,7 @@ object AppUpdateManager {
     ): Result<AppReleaseInfo> {
         return try {
             val currentVersion = PlatformAppUpdater.getAppVersionName()
+            val testChannel = PlatformAppUpdater.isTestChannel() || currentVersion.contains("-")
             val url = "https://api.github.com/repos/$owner/$repo/releases"
 
             val response = httpClient.get(url) {
@@ -75,13 +147,19 @@ object AppUpdateManager {
             val bodyText = response.bodyAsText()
             val jsonArray = Json.parseToJsonElement(bodyText).jsonArray
 
-            if (jsonArray.isEmpty()) {
+            val json = selectReleaseForChannel(jsonArray, isTestChannel = testChannel)
+            if (json == null) {
+                val emptyMsg = if (testChannel) {
+                    "Aún no hay ninguna pre-release de test publicada en GitHub."
+                } else {
+                    "Aún no hay ninguna release oficial publicada en GitHub."
+                }
                 return Result.success(
                     AppReleaseInfo(
                         tagName = "v$currentVersion",
                         versionName = currentVersion,
                         title = "Versión $currentVersion",
-                        releaseNotes = "Aún no hay ninguna release publicada en GitHub.",
+                        releaseNotes = emptyMsg,
                         publishedAt = "",
                         apkDownloadUrl = null,
                         apkSizeMb = null,
@@ -92,18 +170,6 @@ object AppUpdateManager {
                     )
                 )
             }
-
-            val nonDrafts = jsonArray.mapNotNull { el ->
-                val obj = el.jsonObject
-                val isDraft = obj["draft"]?.jsonPrimitive?.booleanOrNull ?: false
-                if (!isDraft) obj else null
-            }
-
-            val json = nonDrafts.maxWithOrNull { a, b ->
-                val tagA = a["tag_name"]?.jsonPrimitive?.contentOrNull ?: ""
-                val tagB = b["tag_name"]?.jsonPrimitive?.contentOrNull ?: ""
-                compareVersions(tagA, tagB)
-            } ?: jsonArray.first().jsonObject
 
             val tagName = json["tag_name"]?.jsonPrimitive?.contentOrNull ?: ""
             val cleanVersion = tagName.removePrefix("v").removePrefix("V").trim()

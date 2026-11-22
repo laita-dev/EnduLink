@@ -27,6 +27,12 @@ actual object PlatformAppUpdater {
         }
     }
 
+    actual fun isTestChannel(): Boolean {
+        val ctx = AndroidAppContext.appContext
+        val pkgIsTest = ctx?.packageName?.endsWith(".test") == true
+        return pkgIsTest || getAppVersionName().contains("-")
+    }
+
     actual fun openExternalUrl(url: String) {
         val ctx = AndroidAppContext.appContext ?: return
         try {
