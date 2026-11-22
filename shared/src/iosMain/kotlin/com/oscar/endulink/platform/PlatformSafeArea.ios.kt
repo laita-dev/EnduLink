@@ -11,7 +11,9 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
 import kotlinx.coroutines.delay
 import platform.UIKit.UIApplication
+import platform.UIKit.UIDevice
 import platform.UIKit.UIScreen
+import platform.UIKit.UIUserInterfaceIdiomPad
 import platform.UIKit.UIWindow
 
 private data class SafeInsetsDp(
@@ -44,12 +46,17 @@ private fun queryIosHardwareSafeInsets(): SafeInsetsDp {
     val screenH = screenBounds.useContents { size.height.toFloat() }
     val isPortrait = screenH >= screenW
     val maxDim = maxOf(screenW, screenH)
+    val minDim = minOf(screenW, screenH)
+    val isPad = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad || minDim >= 600f
 
-    if (isPortrait) {
+    if (isPad) {
+        // En iPad no existe Dynamic Island ni Notch: respetar los safeAreaInsets reales de UIKit
+        winTop = maxOf(winTop, 20f)
+    } else if (isPortrait) {
         val minTop = when {
             maxDim >= 852f -> 59f // Dynamic Island (iPhone 14 Pro, 15/15 Pro/Plus/Max, 16/16 Pro/Plus/Max)
             maxDim >= 780f -> 47f // Notch (iPhone X, XS, XR, 11, 12, 13, 14)
-            else -> 20f           // Clásico / SE / iPad (Status Bar)
+            else -> 20f           // Clásico / SE (Status Bar)
         }
         val minBottom = if (maxDim >= 780f) 24f else 0f
         winTop = maxOf(winTop, minTop)

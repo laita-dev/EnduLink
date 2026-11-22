@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.oscar.endulink.bike.BikeState
@@ -103,11 +104,22 @@ fun HudOverlay(
     onDismissSharedTrack: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
+        val isTablet = maxWidth >= 600.dp
+        val isCompactHeight = maxHeight < 500.dp
+        val overlayMaxWidth = if (isTablet) 680.dp else Dp.Unspecified
+        val sideBtnSize = if (isTablet) 44.dp else 38.dp
+        val zoomBtnHeight = if (isTablet) 38.dp else 34.dp
+        val sideBtnSpacing = if (isCompactHeight) 5.dp else 8.dp
+        val sideBottomPadding = when {
+            isCompactHeight -> 0.dp
+            isTablet -> 20.dp
+            else -> 60.dp
+        }
 
         // ==========================================
         // 1. ZONA SUPERIOR: Buscador + Capas + HUD Telemetría
@@ -115,6 +127,7 @@ fun HudOverlay(
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                .widthIn(max = overlayMaxWidth)
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
@@ -350,7 +363,8 @@ fun HudOverlay(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(EnduPalette.Surface.copy(alpha = 0.96f))
+                        .background(EnduPalette.Surface)
+                        .border(1.dp, EnduPalette.Outline, RoundedCornerShape(8.dp))
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -379,10 +393,10 @@ fun HudOverlay(
                 .filter { it.status.isAlert }
                 .maxByOrNull { it.status.alertPriority }
             if (topAlertMember != null) {
-                val alertColor = when (topAlertMember.status) {
-                    RiderStatus.SOS -> EnduPalette.Danger
-                    RiderStatus.MECHANICAL -> EnduPalette.Accent
-                    else -> EnduPalette.Warning
+                val (alertColor, alertBgColor) = when (topAlertMember.status) {
+                    RiderStatus.SOS -> EnduPalette.Danger to Color(0xFF451218)
+                    RiderStatus.MECHANICAL -> EnduPalette.Accent to Color(0xFF3E220D)
+                    else -> EnduPalette.Warning to Color(0xFF3A2D0B)
                 }
                 val distTxt = rider.coordinate?.let {
                     " · a ${GroupTftLayout.formatCompactDistance(it.distanceTo(topAlertMember.coordinate))}"
@@ -391,8 +405,8 @@ fun HudOverlay(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(alertColor.copy(alpha = 0.22f))
-                        .border(1.dp, alertColor, RoundedCornerShape(8.dp))
+                        .background(alertBgColor)
+                        .border(1.5.dp, alertColor, RoundedCornerShape(8.dp))
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -440,19 +454,21 @@ fun HudOverlay(
                 }
             }
 
-            // Notificación de track GPX recibido del grupo
+            // Notificación de track GPX o dirección recibida del grupo
             if (groupSharedTrack != null) {
+                val prefix = if (groupSharedTrack.isDestination) "Dirección grupo" else "Track grupo"
+                val actionLabel = if (groupSharedTrack.isDestination) "Ir ahí" else "Cargar"
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(EnduPalette.Surface.copy(alpha = 0.96f))
-                        .border(1.dp, EnduPalette.AccentBlue.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                        .background(EnduPalette.Surface)
+                        .border(1.dp, EnduPalette.AccentBlue, RoundedCornerShape(8.dp))
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Track grupo (${groupSharedTrack.senderName}): ${groupSharedTrack.name}",
+                        text = "$prefix (${groupSharedTrack.senderName}): ${groupSharedTrack.name}",
                         color = EnduPalette.TextPrimary,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -468,7 +484,7 @@ fun HudOverlay(
                             .clickable { onImportSharedTrack() }
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        Text("Cargar", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(actionLabel, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
@@ -489,15 +505,15 @@ fun HudOverlay(
         Column(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(bottom = 60.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(bottom = sideBottomPadding),
+            verticalArrangement = Arrangement.spacedBy(sideBtnSpacing),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // 1. Orientación / Brújula (Norte arriba vs Rumbo de avance arriba)
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(sideBtnSize)
                     .clip(CircleShape)
                     .background(if (followMode == MapFollowMode.FOLLOW_HEADING) EnduPalette.Accent.copy(alpha = 0.28f) else EnduPalette.Surface.copy(alpha = 0.92f))
                     .border(
@@ -510,7 +526,7 @@ fun HudOverlay(
                 CompassNorthIcon(
                     isHeadingMode = (followMode == MapFollowMode.FOLLOW_HEADING),
                     color = if (followMode == MapFollowMode.FOLLOW_HEADING) EnduPalette.Accent else Color(0xFFFF5252),
-                    size = 15.dp
+                    size = if (isTablet) 17.dp else 15.dp
                 )
             }
 
@@ -525,7 +541,7 @@ fun HudOverlay(
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(38.dp, 34.dp)
+                        .size(sideBtnSize, zoomBtnHeight)
                         .clickable { onZoomIn() }
                 ) {
                     ZoomPlusIcon(color = EnduPalette.TextPrimary)
@@ -539,7 +555,7 @@ fun HudOverlay(
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(38.dp, 34.dp)
+                        .size(sideBtnSize, zoomBtnHeight)
                         .clickable { onZoomOut() }
                 ) {
                     ZoomMinusIcon(color = EnduPalette.TextPrimary)
@@ -548,13 +564,13 @@ fun HudOverlay(
 
             // 3. Ver ruta completa en pantalla (solo si hay ruta activa)
             if (roadOptions.isNotEmpty() || selectedRoute != null) {
-                MapCircleButton(onClick = onFitMap) {
+                MapCircleButton(buttonSize = sideBtnSize, onClick = onFitMap) {
                     FitRouteBoundsIcon(color = EnduPalette.Accent)
                 }
             }
 
             // 5. Marcador rápido
-            MapCircleButton(onClick = onOpenQuickMarker) {
+            MapCircleButton(buttonSize = sideBtnSize, onClick = onOpenQuickMarker) {
                 QuickPinIcon(color = Color(0xFF00E5FF))
             }
 
@@ -562,7 +578,7 @@ fun HudOverlay(
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(sideBtnSize)
                     .clip(CircleShape)
                     .background(if (followMode != MapFollowMode.FREE) EnduPalette.Accent else EnduPalette.Surface.copy(alpha = 0.92f))
                     .border(
@@ -585,6 +601,7 @@ fun HudOverlay(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .widthIn(max = overlayMaxWidth)
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
@@ -1485,13 +1502,14 @@ private fun MapCircleButton(
     isActive: Boolean = false,
     activeBgColor: Color = EnduPalette.Accent,
     defaultBgColor: Color = EnduPalette.Surface.copy(alpha = 0.92f),
+    buttonSize: Dp = 38.dp,
     onClick: () -> Unit,
     content: @Composable () -> Unit
 ) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
-            .size(38.dp)
+            .size(buttonSize)
             .clip(CircleShape)
             .background(if (isActive) activeBgColor else defaultBgColor)
             .border(

@@ -38,19 +38,29 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:theme="@style/Theme.EnduLink">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Enlaces profundos de invitación a grupo EnduLink -->
+            <!-- Enlaces profundos de invitación a grupo EnduLink (custom scheme + HTTPS clicable en WhatsApp) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="endulink" android:host="group" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="laita-dev.github.io"
+                    android:pathPrefix="/EnduLink/group" />
             </intent-filter>
 
             <!-- Apertura directa de archivos GPX por tipo MIME (WhatsApp, Archivos, Mail, Drive) -->

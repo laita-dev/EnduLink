@@ -1,6 +1,8 @@
 package com.oscar.endulink.platform
 
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.useContents
+import platform.CoreGraphics.CGRectMake
 import platform.Foundation.NSThread
 import platform.UIKit.UIActivityViewController
 import platform.UIKit.UIApplication
@@ -23,7 +25,13 @@ actual fun sharePlainText(subject: String, text: String) {
                     activityItems = listOf(text),
                     applicationActivities = null
                 )
-                activityVC.popoverPresentationController?.sourceView = top.view
+                activityVC.popoverPresentationController?.let { popover ->
+                    popover.sourceView = top.view
+                    val centerRect = top.view.bounds.useContents {
+                        CGRectMake(size.width / 2.0, size.height / 2.0, 1.0, 1.0)
+                    }
+                    popover.sourceRect = centerRect
+                }
                 top.presentViewController(activityVC, animated = true, completion = null)
             }
         } catch (_: Exception) {}

@@ -54,8 +54,13 @@ fun WaypointsSheet(
         modifier = modifier.fillMaxSize(),
         color = EnduPalette.Background
     ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.TopCenter
+        ) {
         Column(
             modifier = Modifier
+                .widthIn(max = 680.dp)
                 .fillMaxSize()
                 .padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
@@ -381,6 +386,7 @@ fun WaypointsSheet(
                     }
                 }
             }
+        }
         }
     }
 }

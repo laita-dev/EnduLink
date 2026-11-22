@@ -93,6 +93,7 @@ fun App() {
     val groupMyStatusMessage by controller.groupMyStatusMessage.collectAsState()
     val groupConfig by controller.groupConfig.collectAsState()
     val groupSharedTrack by controller.groupSharedTrack.collectAsState()
+    val groupSharedTrackBannerVisible by controller.groupSharedTrackBannerVisible.collectAsState()
     val pendingGroupJoinCode by controller.pendingGroupJoinCode.collectAsState()
 
     LaunchedEffect(inAppToast?.id) {
@@ -258,11 +259,28 @@ fun App() {
 
                 // 2. CAPA DE INTERFAZ CON SAFE AREA DINÁMICA (respeta Dynamic Island, Notch, barra de estado, Home Indicator y bordes curvos en cualquier modelo)
                 val safeAreaPadding = rememberPlatformSafeAreaPadding()
-                Box(
+                BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(safeAreaPadding)
                 ) {
+                val isTabletLayout = maxWidth >= 600.dp
+                val largeSheetModifier = if (isTabletLayout) {
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 16.dp)
+                        .widthIn(max = 640.dp)
+                } else {
+                    Modifier.align(Alignment.BottomCenter)
+                }
+                val compactSheetModifier = if (isTabletLayout) {
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 16.dp)
+                        .widthIn(max = 560.dp)
+                } else {
+                    Modifier.align(Alignment.BottomCenter)
+                }
                 HudOverlay(
                     rider = rider,
                     trackProgress = trackProgress,
@@ -390,7 +408,7 @@ fun App() {
                     groupRoomCode = groupRoomCode,
                     groupMembers = groupMembers,
                     groupConnectionState = groupConnectionState,
-                    groupSharedTrack = groupSharedTrack,
+                    groupSharedTrack = if (groupSharedTrackBannerVisible) groupSharedTrack else null,
                     onOpenGroupSheet = { showGroupSheet = true },
                     onSelectAlertMember = { member ->
                         selectedWaypointForDetail = null
@@ -404,7 +422,7 @@ fun App() {
                         controller.importSharedGroupTrack()
                     },
                     onDismissSharedTrack = {
-                        controller.dismissSharedGroupTrack()
+                        controller.dismissSharedGroupTrackBanner()
                     }
                 )
 
@@ -417,9 +435,16 @@ fun App() {
                             showLayersPanel = false
                         },
                         onClose = { showLayersPanel = false },
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 52.dp, start = 12.dp, end = 12.dp)
+                        modifier = if (isTabletLayout) {
+                            Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 56.dp, start = 12.dp, end = 12.dp)
+                                .widthIn(max = 460.dp)
+                        } else {
+                            Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 52.dp, start = 12.dp, end = 12.dp)
+                        }
                     )
                 }
 
@@ -495,7 +520,7 @@ fun App() {
                             controller.setScrubbedPoint(null)
                             showElevationSheet = false
                         },
-                        modifier = Modifier.align(Alignment.BottomCenter)
+                        modifier = compactSheetModifier
                     )
                 }
 
@@ -561,7 +586,7 @@ fun App() {
                             controller.loadSampleRoute("Paso de Montaña", sample)
                         },
                         onClose = { showRoutesSheet = false },
-                        modifier = Modifier.align(Alignment.BottomCenter)
+                        modifier = largeSheetModifier
                     )
                 }
 
@@ -580,7 +605,7 @@ fun App() {
                         onCancelDownload = { controller.tileStore.cancelDownload() },
                         onClearCache = { controller.tileStore.clearDiskCache() },
                         onClose = { showOfflineSheet = false },
-                        modifier = Modifier.align(Alignment.BottomCenter)
+                        modifier = largeSheetModifier
                     )
                 }
 
@@ -623,6 +648,12 @@ fun App() {
                         onSetBikeGroupDisplayConfig = { showMembers, showNames, showEdgeRadar, showHudBadge, showAlerts ->
                             controller.setBikeGroupDisplayConfig(showMembers, showNames, showEdgeRadar, showHudBadge, showAlerts)
                         },
+                        onSetBikePhoneNotificationsConfig = { enabled, durationSeconds ->
+                            controller.setBikePhoneNotificationsConfig(enabled, durationSeconds)
+                        },
+                        onTriggerTestTftNotification = {
+                            controller.triggerTestTftNotification()
+                        },
                         onSetAllowLocalLanTesting = { controller.setAllowLocalLanTesting(it) },
                         onSaveQr = { controller.saveScannedQr(it) },
                         onClearQr = { controller.clearScannedQr() },
@@ -632,7 +663,7 @@ fun App() {
                         onStopStream = { controller.stopBikeStream() },
                         onClearLogs = { controller.clearBikeLogs() },
                         onClose = { showBikeSheet = false },
-                        modifier = Modifier.align(Alignment.BottomCenter)
+                        modifier = largeSheetModifier
                     )
                 }
 
@@ -644,7 +675,7 @@ fun App() {
                             showWaypointsSheet = true
                         },
                         onClose = { showQuickMarkerSheet = false },
-                        modifier = Modifier.align(Alignment.BottomCenter)
+                        modifier = compactSheetModifier
                     )
                 }
 
@@ -676,7 +707,7 @@ fun App() {
                         onClose = {
                             selectedWaypointForDetail = null
                         },
-                        modifier = Modifier.align(Alignment.BottomCenter)
+                        modifier = compactSheetModifier
                     )
                 }
 
@@ -726,7 +757,7 @@ fun App() {
                         onClose = {
                             routeForDetailId = null
                         },
-                        modifier = Modifier.align(Alignment.BottomCenter)
+                        modifier = compactSheetModifier
                     )
                 }
 
@@ -861,7 +892,7 @@ fun App() {
                         onClose = {
                             selectedGroupMemberId = null
                         },
-                        modifier = Modifier.align(Alignment.BottomCenter)
+                        modifier = compactSheetModifier
                     )
                 }
 
@@ -901,7 +932,7 @@ fun App() {
                             controller.setBikeGroupDisplayConfig(showMembers, showNames, showEdgeRadar, showHudBadge, showAlerts)
                         },
                         onClose = { showGroupSheet = false },
-                        modifier = Modifier.align(Alignment.BottomCenter)
+                        modifier = largeSheetModifier
                     )
                 }
 

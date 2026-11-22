@@ -5,13 +5,30 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import com.oscar.endulink.tiles.PlatformPaths
 import com.oscar.endulink.tiles.TileDiskStorage
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.useContents
+import platform.CoreGraphics.CGRectMake
+import platform.Foundation.NSThread
 import platform.Foundation.NSURL
 import platform.UIKit.UIActivityViewController
 import platform.UIKit.UIApplication
 import platform.UIKit.UIDocumentPickerDelegateProtocol
 import platform.UIKit.UIDocumentPickerMode
 import platform.UIKit.UIDocumentPickerViewController
+import platform.UIKit.UIViewController
+import platform.UIKit.popoverPresentationController
 import platform.darwin.NSObject
+import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_main_queue
+
+private fun findTopViewController(): UIViewController? {
+    val root = UIApplication.sharedApplication.keyWindow?.rootViewController ?: return null
+    var top: UIViewController = root
+    while (top.presentedViewController != null) {
+        top = top.presentedViewController ?: break
+    }
+    return top
+}
 
 private class IosGpxDocumentPickerDelegate(
     private val onPicked: (String, String) -> Unit
@@ -53,7 +70,7 @@ actual fun rememberGPXFilePicker(onGPXImported: (name: String, content: String) 
             )
             picker.delegate = delegate
             picker.allowsMultipleSelection = false
-            UIApplication.sharedApplication.keyWindow?.rootViewController?.presentViewController(
+            findTopViewController()?.presentViewController(
                 picker,
                 animated = true,
                 completion = null
@@ -62,6 +79,7 @@ actual fun rememberGPXFilePicker(onGPXImported: (name: String, content: String) 
     }
 }
 
+@OptIn(ExperimentalForeignApi::class)
 actual fun shareGPXFile(fileName: String, gpxContent: String) {
     try {
         val safeBase = fileName
@@ -75,15 +93,34 @@ actual fun shareGPXFile(fileName: String, gpxContent: String) {
         TileDiskStorage.writeBytes(path, gpxContent.encodeToByteArray())
 
         val fileUrl = NSURL.fileURLWithPath(path)
-        val activityVC = UIActivityViewController(
-            activityItems = listOf(fileUrl),
-            applicationActivities = null
-        )
-        UIApplication.sharedApplication.keyWindow?.rootViewController?.presentViewController(
-            activityVC,
-            animated = true,
-            completion = null
-        )
+        val present: () -> Unit = {
+            try {
+                val top = findTopViewController()
+                if (top != null) {
+                    val activityVC = UIActivityViewController(
+                        activityItems = listOf(fileUrl),
+                        applicationActivities = null
+                    )
+                    activityVC.popoverPresentationController?.let { popover ->
+                        popover.sourceView = top.view
+                        val centerRect = top.view.bounds.useContents {
+                            CGRectMake(size.width / 2.0, size.height / 2.0, 1.0, 1.0)
+                        }
+                        popover.sourceRect = centerRect
+                    }
+                    top.presentViewController(
+                        activityVC,
+                        animated = true,
+                        completion = null
+                    )
+                }
+            } catch (_: Exception) {}
+        }
+        if (NSThread.isMainThread) {
+            present()
+        } else {
+            dispatch_async(dispatch_get_main_queue(), present)
+        }
     } catch (_: Exception) {}
 }
 

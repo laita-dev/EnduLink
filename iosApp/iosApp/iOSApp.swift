@@ -8,6 +8,7 @@ import AVFoundation
 import NetworkExtension
 import QuartzCore
 import UIKit
+import UserNotifications
 
 /// Mantiene despiertos el proceso, la interfaz Wi-Fi (`en0`), los sockets TCP y el bucle H.264 de 15 FPS
 /// cuando el usuario bloquea la pantalla del iPhone (1:1 con `MotIOS/App/BackgroundKeepAlive.swift`).
@@ -1142,6 +1143,42 @@ struct ComposeView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
 }
 
+final class TftNotificationBridgeDelegate: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = TftNotificationBridgeDelegate()
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        forwardNotificationContent(notification.request.content)
+        completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        forwardNotificationContent(response.notification.request.content)
+        completionHandler()
+    }
+
+    private func forwardNotificationContent(_ content: UNNotificationContent) {
+        let appName = content.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedApp = appName.isEmpty ? "EnduLink" : appName
+        let title = content.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = content.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        DispatchQueue.main.async {
+            MainViewControllerKt.postIosIncomingNotification(
+                appName: resolvedApp,
+                title: title,
+                body: body
+            )
+        }
+    }
+}
+
 @main
 struct iOSApp: App {
     init() {
@@ -1149,6 +1186,7 @@ struct iOSApp: App {
         IosWifiBridgeHolder.shared.bridge = IosWifiBridgeImpl()
         IosQrScannerBridgeHolder.shared.bridge = IosQrScannerBridgeImpl()
         IosLanNetworkBridgeHolder.shared.bridge = IosLanNetworkBridgeImpl()
+        UNUserNotificationCenter.current().delegate = TftNotificationBridgeDelegate.shared
     }
 
     var body: some Scene {
@@ -1156,7 +1194,9 @@ struct iOSApp: App {
             ComposeView()
                 .ignoresSafeArea(.all)
                 .onOpenURL { url in
-                    if url.scheme?.lowercased() == "endulink" {
+                    let scheme = url.scheme?.lowercased() ?? ""
+                    let host = url.host?.lowercased() ?? ""
+                    if scheme == "endulink" || host == "laita-dev.github.io" {
                         MainViewControllerKt.handleIncomingGroupLink(url: url.absoluteString)
                     } else {
                         Self.handleIncomingGpxURL(url)

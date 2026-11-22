@@ -52,6 +52,7 @@ fun SaveWaypointDialog(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = EnduPalette.Surface),
         modifier = Modifier
+            .widthIn(max = 520.dp)
             .fillMaxWidth()
             .padding(16.dp)
     ) {

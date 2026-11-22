@@ -76,6 +76,7 @@ fun AppUpdateDialog(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = EnduPalette.Surface),
             modifier = modifier
+                .widthIn(max = 520.dp)
                 .fillMaxWidth()
                 .padding(12.dp)
         ) {
