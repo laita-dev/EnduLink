@@ -17,13 +17,13 @@ android {
         val envVersionName = project.findProperty("appVersionName") as? String
         val envVersionCode = (project.findProperty("appVersionCode") as? String)?.toIntOrNull()
 
-        val resolvedVersionName = envVersionName ?: "0.2.0-test"
+        val resolvedVersionName = envVersionName ?: "0.3.0-test"
         val baseVersion = resolvedVersionName.substringBefore("-")
         val versionParts = baseVersion.split(".").mapNotNull { it.toIntOrNull() }
         val derivedVersionCode = if (versionParts.size >= 3) {
             versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
         } else {
-            200
+            300
         }
 
         versionCode = envVersionCode ?: derivedVersionCode
