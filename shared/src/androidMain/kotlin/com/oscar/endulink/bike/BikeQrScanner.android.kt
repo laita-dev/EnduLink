@@ -148,8 +148,13 @@ actual fun openPlatformWifiSettings() {
     } catch (_: Exception) {}
 }
 
-private object AndroidBikeWifiConnector {
+internal object AndroidBikeWifiConnector {
+    @Volatile
     var passiveMonitorRegistered = false
+    @Volatile
+    var lastSuggestedSsid: String? = null
+    @Volatile
+    var lastSuggestedPass: String? = null
 
     fun ensurePassiveWifiMonitor(cm: ConnectivityManager) {
         if (passiveMonitorRegistered) return
@@ -169,6 +174,16 @@ private object AndroidBikeWifiConnector {
                 }
             })
             passiveMonitorRegistered = true
+        } catch (_: Exception) {}
+    }
+
+    @Suppress("DEPRECATION")
+    fun syncActiveWifiNetwork(cm: ConnectivityManager) {
+        try {
+            val activeWifi = cm.allNetworks.firstOrNull { net ->
+                cm.getNetworkCapabilities(net)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            }
+            AndroidSocketBinder.wifiNetwork = activeWifi
         } catch (_: Exception) {}
     }
 }
@@ -238,6 +253,8 @@ actual fun connectToBikeWifi(
                 wifiManager.removeNetworkSuggestions(listOf(built))
             } catch (_: Exception) {}
             wifiManager.addNetworkSuggestions(listOf(built))
+            AndroidBikeWifiConnector.lastSuggestedSsid = cleanSsid
+            AndroidBikeWifiConnector.lastSuggestedPass = password
             try {
                 wifiManager.startScan()
             } catch (_: Exception) {}
@@ -297,6 +314,52 @@ actual fun connectToBikeWifi(
         } catch (e: Exception) {
             openPlatformWifiSettings()
             onResult(true, "Clave copiada ($password). Selecciona $cleanSsid en Ajustes Wi-Fi.")
+        }
+    }
+}
+
+@Suppress("DEPRECATION")
+actual fun nudgeBikeWifiReconnect(ssid: String, password: String) {
+    val cleanSsid = ssid.trim()
+    if (cleanSsid.isEmpty()) return
+    val ctx = AndroidAppContext.appContext ?: AndroidBikeKeysStorage.appContext ?: return
+    val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    val wifiManager = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+
+    if (cm != null) {
+        AndroidBikeWifiConnector.ensurePassiveWifiMonitor(cm)
+        AndroidBikeWifiConnector.syncActiveWifiNetwork(cm)
+    }
+
+    if (wifiManager != null) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                if (AndroidBikeWifiConnector.lastSuggestedSsid != cleanSsid ||
+                    AndroidBikeWifiConnector.lastSuggestedPass != password
+                ) {
+                    val suggestionBuilder = WifiNetworkSuggestion.Builder()
+                        .setSsid(cleanSsid)
+                        .setIsAppInteractionRequired(false)
+                    if (password.isNotEmpty()) {
+                        suggestionBuilder.setWpa2Passphrase(password)
+                    }
+                    val built = suggestionBuilder.build()
+                    try {
+                        wifiManager.removeNetworkSuggestions(listOf(built))
+                    } catch (_: Exception) {}
+                    wifiManager.addNetworkSuggestions(listOf(built))
+                    AndroidBikeWifiConnector.lastSuggestedSsid = cleanSsid
+                    AndroidBikeWifiConnector.lastSuggestedPass = password
+                }
+            } catch (_: Exception) {}
+            try {
+                wifiManager.startScan()
+            } catch (_: Exception) {}
+        } else {
+            try {
+                wifiManager.startScan()
+                wifiManager.reconnect()
+            } catch (_: Exception) {}
         }
     }
 }

@@ -92,7 +92,8 @@ actual fun getWifiSnapshot(): WifiSnapshot? {
         return WifiSnapshot(
             phoneIP = ip,
             gatewayCandidateIP = gateway,
-            ssid = bridge?.currentWifiSsid()
+            ssid = bridge?.currentWifiSsid(),
+            interfaceName = "en0"
         )
     }
     return null

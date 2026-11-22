@@ -94,6 +94,7 @@ class BikeLink(
 
     private val toAsk = ArrayDeque<PxcMessage>()
     private val askLock = SynchronizedLock()
+    private val sessionLock = SynchronizedLock()
 
     companion object {
         private const val FRAME_WAIT_MS = 40
@@ -120,10 +121,18 @@ class BikeLink(
     /**
      * Llama al puerto 10930 (Knock) de la pantalla TFT de la moto para forzarla a conectarse.
      */
-    fun knock(bikeIP: String, interfaceName: String? = null, port: Int = 10930, quiet: Boolean = false): Boolean {
+    fun knock(
+        bikeIP: String,
+        interfaceName: String? = null,
+        port: Int = 10930,
+        timeoutMs: Int = 900,
+        quiet: Boolean = false
+    ): Boolean {
         return try {
-            val sock = BikeSocketFactory.connectTCP(bikeIP, port, interfaceName, 1600)
+            val sock = BikeSocketFactory.connectTCP(bikeIP, port, interfaceName, timeoutMs)
             try {
+                sock.setReceiveTimeout(timeoutMs.coerceAtLeast(1000))
+                sock.setSendTimeout(timeoutMs.coerceAtLeast(1000))
                 val helloObj = buildJsonObject {
                     put("phoneType", "Android")
                     put("packageName", card.packageName)
@@ -149,6 +158,19 @@ class BikeLink(
             }
             false
         }
+    }
+
+    /**
+     * Aborta inmediatamente una sesión TCP zombi (por ejemplo si desaparece el Wi-Fi de la moto)
+     * dejando los puertos servidor abiertos en `BikeState.LISTENING`.
+     */
+    fun dropActiveSession(reason: String) {
+        if (isClosed) return
+        val gen = sessionLock.withLock {
+            goneReported = false
+            ++pxcGeneration
+        }
+        reportLost(reason, gen)
     }
 
     fun close() {
@@ -229,10 +251,14 @@ class BikeLink(
     private fun handlePxc(socket: BikeSocket) {
         var myGen = pxcGeneration
         try {
+            socket.setReceiveTimeout(5000)
+            socket.setSendTimeout(3000)
             val opening = Pxc.read(socket)
             if (opening.command == Pxc.openBikeAsks) {
-                myGen = ++pxcGeneration
-                goneReported = false
+                sessionLock.withLock {
+                    myGen = ++pxcGeneration
+                    goneReported = false
+                }
                 val stale = socketsLock.withLock {
                     val others = openSockets.filter { it !== socket }
                     openSockets.retainAll { it === socket }
@@ -248,7 +274,7 @@ class BikeLink(
                 Pxc.openBikeAsks -> {
                     events.log("La moto abre canal de sus preguntas")
                     while (!isClosed && pxcGeneration == myGen) {
-                        socket.setReceiveTimeout(3 * bikeTimeoutMs)
+                        socket.setReceiveTimeout(minOf(2 * bikeTimeoutMs, 10_000))
                         val asked = Pxc.read(socket)
                         answerBike(asked, socket)
                     }
@@ -329,7 +355,8 @@ class BikeLink(
     }
 
     private fun askBike(socket: BikeSocket, myGen: Int) {
-        socket.setReceiveTimeout(bikeTimeoutMs)
+        socket.setReceiveTimeout(minOf(bikeTimeoutMs, 6000))
+        socket.setSendTimeout(3000)
 
         val inFrontObj = buildJsonObject {
             put("displayRotation", 0)
@@ -364,8 +391,10 @@ class BikeLink(
     private fun handleControl(socket: BikeSocket) {
         controlTurn++
         val myTurn = controlTurn
+        val myGen = pxcGeneration
 
         try {
+            socket.setSendTimeout(2500)
             while (!isClosed) {
                 val asked = Rv.read(socket)
                 when (asked.command) {
@@ -423,8 +452,9 @@ class BikeLink(
                 }
             }
         } catch (e: Exception) {
-            if (!isClosed) {
+            if (!isClosed && controlTurn == myTurn) {
                 events.log("Canal RV Control cerrado: ${e.message}")
+                reportLost("Canal RV Control cerrado: ${e.message}", myGen)
             }
         } finally {
             if (controlTurn == myTurn) {
@@ -449,13 +479,16 @@ class BikeLink(
         currentDataSocket = socket
         dataTurn++
         val myTurn = dataTurn
+        val myGen = pxcGeneration
         previous?.close()
 
         try {
+            socket.setSendTimeout(2500)
             sendPictureLoop(socket, wanted, myTurn)
         } catch (e: Exception) {
             if (!isClosed && dataTurn == myTurn) {
                 events.log("Canal RV Data cerrado: ${e.message}")
+                reportLost("Canal RV Data cerrado: ${e.message}", myGen)
             }
         } finally {
             if (currentDataSocket === socket) {
@@ -566,10 +599,18 @@ class BikeLink(
     }
 
     private fun reportLost(why: String, gen: Int = pxcGeneration) {
-        if (isClosed || goneReported || gen != pxcGeneration) return
-        goneReported = true
-        currentRequest = null
-        currentDataSocket = null
+        val shouldReport = sessionLock.withLock {
+            if (isClosed || goneReported || gen != pxcGeneration) {
+                false
+            } else {
+                goneReported = true
+                currentRequest = null
+                currentDataSocket = null
+                true
+            }
+        }
+        if (!shouldReport) return
+
         picture.stop()
         val staleSockets = socketsLock.withLock {
             val copy = openSockets.toList()

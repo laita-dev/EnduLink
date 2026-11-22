@@ -96,3 +96,8 @@ actual fun connectToBikeWifi(
         }
     })
 }
+
+actual fun nudgeBikeWifiReconnect(ssid: String, password: String) {
+    // En iOS, NEHotspotConfiguration con joinOnce = false ya queda guardado en el sistema;
+    // invocar apply() en segundo plano con el AP apagado abriría un diálogo modal bloqueante.
+}

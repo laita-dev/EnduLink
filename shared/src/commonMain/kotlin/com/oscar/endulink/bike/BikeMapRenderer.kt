@@ -76,7 +76,8 @@ data class BikeMapConfig(
 data class WifiSnapshot(
     val phoneIP: String,
     val gatewayCandidateIP: String,
-    val ssid: String? = null
+    val ssid: String? = null,
+    val interfaceName: String? = null
 ) {
     fun isLikelyBikeWifi(savedQr: BikeQr? = null): Boolean {
         if (gatewayCandidateIP == "192.168.43.1" ||

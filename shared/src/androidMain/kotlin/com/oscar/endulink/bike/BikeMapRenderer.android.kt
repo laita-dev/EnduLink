@@ -48,10 +48,11 @@ actual fun getWifiSnapshot(): WifiSnapshot? {
                 currentSsid = rawSsid
             }
             val cm = ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-            val activeWifi = cm?.allNetworks?.firstOrNull { net ->
-                cm.getNetworkCapabilities(net)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
-            }
-            if (activeWifi != null) {
+            if (cm != null) {
+                AndroidBikeWifiConnector.ensurePassiveWifiMonitor(cm)
+                val activeWifi = cm.allNetworks.firstOrNull { net ->
+                    cm.getNetworkCapabilities(net)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
+                }
                 AndroidSocketBinder.wifiNetwork = activeWifi
             }
         }
@@ -71,7 +72,12 @@ actual fun getWifiSnapshot(): WifiSnapshot? {
                         val parts = host.split(".")
                         if (parts.size == 4) {
                             val gateway = "${parts[0]}.${parts[1]}.${parts[2]}.1"
-                            return WifiSnapshot(phoneIP = host, gatewayCandidateIP = gateway, ssid = currentSsid)
+                            return WifiSnapshot(
+                                phoneIP = host,
+                                gatewayCandidateIP = gateway,
+                                ssid = currentSsid,
+                                interfaceName = iface.name
+                            )
                         }
                     }
                 }

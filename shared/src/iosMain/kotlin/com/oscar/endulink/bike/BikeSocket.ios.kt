@@ -138,7 +138,9 @@ class IosBikeServerSocket(private var serverFd: Int) : BikeServerSocket {
             val b4 = ((ipInt shr 24) and 0xFFu).toUInt()
             val remoteIp = "$b1.$b2.$b3.$b4"
 
-            return IosBikeSocket(clientFd, remoteIP = remoteIp)
+            val wrapped = IosBikeSocket(clientFd, remoteIP = remoteIp)
+            wrapped.setSendTimeout(2500)
+            return wrapped
         }
     }
 

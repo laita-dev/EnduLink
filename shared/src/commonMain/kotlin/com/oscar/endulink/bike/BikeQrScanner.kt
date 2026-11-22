@@ -29,3 +29,9 @@ expect fun connectToBikeWifi(
     onResult: (success: Boolean, message: String) -> Unit
 )
 
+/**
+ * Empuja en segundo plano (sin abrir pantallas ni diálogos del sistema) el reescaneo y
+ * reasociación al Wi-Fi guardado de la moto cuando ésta vuelve a encenderse.
+ */
+expect fun nudgeBikeWifiReconnect(ssid: String, password: String)
+

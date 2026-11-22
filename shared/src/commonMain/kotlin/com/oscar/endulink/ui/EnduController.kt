@@ -279,18 +279,28 @@ class EnduController {
             var tick = 0
             var wasOnBikeWifi = false
             while (isActive) {
-                val pollIntervalTicks = if (_bikeState.value == BikeState.SHOWING) 6 else 2
+                val pollIntervalTicks = if (_bikeState.value == BikeState.SHOWING) 2 else 1
                 if (tick % pollIntervalTicks == 0) {
                     val snap = getWifiSnapshot()
                     _wifiSnapshot.value = snap
                     val onBikeWifi = snap?.isLikelyBikeWifi(_bikeQr.value) == true
+                    if (!onBikeWifi && wasOnBikeWifi) {
+                        manuallyStoppedOnCurrentBikeWifi = false
+                        val curBikeState = _bikeState.value
+                        if (bikeLink?.isOpen == true && (curBikeState == BikeState.SHOWING || curBikeState == BikeState.GREETED)) {
+                            logBike("Wi-Fi de la moto perdido · Cerrando sesión TCP anterior para reconectar en cuanto vuelva...")
+                            bikeLink?.dropActiveSession("Wi-Fi de la moto desconectado")
+                        }
+                    }
                     if (onBikeWifi && (!wasOnBikeWifi || _bikeState.value == BikeState.CLOSED)) {
                         if (!manuallyStoppedOnCurrentBikeWifi) {
+                            val curBikeState = _bikeState.value
+                            if (bikeLink?.isOpen == true && (curBikeState == BikeState.SHOWING || curBikeState == BikeState.GREETED)) {
+                                bikeLink?.dropActiveSession("Reconexión a Wi-Fi de la moto")
+                            }
                             logBike("Wi-Fi de la moto detectado (${snap?.ssid ?: snap?.gatewayCandidateIP}) · Activando pantalla TFT automáticamente...")
                             startBikeStream()
                         }
-                    } else if (!onBikeWifi && wasOnBikeWifi) {
-                        manuallyStoppedOnCurrentBikeWifi = false
                     }
                     wasOnBikeWifi = onBikeWifi
                 }
@@ -1420,6 +1430,8 @@ class EnduController {
         bikeSupervisorJob = scope.launch {
             val idleTimeoutMs = 180_000L // 3 minutos de búsqueda activa -> pasa a escucha pasiva sin gasto de batería
             var lastKnockMs = 0L
+            var lastWifiNudgeMs = 0L
+            var knockRound = 0
             var pausedLogged = false
 
             while (isActive && link.isOpen) {
@@ -1430,6 +1442,7 @@ class EnduController {
                     bikeSearchResetAtMs = nowMs
                     _bikeSearchRemainingSeconds.value = null
                     lastKnockMs = 0L
+                    knockRound = 0
                     pausedLogged = false
                 } else {
                     val snap = getWifiSnapshot()
@@ -1457,23 +1470,49 @@ class EnduController {
                         pausedLogged = false
                         _bikeSearchRemainingSeconds.value = ((idleTimeoutMs - elapsedMs) / 1000L).toInt().coerceAtLeast(1)
 
-                        if (forceImmediateKnock || nowMs - lastKnockMs >= 4000L) {
+                        if (!onBikeWifi && nowMs - lastWifiNudgeMs >= 5_000L) {
+                            val savedQr = _bikeQr.value
+                            if (savedQr != null) {
+                                lastWifiNudgeMs = nowMs
+                                nudgeBikeWifiReconnect(savedQr.ssid, savedQr.password)
+                            }
+                        }
+
+                        val knockIntervalMs = if (onBikeWifi) 1500L else 3500L
+                        if (forceImmediateKnock || nowMs - lastKnockMs >= knockIntervalMs) {
                             val isFirstAttempt = (lastKnockMs == 0L || forceImmediateKnock)
                             forceImmediateKnock = false
                             lastKnockMs = nowMs
-                            val knockCandidates = listOfNotNull(
-                                snap?.gatewayCandidateIP,
-                                "192.168.43.1",
-                                "192.168.49.1",
-                                "192.168.169.1"
-                            ).distinct()
+                            knockRound++
+
+                            val detectedGateway = snap?.gatewayCandidateIP?.takeIf { it.isNotBlank() }
+                            val useGatewayOnly = onBikeWifi && detectedGateway != null && (knockRound % 3 != 0)
+                            val knockCandidates = if (useGatewayOnly) {
+                                listOf(detectedGateway!!)
+                            } else {
+                                listOfNotNull(
+                                    detectedGateway,
+                                    "192.168.43.1",
+                                    "192.168.49.1",
+                                    "192.168.169.1"
+                                ).distinct()
+                            }
+                            val timeoutMs = if (useGatewayOnly) 800 else 650
 
                             for (candidateIp in knockCandidates) {
                                 if (!link.isOpen || _bikeState.value != BikeState.LISTENING) break
                                 if (isFirstAttempt) {
                                     logBike("Llamando a pantalla TFT (knock) en $candidateIp:10930...")
                                 }
-                                if (link.knock(candidateIp, quiet = !isFirstAttempt)) break
+                                if (link.knock(
+                                        bikeIP = candidateIp,
+                                        interfaceName = snap?.interfaceName,
+                                        timeoutMs = timeoutMs,
+                                        quiet = !isFirstAttempt
+                                    )
+                                ) {
+                                    break
+                                }
                             }
                         }
                     }
