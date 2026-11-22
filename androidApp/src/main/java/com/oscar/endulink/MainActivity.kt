@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
     private fun handleIncomingGpxIntent(incoming: Intent?) {
         if (incoming == null) return
         val viewUri = if (incoming.action == Intent.ACTION_VIEW) incoming.data else null
-        if (viewUri != null && viewUri.scheme.equals("endulink", ignoreCase = true)) {
+        if (viewUri != null && com.oscar.endulink.group.GroupInvite.parseRoomCode(viewUri.toString()) != null) {
             incoming.action = null
             incoming.data = null
             com.oscar.endulink.ui.EnduController.shared.handleIncomingGroupLink(viewUri.toString())

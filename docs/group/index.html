@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Unirse a Grupo · EnduLink / motillOS</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0d1117;
+      color: #f0f6fc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .card {
+      width: 100%;
+      max-width: 400px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 16px;
+      padding: 24px;
+      text-align: center;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+    }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    p { font-size: 14px; color: #8b949e; margin: 0 0 18px; line-height: 1.45; }
+    .code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 3px;
+      color: #00e5ff;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 18px;
+    }
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 14px 16px;
+      border: 0;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      box-sizing: border-box;
+      margin-bottom: 10px;
+    }
+    .btn-primary { background: #ff6b2c; color: #ffffff; }
+    .btn-secondary { background: #21262d; color: #f0f6fc; border: 1px solid #30363d; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Grupo de ruta EnduLink</h1>
+    <p>Pulsa el botón para abrir la app directamente y unirte al grupo.</p>
+    <div id="room-code" class="code">------</div>
+    <a id="open-btn" class="btn btn-primary" href="#">Abrir en EnduLink / motillOS</a>
+    <button id="copy-btn" class="btn btn-secondary" type="button">Copiar código</button>
+  </div>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var raw = params.get("c") || params.get("code") || window.location.hash.replace(/^#/, "");
+      var clean = (raw || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      var codeEl = document.getElementById("room-code");
+      var openBtn = document.getElementById("open-btn");
+      var copyBtn = document.getElementById("copy-btn");
+
+      if (clean.length >= 4 && clean.length <= 12) {
+        var formatted = clean.length === 6 ? clean.slice(0, 3) + "-" + clean.slice(3) : clean;
+        var deepLink = "endulink://group/" + clean;
+        codeEl.textContent = formatted;
+        openBtn.href = deepLink;
+        copyBtn.addEventListener("click", function () {
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(formatted);
+            copyBtn.textContent = "Código copiado";
+          }
+        });
+        setTimeout(function () { window.location.href = deepLink; }, 120);
+      } else {
+        codeEl.textContent = "SIN CÓDIGO";
+        openBtn.style.display = "none";
+        copyBtn.style.display = "none";
+      }
+    })();
+  </script>
+</body>
+</html>

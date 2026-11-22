@@ -12,6 +12,8 @@
 
 # Servicios y componentes declarados en AndroidManifest
 -keep class com.oscar.endulink.platform.BikeForegroundService { *; }
+# Reactivar junto al <service> en AndroidManifest.xml (ver NOTIFICACIONES_TFT_ANDROID.md)
+# -keep class com.oscar.endulink.platform.EnduNotificationListenerService { *; }
 
 # Dependencias opcionales en JVM referenciadas por OkHttp / Ktor
 -dontwarn org.slf4j.**

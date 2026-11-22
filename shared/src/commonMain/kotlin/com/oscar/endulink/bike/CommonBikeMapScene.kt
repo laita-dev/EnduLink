@@ -13,6 +13,9 @@ import com.oscar.endulink.group.TftProjectedMember
 import com.oscar.endulink.platform.BatteryStatus
 import com.oscar.endulink.platform.RiderTelemetry
 import com.oscar.endulink.platform.SynchronizedLock
+import com.oscar.endulink.platform.TftNotificationCategory
+import com.oscar.endulink.platform.TftNotificationTextLayout
+import com.oscar.endulink.platform.TftPhoneNotification
 import com.oscar.endulink.platform.getPlatformBatteryStatus
 import com.oscar.endulink.platform.withLock
 import com.oscar.endulink.tiles.MapLayer
@@ -148,6 +151,27 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         isAntiAlias = true
     }
     private val groupArrowPath = Path()
+    private val notifBgPaint = Paint().apply {
+        style = PaintingStyle.Fill
+        isAntiAlias = true
+    }
+    private val notifStrokePaint = Paint().apply {
+        style = PaintingStyle.Stroke
+        isAntiAlias = true
+    }
+    private val notifIconStrokePaint = Paint().apply {
+        color = Color.White
+        style = PaintingStyle.Stroke
+        strokeCap = StrokeCap.Round
+        strokeJoin = StrokeJoin.Round
+        isAntiAlias = true
+    }
+    private val notifIconFillPaint = Paint().apply {
+        color = Color.White
+        style = PaintingStyle.Fill
+        isAntiAlias = true
+    }
+    private val notifIconPath = Path()
 
     private var lastBatteryCheckMs: Long = 0L
     private var cachedBatteryStatus: BatteryStatus = BatteryStatus()
@@ -177,7 +201,8 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         remainingMinutes: Int? = null,
         routeTypeLabel: String? = null,
         groupMembers: List<GroupMember> = emptyList(),
-        groupActiveCount: Int = 0
+        groupActiveCount: Int = 0,
+        activeNotification: TftPhoneNotification? = null
     ): ImageBitmap = lock.withLock {
         val bmp = ImageBitmap(width, height, ImageBitmapConfig.Argb8888)
         val canvas = Canvas(bmp)
@@ -198,7 +223,8 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             remainingMinutes = remainingMinutes,
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
-            groupActiveCount = groupActiveCount
+            groupActiveCount = groupActiveCount,
+            activeNotification = activeNotification
         )
         return bmp
     }
@@ -219,7 +245,8 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         remainingMinutes: Int? = null,
         routeTypeLabel: String? = null,
         groupMembers: List<GroupMember> = emptyList(),
-        groupActiveCount: Int = 0
+        groupActiveCount: Int = 0,
+        activeNotification: TftPhoneNotification? = null
     ): ByteArray = lock.withLock {
         val cur = cachedBitmap
         val bmp = if (cur != null && cur.width == width && cur.height == height) {
@@ -253,7 +280,8 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             remainingMinutes = remainingMinutes,
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
-            groupActiveCount = groupActiveCount
+            groupActiveCount = groupActiveCount,
+            activeNotification = activeNotification
         )
 
         bmp.readPixels(
@@ -292,7 +320,8 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         remainingMinutes: Int?,
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
-        groupActiveCount: Int
+        groupActiveCount: Int,
+        activeNotification: TftPhoneNotification?
     ) {
         val w = width
         val h = height
@@ -744,8 +773,9 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             )
         }
 
-        // 9c. Banner destacado de alerta rápida (SOS / Avería / Esperadme)
+        // 9c. Banner destacado de alerta rápida (SOS / Avería / Esperadme) + mensaje personalizado
         val alertBanner = if (config.showGroupAlertsOnTft) groupPlan?.alertBanner else null
+        var alertBannerBottomPx = 0f
         if (alertBanner != null) {
             val alertLeft = 14f * scale
             val maxAlertRight = if (groupActiveCount > 0 && config.showGroupHudBadgeOnTft) {
@@ -753,35 +783,321 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             } else {
                 w - 14f * scale
             }
-            val alertRight = minOf(maxAlertRight, alertLeft + 286f * scale)
+            val alertRight = minOf(maxAlertRight, alertLeft + 332f * scale)
             val alertTop = 62f * scale
-            val alertBottom = 90f * scale
+            val innerW = (alertRight - alertLeft - 20f * scale).coerceAtLeast(40f * scale)
+            val headerSize = 11.5f * scale
+            val msgSize = 10.5f * scale
+            val headerText = TftNotificationTextLayout.truncateToWidth(
+                text = alertBanner.text,
+                maxWidth = innerW
+            ) { TftVectorText.measureText(it, headerSize) }
+            val msgLines = if (alertBanner.subtext.isNotBlank()) {
+                TftNotificationTextLayout.wrapLines(
+                    text = alertBanner.subtext,
+                    maxWidth = innerW,
+                    maxLines = 2
+                ) { TftVectorText.measureText(it, msgSize) }
+            } else {
+                emptyList()
+            }
+            val bannerHeight = when (msgLines.size) {
+                0 -> 28f
+                1 -> 47f
+                else -> 63f
+            } * scale
+            val alertBottom = alertTop + bannerHeight
             if (alertRight > alertLeft + 40f * scale) {
+                alertBannerBottomPx = alertBottom
                 groupAlertBgPaint.color = when (alertBanner.status) {
-                    RiderStatus.SOS -> Color(215, 38, 38, 240)
-                    RiderStatus.MECHANICAL -> Color(225, 105, 0, 240)
-                    else -> Color(195, 145, 0, 240)
+                    RiderStatus.SOS -> Color(198, 24, 24, 255)
+                    RiderStatus.MECHANICAL -> Color(204, 88, 0, 255)
+                    else -> Color(156, 110, 0, 255)
                 }
                 groupStrokePaint.color = Color.White
-                groupStrokePaint.strokeWidth = 1.6f * scale
+                groupStrokePaint.strokeWidth = 1.8f * scale
                 canvas.drawRoundRect(alertLeft, alertTop, alertRight, alertBottom, 8f * scale, 8f * scale, groupAlertBgPaint)
                 canvas.drawRoundRect(alertLeft, alertTop, alertRight, alertBottom, 8f * scale, 8f * scale, groupStrokePaint)
                 TftVectorText.drawText(
                     canvas = canvas,
-                    text = alertBanner.text,
+                    text = headerText,
                     x = alertLeft + 10f * scale,
-                    y = alertBottom - 8.5f * scale,
-                    size = 11.5f * scale,
+                    y = alertTop + 19.5f * scale,
+                    size = headerSize,
                     color = Color.White,
                     strokeW = 1.9f * scale
                 )
+                if (msgLines.isNotEmpty()) {
+                    TftVectorText.drawText(
+                        canvas = canvas,
+                        text = msgLines[0],
+                        x = alertLeft + 10f * scale,
+                        y = alertTop + 38f * scale,
+                        size = msgSize,
+                        color = Color(255, 250, 235, 255),
+                        strokeW = 1.65f * scale
+                    )
+                }
+                if (msgLines.size >= 2) {
+                    TftVectorText.drawText(
+                        canvas = canvas,
+                        text = msgLines[1],
+                        x = alertLeft + 10f * scale,
+                        y = alertTop + 54f * scale,
+                        size = msgSize,
+                        color = Color(255, 250, 235, 255),
+                        strokeW = 1.65f * scale
+                    )
+                }
             }
+        }
+
+        // 9d. Notificación emergente del móvil (Heads-up banner temporal)
+        if (config.showPhoneNotificationsOnTft && activeNotification != null) {
+            drawPhoneNotificationBanner(
+                canvas = canvas,
+                w = w,
+                scale = scale,
+                notif = activeNotification,
+                alertBannerBottomPx = alertBannerBottomPx
+            )
         }
 
         // 10. BlackEdges (4px arriba y abajo requeridos por Carbit EasyConn)
         val edgePx = (4f * scale).coerceAtLeast(2f)
         canvas.drawRect(0f, 0f, w, edgePx, blackEdgePaint)
         canvas.drawRect(0f, h - edgePx, w, h, blackEdgePaint)
+    }
+
+    private fun drawPhoneNotificationBanner(
+        canvas: Canvas,
+        w: Float,
+        scale: Float,
+        notif: TftPhoneNotification,
+        alertBannerBottomPx: Float
+    ) {
+        val nowMs = Clock.System.now().toEpochMilliseconds()
+        if (!notif.isActive(nowMs)) return
+
+        val elapsed = notif.elapsedMs(nowMs)
+        val remaining = notif.remainingMs(nowMs)
+        val alphaFactor = when {
+            elapsed < 180L -> 0.72f + 0.28f * (elapsed / 180f).coerceIn(0f, 1f)
+            remaining < 220L -> (remaining / 220f).coerceIn(0f, 1f)
+            else -> 1f
+        }
+        val slideOffsetY = when {
+            elapsed < 180L -> -(1f - (elapsed / 180f).coerceIn(0f, 1f)) * 12f * scale
+            remaining < 220L -> -(1f - (remaining / 220f).coerceIn(0f, 1f)) * 16f * scale
+            else -> 0f
+        }
+
+        val left = 14f * scale
+        val right = w - 14f * scale
+        if (right <= left + 120f * scale) return
+
+        val top = (if (alertBannerBottomPx > 0f) alertBannerBottomPx + 6f * scale else 58f * scale) + slideOffsetY
+        val textLeft = left + 54f * scale
+        val textMaxW = (right - 14f * scale - textLeft).coerceAtLeast(60f * scale)
+
+        val appSize = 10.5f * scale
+        val nowSize = 9.5f * scale
+        val titleSize = 12.5f * scale
+        val bodySize = 10.5f * scale
+
+        val appText = TftNotificationTextLayout.truncateToWidth(
+            text = notif.appName.uppercase(),
+            maxWidth = (textMaxW - 56f * scale).coerceAtLeast(40f * scale)
+        ) { TftVectorText.measureText(it, appSize) }
+
+        val titleText = TftNotificationTextLayout.truncateToWidth(
+            text = notif.title,
+            maxWidth = textMaxW
+        ) { TftVectorText.measureText(it, titleSize) }
+
+        val bodyLines = TftNotificationTextLayout.wrapLines(
+            text = notif.text,
+            maxWidth = textMaxW,
+            maxLines = 2
+        ) { TftVectorText.measureText(it, bodySize) }
+
+        val cardH = when (bodyLines.size) {
+            0 -> 58f
+            1 -> 74f
+            else -> 92f
+        } * scale
+        val bottom = top + cardH
+        val radius = 14f * scale
+
+        val accentBase = Color(notif.accentArgb)
+        val accentColor = accentBase.copy(alpha = alphaFactor)
+
+        notifBgPaint.color = Color(18, 22, 30, (246f * alphaFactor).roundToInt().coerceIn(0, 255))
+        canvas.drawRoundRect(left, top, right, bottom, radius, radius, notifBgPaint)
+
+        notifStrokePaint.color = accentColor
+        notifStrokePaint.strokeWidth = 1.8f * scale
+        canvas.drawRoundRect(left, top, right, bottom, radius, radius, notifStrokePaint)
+
+        // Avatar circular izquierdo con icono vectorial por categoría
+        val cx = left + 29f * scale
+        val cy = top + (cardH - 4f * scale) * 0.5f
+        val avatarR = 16f * scale
+        notifBgPaint.color = accentColor
+        canvas.drawCircle(Offset(cx, cy), avatarR, notifBgPaint)
+
+        drawCategoryIcon(canvas, notif.category, cx, cy, scale, alphaFactor)
+
+        // Cabecera: Nombre app + AHORA
+        TftVectorText.drawText(
+            canvas = canvas,
+            text = appText,
+            x = textLeft,
+            y = top + 19f * scale,
+            size = appSize,
+            color = accentColor,
+            strokeW = 1.7f * scale
+        )
+        val nowStr = "AHORA"
+        val nowW = TftVectorText.measureText(nowStr, nowSize)
+        TftVectorText.drawText(
+            canvas = canvas,
+            text = nowStr,
+            x = right - 14f * scale - nowW,
+            y = top + 19f * scale,
+            size = nowSize,
+            color = Color(165, 175, 188, (190f * alphaFactor).roundToInt().coerceIn(0, 255)),
+            strokeW = 1.4f * scale
+        )
+
+        // Título / remitente
+        TftVectorText.drawText(
+            canvas = canvas,
+            text = titleText,
+            x = textLeft,
+            y = top + 38f * scale,
+            size = titleSize,
+            color = Color.White.copy(alpha = alphaFactor),
+            strokeW = 2.0f * scale
+        )
+
+        // Cuerpo en 1 o 2 líneas
+        val bodyColor = Color(224, 232, 240, (255f * alphaFactor).roundToInt().coerceIn(0, 255))
+        if (bodyLines.isNotEmpty()) {
+            TftVectorText.drawText(
+                canvas = canvas,
+                text = bodyLines[0],
+                x = textLeft,
+                y = top + 56f * scale,
+                size = bodySize,
+                color = bodyColor,
+                strokeW = 1.55f * scale
+            )
+        }
+        if (bodyLines.size >= 2) {
+            TftVectorText.drawText(
+                canvas = canvas,
+                text = bodyLines[1],
+                x = textLeft,
+                y = top + 73f * scale,
+                size = bodySize,
+                color = bodyColor,
+                strokeW = 1.55f * scale
+            )
+        }
+
+        // Barra inferior de tiempo restante
+        val trackLeft = left + 12f * scale
+        val trackRight = right - 12f * scale
+        val trackTop = bottom - 6f * scale
+        val trackBottom = bottom - 3f * scale
+        val trackR = 1.5f * scale
+        notifBgPaint.color = Color(255, 255, 255, (45f * alphaFactor).roundToInt().coerceIn(0, 255))
+        canvas.drawRoundRect(trackLeft, trackTop, trackRight, trackBottom, trackR, trackR, notifBgPaint)
+
+        val progress = notif.remainingProgress(nowMs)
+        val fillW = (trackRight - trackLeft) * progress
+        if (fillW > 2f * scale) {
+            notifBgPaint.color = accentColor
+            canvas.drawRoundRect(trackLeft, trackTop, trackLeft + fillW, trackBottom, trackR, trackR, notifBgPaint)
+        }
+    }
+
+    private fun drawCategoryIcon(
+        canvas: Canvas,
+        category: TftNotificationCategory,
+        cx: Float,
+        cy: Float,
+        scale: Float,
+        alphaFactor: Float
+    ) {
+        val white = Color.White.copy(alpha = alphaFactor)
+        notifIconStrokePaint.color = white
+        notifIconStrokePaint.strokeWidth = 1.8f * scale
+        notifIconFillPaint.color = white
+        notifIconPath.reset()
+
+        when (category) {
+            TftNotificationCategory.MESSAGE -> {
+                notifIconPath.moveTo(cx - 7f * scale, cy - 5.5f * scale)
+                notifIconPath.lineTo(cx + 7f * scale, cy - 5.5f * scale)
+                notifIconPath.lineTo(cx + 7f * scale, cy + 3.5f * scale)
+                notifIconPath.lineTo(cx - 1.5f * scale, cy + 3.5f * scale)
+                notifIconPath.lineTo(cx - 5.5f * scale, cy + 7f * scale)
+                notifIconPath.lineTo(cx - 5f * scale, cy + 3.5f * scale)
+                notifIconPath.lineTo(cx - 7f * scale, cy + 3.5f * scale)
+                notifIconPath.close()
+                canvas.drawPath(notifIconPath, notifIconStrokePaint)
+            }
+            TftNotificationCategory.CALL -> {
+                notifIconPath.moveTo(cx - 5.5f * scale, cy - 6.5f * scale)
+                notifIconPath.lineTo(cx - 2f * scale, cy - 6.5f * scale)
+                notifIconPath.lineTo(cx - 1f * scale, cy - 3f * scale)
+                notifIconPath.lineTo(cx - 3f * scale, cy - 1f * scale)
+                notifIconPath.lineTo(cx + 1f * scale, cy + 3f * scale)
+                notifIconPath.lineTo(cx + 3f * scale, cy + 1f * scale)
+                notifIconPath.lineTo(cx + 6.5f * scale, cy + 2f * scale)
+                notifIconPath.lineTo(cx + 6.5f * scale, cy + 5.5f * scale)
+                notifIconPath.lineTo(cx + 3f * scale, cy + 6.5f * scale)
+                notifIconPath.lineTo(cx - 2.5f * scale, cy + 3.5f * scale)
+                notifIconPath.lineTo(cx - 6.5f * scale, cy - 2.5f * scale)
+                notifIconPath.close()
+                canvas.drawPath(notifIconPath, notifIconStrokePaint)
+            }
+            TftNotificationCategory.NAVIGATION -> {
+                notifIconPath.moveTo(cx, cy - 7.5f * scale)
+                notifIconPath.lineTo(cx + 6.5f * scale, cy + 6.5f * scale)
+                notifIconPath.lineTo(cx, cy + 3f * scale)
+                notifIconPath.lineTo(cx - 6.5f * scale, cy + 6.5f * scale)
+                notifIconPath.close()
+                canvas.drawPath(notifIconPath, notifIconFillPaint)
+            }
+            TftNotificationCategory.ALERT -> {
+                notifIconPath.moveTo(cx, cy - 7f * scale)
+                notifIconPath.lineTo(cx + 7f * scale, cy + 5.5f * scale)
+                notifIconPath.lineTo(cx - 7f * scale, cy + 5.5f * scale)
+                notifIconPath.close()
+                canvas.drawPath(notifIconPath, notifIconStrokePaint)
+                notifIconPath.reset()
+                notifIconPath.moveTo(cx, cy - 2.5f * scale)
+                notifIconPath.lineTo(cx, cy + 1.5f * scale)
+                canvas.drawPath(notifIconPath, notifIconStrokePaint)
+                canvas.drawCircle(Offset(cx, cy + 3.7f * scale), 1f * scale, notifIconFillPaint)
+            }
+            TftNotificationCategory.APP -> {
+                notifIconPath.moveTo(cx - 5f * scale, cy + 2.5f * scale)
+                notifIconPath.lineTo(cx - 5f * scale, cy - 2.5f * scale)
+                notifIconPath.lineTo(cx - 2.5f * scale, cy - 6f * scale)
+                notifIconPath.lineTo(cx + 2.5f * scale, cy - 6f * scale)
+                notifIconPath.lineTo(cx + 5f * scale, cy - 2.5f * scale)
+                notifIconPath.lineTo(cx + 5f * scale, cy + 2.5f * scale)
+                notifIconPath.lineTo(cx + 7f * scale, cy + 4f * scale)
+                notifIconPath.lineTo(cx - 7f * scale, cy + 4f * scale)
+                notifIconPath.close()
+                canvas.drawPath(notifIconPath, notifIconStrokePaint)
+                canvas.drawCircle(Offset(cx, cy + 6.2f * scale), 1.3f * scale, notifIconFillPaint)
+            }
+        }
     }
 
     private fun buildClippedRouteAndChevronsFromNorm(
@@ -1143,6 +1459,9 @@ internal object TftVectorText {
             'Ó', 'Ò', 'Ö' -> 'O'
             'Ú', 'Ù', 'Ü' -> 'U'
             'Ñ' -> 'N'
+            'Ç' -> 'C'
+            '¿' -> '?'
+            '¡' -> '!'
             else -> c.uppercaseChar()
         }
     }
@@ -1423,6 +1742,89 @@ internal object TftVectorText {
                 p.lineTo(xm, y0 + h * 0.62f)
                 p.moveTo(xm, y1 - h * 0.14f)
                 p.lineTo(xm, y1)
+            }
+            '?' -> {
+                p.moveTo(x0, y0 + h * 0.22f)
+                p.lineTo(x0 + w * 0.25f, y0)
+                p.lineTo(x1 - w * 0.15f, y0)
+                p.lineTo(x1, y0 + h * 0.25f)
+                p.lineTo(xm, ym)
+                p.lineTo(xm, y0 + h * 0.65f)
+                p.moveTo(xm, y1 - h * 0.14f)
+                p.lineTo(xm, y1)
+            }
+            '(', '[' -> {
+                p.moveTo(x1 - w * 0.2f, y0)
+                p.lineTo(x0 + w * 0.25f, ym)
+                p.lineTo(x1 - w * 0.2f, y1)
+            }
+            ')', ']' -> {
+                p.moveTo(x0 + w * 0.2f, y0)
+                p.lineTo(x1 - w * 0.25f, ym)
+                p.lineTo(x0 + w * 0.2f, y1)
+            }
+            '\'' -> {
+                p.moveTo(xm, y0)
+                p.lineTo(xm, y0 + h * 0.28f)
+            }
+            '"' -> {
+                p.moveTo(x0 + w * 0.3f, y0)
+                p.lineTo(x0 + w * 0.3f, y0 + h * 0.28f)
+                p.moveTo(x1 - w * 0.3f, y0)
+                p.lineTo(x1 - w * 0.3f, y0 + h * 0.28f)
+            }
+            ';' -> {
+                p.moveTo(xm, y0 + h * 0.25f)
+                p.lineTo(xm, y0 + h * 0.32f)
+                p.moveTo(xm, y1 - h * 0.25f)
+                p.lineTo(x0 + w * 0.35f, y1)
+            }
+            '@' -> {
+                p.moveTo(x1 - w * 0.15f, ym)
+                p.lineTo(x1 - w * 0.15f, y0 + h * 0.25f)
+                p.lineTo(xm, y0 + h * 0.25f)
+                p.lineTo(xm, ym + h * 0.15f)
+                p.lineTo(x1, ym + h * 0.15f)
+                p.lineTo(x1, y0)
+                p.lineTo(x0, y0)
+                p.lineTo(x0, y1)
+                p.lineTo(x1, y1)
+            }
+            '#' -> {
+                p.moveTo(x0 + w * 0.3f, y0)
+                p.lineTo(x0 + w * 0.2f, y1)
+                p.moveTo(x1 - w * 0.2f, y0)
+                p.lineTo(x1 - w * 0.3f, y1)
+                p.moveTo(x0, y0 + h * 0.35f)
+                p.lineTo(x1, y0 + h * 0.35f)
+                p.moveTo(x0, y1 - h * 0.3f)
+                p.lineTo(x1, y1 - h * 0.3f)
+            }
+            '*' -> {
+                p.moveTo(xm, y0 + h * 0.15f)
+                p.lineTo(xm, y1 - h * 0.15f)
+                p.moveTo(x0 + w * 0.1f, y0 + h * 0.28f)
+                p.lineTo(x1 - w * 0.1f, y1 - h * 0.28f)
+                p.moveTo(x1 - w * 0.1f, y0 + h * 0.28f)
+                p.lineTo(x0 + w * 0.1f, y1 - h * 0.28f)
+            }
+            '=' -> {
+                p.moveTo(x0, y0 + h * 0.36f)
+                p.lineTo(x1, y0 + h * 0.36f)
+                p.moveTo(x0, y1 - h * 0.32f)
+                p.lineTo(x1, y1 - h * 0.32f)
+            }
+            '_' -> {
+                p.moveTo(x0, y1)
+                p.lineTo(x1, y1)
+            }
+            '…' -> {
+                p.moveTo(x0 + w * 0.15f, y1 - h * 0.08f)
+                p.lineTo(x0 + w * 0.2f, y1)
+                p.moveTo(xm, y1 - h * 0.08f)
+                p.lineTo(xm, y1)
+                p.moveTo(x1 - w * 0.2f, y1 - h * 0.08f)
+                p.lineTo(x1 - w * 0.15f, y1)
             }
         }
     }

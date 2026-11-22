@@ -96,6 +96,9 @@ class GroupManager(
     private val _sharedTrack = MutableStateFlow<SharedGroupTrack?>(null)
     val sharedTrack: StateFlow<SharedGroupTrack?> = _sharedTrack.asStateFlow()
 
+    private val _sharedTrackBannerVisible = MutableStateFlow(false)
+    val sharedTrackBannerVisible: StateFlow<Boolean> = _sharedTrackBannerVisible.asStateFlow()
+
     private val _statusBanner = MutableStateFlow<String?>(null)
     val statusBanner: StateFlow<String?> = _statusBanner.asStateFlow()
 
@@ -225,6 +228,7 @@ class GroupManager(
         }
         _members.value = emptyList()
         _sharedTrack.value = null
+        _sharedTrackBannerVisible.value = false
         _myStatus.value = RiderStatus.RIDING
         _myStatusMessage.value = ""
         _activeRoomCode.value = roomCode
@@ -273,6 +277,7 @@ class GroupManager(
         _myStatus.value = RiderStatus.RIDING
         _myStatusMessage.value = ""
         _sharedTrack.value = null
+        _sharedTrackBannerVisible.value = false
         stateLock.withLock {
             memberMap.clear()
         }
@@ -306,18 +311,40 @@ class GroupManager(
         }
     }
 
-    fun shareRoute(route: GPXRoute): Boolean {
+    fun shareRoute(
+        route: GPXRoute,
+        isDestination: Boolean = false,
+        destinationCoord: GeoCoord? = null
+    ): Boolean {
         if (_activeRoomCode.value == null) return false
         val cfg = ensureMemberId(_config.value)
         val senderName = cfg.nickname.ifBlank { "Piloto" }
-        val wire = CompactGroupTrackCodec.encodeRoute(route, cfg.memberId, senderName) ?: return false
+        val wire = CompactGroupTrackCodec.encodeRoute(
+            route = route,
+            senderId = cfg.memberId,
+            senderName = senderName,
+            isDestination = isDestination,
+            destinationCoord = destinationCoord
+        ) ?: return false
+        stateLock.withLock {
+            lastHandledTrackId = wire.id
+        }
+        CompactGroupTrackCodec.toSharedGroupTrack(wire, isFromSelf = true)?.let { localShared ->
+            _sharedTrack.value = localShared
+            _sharedTrackBannerVisible.value = false
+        }
         if (cfg.enableOnlineSync) mqttTransport.publishSharedTrack(wire)
         if (cfg.enableOfflineLanSync) lanTransport.publishSharedTrack(wire)
         publishCurrentPosition(forceImmediate = true)
         return true
     }
 
+    fun dismissSharedTrackBanner() {
+        _sharedTrackBannerVisible.value = false
+    }
+
     fun dismissSharedTrack() {
+        _sharedTrackBannerVisible.value = false
         _sharedTrack.value = null
     }
 
@@ -433,8 +460,9 @@ class GroupManager(
             }
         }
         if (!isNew) return
-        val converted = CompactGroupTrackCodec.toSharedGroupTrack(wire) ?: return
+        val converted = CompactGroupTrackCodec.toSharedGroupTrack(wire, isFromSelf = false) ?: return
         _sharedTrack.value = converted
+        _sharedTrackBannerVisible.value = true
     }
 
     private fun buildLanGossipPeers(): List<WirePeerGossip> {

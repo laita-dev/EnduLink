@@ -3,6 +3,7 @@ package com.oscar.endulink.bike
 import androidx.compose.ui.graphics.ImageBitmap
 import com.oscar.endulink.group.GroupMember
 import com.oscar.endulink.platform.RiderTelemetry
+import com.oscar.endulink.platform.TftPhoneNotification
 import com.oscar.endulink.tiles.MapLayer
 import com.oscar.endulink.tiles.TileStore
 import com.oscar.endulink.trail.GPXRoute
@@ -117,7 +118,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         remainingMinutes: Int?,
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
-        groupActiveCount: Int
+        groupActiveCount: Int,
+        activeNotification: TftPhoneNotification?
     ): ByteArray? {
         return scene.renderRgba(
             width = width,
@@ -135,7 +137,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             remainingMinutes = remainingMinutes,
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
-            groupActiveCount = groupActiveCount
+            groupActiveCount = groupActiveCount,
+            activeNotification = activeNotification
         )
     }
 
@@ -155,7 +158,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         remainingMinutes: Int?,
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
-        groupActiveCount: Int
+        groupActiveCount: Int,
+        activeNotification: TftPhoneNotification?
     ): ImageBitmap? {
         return scene.renderPreview(
             width = width,
@@ -173,7 +177,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             remainingMinutes = remainingMinutes,
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
-            groupActiveCount = groupActiveCount
+            groupActiveCount = groupActiveCount,
+            activeNotification = activeNotification
         )
     }
 }

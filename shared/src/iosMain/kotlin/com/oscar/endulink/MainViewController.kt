@@ -1,6 +1,7 @@
 package com.oscar.endulink
 
 import androidx.compose.ui.window.ComposeUIViewController
+import com.oscar.endulink.platform.PhoneNotificationCenter
 import com.oscar.endulink.platform.showPlatformToast
 import com.oscar.endulink.ui.App
 import com.oscar.endulink.ui.EnduController
@@ -24,5 +25,13 @@ fun notifyExternalGpxError(message: String) {
 
 fun handleIncomingGroupLink(url: String) {
     EnduController.shared.handleIncomingGroupLink(url)
+}
+
+fun postIosIncomingNotification(appName: String, title: String, body: String) {
+    PhoneNotificationCenter.postNotification(
+        appName = appName,
+        title = title,
+        text = body
+    )
 }
 

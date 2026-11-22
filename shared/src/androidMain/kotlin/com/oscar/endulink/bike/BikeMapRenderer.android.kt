@@ -10,6 +10,9 @@ import com.oscar.endulink.group.TftEdgeIndicator
 import com.oscar.endulink.group.TftProjectedMember
 import com.oscar.endulink.platform.BatteryStatus
 import com.oscar.endulink.platform.RiderTelemetry
+import com.oscar.endulink.platform.TftNotificationCategory
+import com.oscar.endulink.platform.TftNotificationTextLayout
+import com.oscar.endulink.platform.TftPhoneNotification
 import com.oscar.endulink.platform.getPlatformBatteryStatus
 import com.oscar.endulink.tiles.MapLayer
 import com.oscar.endulink.tiles.TileCoord
@@ -254,6 +257,54 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         isAntiAlias = true
     }
+    private val notifBgPaint = Paint().apply {
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val notifStrokePaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.8f
+        isAntiAlias = true
+    }
+    private val notifAppPaint = Paint().apply {
+        textSize = 11f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        isAntiAlias = true
+    }
+    private val notifTimePaint = Paint().apply {
+        color = android.graphics.Color.rgb(165, 175, 188)
+        textSize = 10.5f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        isAntiAlias = true
+    }
+    private val notifTitlePaint = Paint().apply {
+        color = android.graphics.Color.WHITE
+        textSize = 14.5f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        isAntiAlias = true
+    }
+    private val notifBodyPaint = Paint().apply {
+        color = android.graphics.Color.rgb(224, 232, 240)
+        textSize = 12.5f
+        isAntiAlias = true
+    }
+    private val notifIconStrokePaint = Paint().apply {
+        color = android.graphics.Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        isAntiAlias = true
+    }
+    private val notifIconFillPaint = Paint().apply {
+        color = android.graphics.Color.WHITE
+        style = Paint.Style.FILL
+        isAntiAlias = true
+    }
+    private val notifIconPath = Path()
+    private val notifRect = RectF()
+    private val notifTrackRect = RectF()
+    private val notifProgressRect = RectF()
 
     private var lastBatteryCheckMs: Long = 0L
     private var cachedBatteryStatus: BatteryStatus = BatteryStatus()
@@ -284,7 +335,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         remainingMinutes: Int?,
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
-        groupActiveCount: Int
+        groupActiveCount: Int,
+        activeNotification: TftPhoneNotification?
     ): ByteArray? {
         val bmp = getOrCreateBitmap(width, height)
         val canvas = cachedCanvas ?: Canvas(bmp).also { cachedCanvas = it }
@@ -307,7 +359,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             remainingMinutes = remainingMinutes,
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
-            groupActiveCount = groupActiveCount
+            groupActiveCount = groupActiveCount,
+            activeNotification = activeNotification
         )
 
         bmp.copyPixelsToBuffer(ByteBuffer.wrap(buffer))
@@ -331,7 +384,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         remainingMinutes: Int?,
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
-        groupActiveCount: Int
+        groupActiveCount: Int,
+        activeNotification: TftPhoneNotification?
     ): ImageBitmap? {
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
@@ -352,7 +406,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             remainingMinutes = remainingMinutes,
             routeTypeLabel = routeTypeLabel,
             groupMembers = groupMembers,
-            groupActiveCount = groupActiveCount
+            groupActiveCount = groupActiveCount,
+            activeNotification = activeNotification
         )
         return bmp.asImageBitmap()
     }
@@ -374,7 +429,8 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         remainingMinutes: Int?,
         routeTypeLabel: String?,
         groupMembers: List<GroupMember>,
-        groupActiveCount: Int
+        groupActiveCount: Int,
+        activeNotification: TftPhoneNotification?
     ) {
         val w = width
         val h = height
@@ -779,11 +835,211 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             }
         }
 
+        // 9d. Notificación emergente del móvil (Heads-up banner temporal)
+        if (config.showPhoneNotificationsOnTft && activeNotification != null) {
+            drawPhoneNotificationBanner(
+                canvas = canvas,
+                vw = vw,
+                notif = activeNotification,
+                hasAlertBanner = (alertBanner != null)
+            )
+        }
+
         canvas.restore()
 
         // 10. BlackEdges (Márgenes negros de 4px arriba y abajo requeridos por el escalador Carbit EasyConn)
         canvas.drawRect(0f, 0f, w, 4f, blackEdgePaint)
         canvas.drawRect(0f, h - 4f, w, h, blackEdgePaint)
+    }
+
+    private fun drawPhoneNotificationBanner(
+        canvas: Canvas,
+        vw: Float,
+        notif: TftPhoneNotification,
+        hasAlertBanner: Boolean
+    ) {
+        val nowMs = System.currentTimeMillis()
+        if (!notif.isActive(nowMs)) return
+
+        val elapsed = notif.elapsedMs(nowMs)
+        val remaining = notif.remainingMs(nowMs)
+        val alphaFactor = when {
+            elapsed < 180L -> 0.72f + 0.28f * (elapsed / 180f).coerceIn(0f, 1f)
+            remaining < 220L -> (remaining / 220f).coerceIn(0f, 1f)
+            else -> 1f
+        }
+        val slideOffsetY = when {
+            elapsed < 180L -> -(1f - (elapsed / 180f).coerceIn(0f, 1f)) * 12f
+            remaining < 220L -> -(1f - (remaining / 220f).coerceIn(0f, 1f)) * 16f
+            else -> 0f
+        }
+
+        val left = 14f
+        val right = vw - 14f
+        if (right <= left + 120f) return
+
+        val top = (if (hasAlertBanner) 94f else 58f) + slideOffsetY
+        val textLeft = left + 54f
+        val textMaxW = (right - 14f - textLeft).coerceAtLeast(60f)
+
+        val appText = TftNotificationTextLayout.truncateToWidth(
+            text = notif.appName.uppercase(),
+            maxWidth = (textMaxW - 52f).coerceAtLeast(40f)
+        ) { notifAppPaint.measureText(it) }
+
+        val titleText = TftNotificationTextLayout.truncateToWidth(
+            text = notif.title,
+            maxWidth = textMaxW
+        ) { notifTitlePaint.measureText(it) }
+
+        val bodyLines = TftNotificationTextLayout.wrapLines(
+            text = notif.text,
+            maxWidth = textMaxW,
+            maxLines = 2
+        ) { notifBodyPaint.measureText(it) }
+
+        val cardH = when (bodyLines.size) {
+            0 -> 58f
+            1 -> 74f
+            else -> 92f
+        }
+        val bottom = top + cardH
+
+        val accentRgb = notif.accentArgb.toInt()
+        val accentR = (accentRgb ushr 16) and 0xFF
+        val accentG = (accentRgb ushr 8) and 0xFF
+        val accentB = accentRgb and 0xFF
+        val bgAlpha = (246f * alphaFactor).roundToInt().coerceIn(0, 255)
+        val fgAlpha = (255f * alphaFactor).roundToInt().coerceIn(0, 255)
+
+        notifRect.set(left, top, right, bottom)
+        notifBgPaint.color = android.graphics.Color.argb(bgAlpha, 18, 22, 30)
+        canvas.drawRoundRect(notifRect, 14f, 14f, notifBgPaint)
+
+        notifStrokePaint.color = android.graphics.Color.argb(fgAlpha, accentR, accentG, accentB)
+        canvas.drawRoundRect(notifRect, 14f, 14f, notifStrokePaint)
+
+        // Avatar circular izquierdo con icono vectorial por categoría
+        val cx = left + 29f
+        val cy = top + (cardH - 4f) * 0.5f
+        notifBgPaint.color = android.graphics.Color.argb(fgAlpha, accentR, accentG, accentB)
+        canvas.drawCircle(cx, cy, 16f, notifBgPaint)
+
+        drawCategoryIcon(canvas, notif.category, cx, cy, fgAlpha)
+
+        // Cabecera: Nombre de app + AHORA
+        notifAppPaint.color = android.graphics.Color.argb(fgAlpha, accentR, accentG, accentB)
+        canvas.drawText(appText, textLeft, top + 20f, notifAppPaint)
+
+        val nowLbl = "AHORA"
+        val nowW = notifTimePaint.measureText(nowLbl)
+        notifTimePaint.color = android.graphics.Color.argb((190f * alphaFactor).roundToInt().coerceIn(0, 255), 165, 175, 188)
+        canvas.drawText(nowLbl, right - 14f - nowW, top + 20f, notifTimePaint)
+
+        // Título / remitente
+        notifTitlePaint.color = android.graphics.Color.argb(fgAlpha, 255, 255, 255)
+        canvas.drawText(titleText, textLeft, top + 39f, notifTitlePaint)
+
+        // Cuerpo en 1 o 2 líneas
+        notifBodyPaint.color = android.graphics.Color.argb(fgAlpha, 224, 232, 240)
+        if (bodyLines.isNotEmpty()) {
+            canvas.drawText(bodyLines[0], textLeft, top + 57f, notifBodyPaint)
+        }
+        if (bodyLines.size >= 2) {
+            canvas.drawText(bodyLines[1], textLeft, top + 74f, notifBodyPaint)
+        }
+
+        // Barra inferior de progreso del tiempo restante
+        val trackLeft = left + 12f
+        val trackRight = right - 12f
+        val trackTop = bottom - 6f
+        val trackBottom = bottom - 3f
+        notifTrackRect.set(trackLeft, trackTop, trackRight, trackBottom)
+        notifBgPaint.color = android.graphics.Color.argb((45f * alphaFactor).roundToInt().coerceIn(0, 255), 255, 255, 255)
+        canvas.drawRoundRect(notifTrackRect, 1.5f, 1.5f, notifBgPaint)
+
+        val progress = notif.remainingProgress(nowMs)
+        val fillW = (trackRight - trackLeft) * progress
+        if (fillW > 2f) {
+            notifProgressRect.set(trackLeft, trackTop, trackLeft + fillW, trackBottom)
+            notifBgPaint.color = android.graphics.Color.argb(fgAlpha, accentR, accentG, accentB)
+            canvas.drawRoundRect(notifProgressRect, 1.5f, 1.5f, notifBgPaint)
+        }
+    }
+
+    private fun drawCategoryIcon(
+        canvas: Canvas,
+        category: TftNotificationCategory,
+        cx: Float,
+        cy: Float,
+        fgAlpha: Int
+    ) {
+        val whiteArgb = android.graphics.Color.argb(fgAlpha, 255, 255, 255)
+        notifIconStrokePaint.color = whiteArgb
+        notifIconFillPaint.color = whiteArgb
+        notifIconPath.reset()
+
+        when (category) {
+            TftNotificationCategory.MESSAGE -> {
+                notifIconPath.moveTo(cx - 7f, cy - 5.5f)
+                notifIconPath.lineTo(cx + 7f, cy - 5.5f)
+                notifIconPath.lineTo(cx + 7f, cy + 3.5f)
+                notifIconPath.lineTo(cx - 1.5f, cy + 3.5f)
+                notifIconPath.lineTo(cx - 5.5f, cy + 7f)
+                notifIconPath.lineTo(cx - 5f, cy + 3.5f)
+                notifIconPath.lineTo(cx - 7f, cy + 3.5f)
+                notifIconPath.close()
+                canvas.drawPath(notifIconPath, notifIconStrokePaint)
+            }
+            TftNotificationCategory.CALL -> {
+                notifIconPath.moveTo(cx - 5.5f, cy - 6.5f)
+                notifIconPath.lineTo(cx - 2f, cy - 6.5f)
+                notifIconPath.lineTo(cx - 1f, cy - 3f)
+                notifIconPath.lineTo(cx - 3f, cy - 1f)
+                notifIconPath.lineTo(cx + 1f, cy + 3f)
+                notifIconPath.lineTo(cx + 3f, cy + 1f)
+                notifIconPath.lineTo(cx + 6.5f, cy + 2f)
+                notifIconPath.lineTo(cx + 6.5f, cy + 5.5f)
+                notifIconPath.lineTo(cx + 3f, cy + 6.5f)
+                notifIconPath.lineTo(cx - 2.5f, cy + 3.5f)
+                notifIconPath.lineTo(cx - 6.5f, cy - 2.5f)
+                notifIconPath.close()
+                canvas.drawPath(notifIconPath, notifIconStrokePaint)
+            }
+            TftNotificationCategory.NAVIGATION -> {
+                notifIconPath.moveTo(cx, cy - 7.5f)
+                notifIconPath.lineTo(cx + 6.5f, cy + 6.5f)
+                notifIconPath.lineTo(cx, cy + 3f)
+                notifIconPath.lineTo(cx - 6.5f, cy + 6.5f)
+                notifIconPath.close()
+                canvas.drawPath(notifIconPath, notifIconFillPaint)
+            }
+            TftNotificationCategory.ALERT -> {
+                notifIconPath.moveTo(cx, cy - 7f)
+                notifIconPath.lineTo(cx + 7f, cy + 5.5f)
+                notifIconPath.lineTo(cx - 7f, cy + 5.5f)
+                notifIconPath.close()
+                canvas.drawPath(notifIconPath, notifIconStrokePaint)
+                notifIconPath.reset()
+                notifIconPath.moveTo(cx, cy - 2.5f)
+                notifIconPath.lineTo(cx, cy + 1.5f)
+                canvas.drawPath(notifIconPath, notifIconStrokePaint)
+                canvas.drawCircle(cx, cy + 3.7f, 1.1f, notifIconFillPaint)
+            }
+            TftNotificationCategory.APP -> {
+                notifIconPath.moveTo(cx - 5f, cy + 2.5f)
+                notifIconPath.lineTo(cx - 5f, cy - 2.5f)
+                notifIconPath.lineTo(cx - 2.5f, cy - 6f)
+                notifIconPath.lineTo(cx + 2.5f, cy - 6f)
+                notifIconPath.lineTo(cx + 5f, cy - 2.5f)
+                notifIconPath.lineTo(cx + 5f, cy + 2.5f)
+                notifIconPath.lineTo(cx + 7f, cy + 4f)
+                notifIconPath.lineTo(cx - 7f, cy + 4f)
+                notifIconPath.close()
+                canvas.drawPath(notifIconPath, notifIconStrokePaint)
+                canvas.drawCircle(cx, cy + 6.2f, 1.3f, notifIconFillPaint)
+            }
+        }
     }
 
     private fun drawGroupMemberPin(

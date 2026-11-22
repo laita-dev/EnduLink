@@ -33,6 +33,7 @@ data class TftEdgeIndicator(
 data class TftGroupAlertBanner(
     val member: GroupMember,
     val text: String,
+    val subtext: String = "",
     val status: RiderStatus
 )
 
@@ -65,22 +66,42 @@ object GroupTftLayout {
     }
 
     fun formatShortName(name: String): String {
+        val clean = normalizeTftAscii(name, maxLen = 8)
+        return clean.ifBlank { "COMP" }
+    }
+
+    fun formatBannerMessage(message: String): String {
+        return normalizeTftAscii(message, maxLen = 60)
+    }
+
+    private fun normalizeTftAscii(raw: String, maxLen: Int): String {
         val clean = buildString {
-            for (ch in name.trim().uppercase()) {
+            var lastWasSpace = false
+            for (ch in raw.trim().uppercase()) {
                 val mapped = when (ch) {
-                    'Á', 'À', 'Ä' -> 'A'
-                    'É', 'È', 'Ë' -> 'E'
-                    'Í', 'Ì', 'Ï' -> 'I'
-                    'Ó', 'Ò', 'Ö' -> 'O'
-                    'Ú', 'Ù', 'Ü' -> 'U'
+                    'Á', 'À', 'Ä', 'Â' -> 'A'
+                    'É', 'È', 'Ë', 'Ê' -> 'E'
+                    'Í', 'Ì', 'Ï', 'Î' -> 'I'
+                    'Ó', 'Ò', 'Ö', 'Ô' -> 'O'
+                    'Ú', 'Ù', 'Ü', 'Û' -> 'U'
                     'Ñ' -> 'N'
+                    'Ç' -> 'C'
+                    '\n', '\r', '\t' -> ' '
                     else -> ch
                 }
-                append(mapped)
-                if (length >= 8) break
+                if (mapped == ' ') {
+                    if (!lastWasSpace && isNotEmpty()) {
+                        append(' ')
+                        lastWasSpace = true
+                    }
+                } else {
+                    append(mapped)
+                    lastWasSpace = false
+                }
+                if (length >= maxLen) break
             }
         }
-        return clean.ifBlank { "COMP" }
+        return clean.trim()
     }
 
     fun compute(
@@ -214,6 +235,7 @@ object GroupTftLayout {
             TftGroupAlertBanner(
                 member = it.member,
                 text = "$tag: $who - $dist",
+                subtext = formatBannerMessage(it.member.statusMessage),
                 status = it.member.status
             )
         }

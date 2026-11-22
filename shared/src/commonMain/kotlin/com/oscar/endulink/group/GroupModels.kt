@@ -129,7 +129,11 @@ data class SharedGroupTrack(
     val sentAtEpochMs: Long,
     val distanceKm: Double,
     val pointCount: Int,
-    val gpxXml: String
+    val gpxXml: String,
+    val isDestination: Boolean = false,
+    val destinationLat: Double? = null,
+    val destinationLon: Double? = null,
+    val isFromSelf: Boolean = false
 )
 
 @Serializable
@@ -150,6 +154,9 @@ data class GroupConfig(
 object GroupInvite {
     private const val ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     const val SCHEME_PREFIX = "endulink://group/"
+    const val WEB_INVITE_HOST = "laita-dev.github.io"
+    const val WEB_INVITE_PATH = "/EnduLink/group"
+    const val WEB_INVITE_PREFIX = "https://laita-dev.github.io/EnduLink/group/?c="
 
     fun generateRoomCode(length: Int = 6): String {
         val len = length.coerceIn(4, 12)
@@ -174,29 +181,46 @@ object GroupInvite {
         return "$SCHEME_PREFIX$clean"
     }
 
+    fun buildWebInviteUrl(code: String): String {
+        val clean = normalizeRawToken(code)
+        return "$WEB_INVITE_PREFIX$clean"
+    }
+
     fun buildShareMessage(code: String, inviterName: String): String {
         val formatted = formatForDisplay(code)
-        val uri = buildInviteUri(code)
+        val webUrl = buildWebInviteUrl(code)
         val who = inviterName.trim().ifBlank { "Un compañero" }
-        return "$who te invita a su grupo de ruta en EnduLink.\nCódigo: $formatted\nEnlace directo: $uri"
+        return "$who te invita a su grupo de ruta en EnduLink.\nCódigo: $formatted\nÚnete pulsando aquí: $webUrl"
     }
 
     fun parseRoomCode(raw: String): String? {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return null
 
-        val extracted = if (trimmed.contains("://")) {
-            val lower = trimmed.lowercase()
-            if (!lower.startsWith(SCHEME_PREFIX)) {
-                return null
+        // Si el usuario pegó el mensaje completo de WhatsApp, extraer primero la URL de invitación
+        val embeddedHttps = extractEmbeddedUrl(trimmed, "https://$WEB_INVITE_HOST$WEB_INVITE_PATH")
+            ?: extractEmbeddedUrl(trimmed, "http://$WEB_INVITE_HOST$WEB_INVITE_PATH")
+            ?: extractEmbeddedUrl(trimmed, SCHEME_PREFIX)
+        val candidate = embeddedHttps ?: trimmed
+
+        val extracted = if (candidate.contains("://")) {
+            val lower = candidate.lowercase()
+            when {
+                lower.startsWith(SCHEME_PREFIX) -> {
+                    candidate.substring(SCHEME_PREFIX.length)
+                        .substringBefore('?')
+                        .substringBefore('#')
+                        .trim('/')
+                }
+                lower.startsWith("https://$WEB_INVITE_HOST$WEB_INVITE_PATH".lowercase()) ||
+                    lower.startsWith("http://$WEB_INVITE_HOST$WEB_INVITE_PATH".lowercase()) -> {
+                    extractCodeFromWebUrl(candidate) ?: return null
+                }
+                else -> return null
             }
-            trimmed.substring(SCHEME_PREFIX.length)
-                .substringBefore('?')
-                .substringBefore('#')
-                .trim('/')
         } else {
-            if (trimmed.contains(':')) return null
-            trimmed
+            if (candidate.contains(':')) return null
+            candidate
         }
 
         val clean = normalizeRawToken(extracted)
@@ -213,7 +237,10 @@ object GroupInvite {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return null
         val lower = trimmed.lowercase()
-        if (lower.startsWith(SCHEME_PREFIX)) {
+        if (lower.startsWith(SCHEME_PREFIX) ||
+            lower.startsWith("https://$WEB_INVITE_HOST$WEB_INVITE_PATH".lowercase()) ||
+            lower.startsWith("http://$WEB_INVITE_HOST$WEB_INVITE_PATH".lowercase())
+        ) {
             return parseRoomCode(trimmed)
         }
         if (lower.startsWith("http://") ||
@@ -225,6 +252,32 @@ object GroupInvite {
         }
         val clean = normalizeRawToken(trimmed)
         return if (clean.length == 6 && clean.all { it in 'A'..'Z' || it in '0'..'9' }) clean else null
+    }
+
+    private fun extractEmbeddedUrl(text: String, prefix: String): String? {
+        val idx = text.indexOf(prefix, ignoreCase = true)
+        if (idx < 0) return null
+        val tail = text.substring(idx)
+        return tail.split(' ', '\n', '\r', '\t').firstOrNull()?.trim()
+    }
+
+    private fun extractCodeFromWebUrl(url: String): String? {
+        val query = url.substringAfter('?', "").substringBefore('#')
+        if (query.isNotEmpty()) {
+            for (part in query.split('&')) {
+                val key = part.substringBefore('=').lowercase()
+                if (key == "c" || key == "code") {
+                    val value = part.substringAfter('=', "")
+                    if (value.isNotBlank()) return value
+                }
+            }
+        }
+        val hash = url.substringAfter('#', "")
+        if (hash.isNotBlank()) return hash.trim('/')
+        val pathTail = url.substringBefore('?').substringBefore('#')
+            .substringAfter(WEB_INVITE_PATH, "")
+            .trim('/')
+        return pathTail.takeIf { it.isNotBlank() }
     }
 
     private fun normalizeRawToken(token: String): String {
@@ -295,7 +348,10 @@ internal data class WireSharedTrackPayload(
     val latE5: List<Int>,
     val lonE5: List<Int>,
     val eleM: List<Int> = emptyList(),
-    val wpts: List<WireSharedWaypoint> = emptyList()
+    val wpts: List<WireSharedWaypoint> = emptyList(),
+    val kind: String = "gpx",
+    val dLa: Double? = null,
+    val dLo: Double? = null
 )
 
 internal object CompactGroupTrackCodec {
@@ -305,7 +361,9 @@ internal object CompactGroupTrackCodec {
         route: GPXRoute,
         senderId: String,
         senderName: String,
-        sentAtEpochMs: Long = Clock.System.now().toEpochMilliseconds()
+        sentAtEpochMs: Long = Clock.System.now().toEpochMilliseconds(),
+        isDestination: Boolean = false,
+        destinationCoord: GeoCoord? = null
     ): WireSharedTrackPayload? {
         val rawPoints = route.points
         if (rawPoints.size < 2) return null
@@ -368,6 +426,11 @@ internal object CompactGroupTrackCodec {
         }
 
         val trackId = "${sentAtEpochMs}_${abs(route.name.hashCode())}"
+        val resolvedDest = if (isDestination) {
+            destinationCoord ?: rawPoints.lastOrNull()?.coordinate
+        } else {
+            null
+        }
         return WireSharedTrackPayload(
             id = trackId,
             n = route.name.take(80),
@@ -378,11 +441,14 @@ internal object CompactGroupTrackCodec {
             latE5 = latDeltas,
             lonE5 = lonDeltas,
             eleM = eleDeltas ?: emptyList(),
-            wpts = wpts
+            wpts = wpts,
+            kind = if (isDestination) "dest" else "gpx",
+            dLa = resolvedDest?.latitude,
+            dLo = resolvedDest?.longitude
         )
     }
 
-    fun toSharedGroupTrack(payload: WireSharedTrackPayload): SharedGroupTrack? {
+    fun toSharedGroupTrack(payload: WireSharedTrackPayload, isFromSelf: Boolean = false): SharedGroupTrack? {
         val count = minOf(payload.latE5.size, payload.lonE5.size)
         if (count < 2) return null
 
@@ -438,6 +504,7 @@ internal object CompactGroupTrackCodec {
             notes = "Compartido en grupo por ${payload.sn}"
         )
 
+        val isDest = payload.kind.equals("dest", ignoreCase = true)
         return SharedGroupTrack(
             id = payload.id,
             name = route.name,
@@ -446,7 +513,11 @@ internal object CompactGroupTrackCodec {
             sentAtEpochMs = payload.ts,
             distanceKm = stats.first,
             pointCount = points.size,
-            gpxXml = route.toGPXXml()
+            gpxXml = route.toGPXXml(),
+            isDestination = isDest,
+            destinationLat = payload.dLa ?: if (isDest) points.lastOrNull()?.latitude else null,
+            destinationLon = payload.dLo ?: if (isDest) points.lastOrNull()?.longitude else null,
+            isFromSelf = isFromSelf
         )
     }
 }

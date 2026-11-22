@@ -28,10 +28,18 @@ class GroupLogicTest {
 
         assertEquals("K7M9P2", GroupInvite.parseRoomCode("k7m-9p2"))
         assertEquals("K7M9P2", GroupInvite.parseRoomCode("endulink://group/K7M-9P2?ref=wa"))
+        assertEquals("6KV7H6", GroupInvite.parseRoomCode("https://laita-dev.github.io/EnduLink/group/?c=6KV7H6"))
+        assertEquals(
+            "6KV7H6",
+            GroupInvite.parseRoomCode(
+                "Nestor te invita a su grupo de ruta en EnduLink.\nCódigo: 6KV-7H6\nÚnete pulsando aquí: https://laita-dev.github.io/EnduLink/group/?c=6KV7H6"
+            )
+        )
         assertNull(GroupInvite.parseRoomCode("http://www.carbit.com.cn/down6/index.html?name=HJ-123"))
         assertNull(GroupInvite.parseQrInvite("HJ-064441"))
         assertNull(GroupInvite.parseQrInvite("WIFI:T:WPA;S:DIRECT-HJ-123;P:12345678;;"))
         assertEquals("K7M9P2", GroupInvite.parseQrInvite("endulink://group/K7M9P2"))
+        assertEquals("6KV7H6", GroupInvite.parseQrInvite("https://laita-dev.github.io/EnduLink/group/?c=6KV7H6"))
     }
 
     @Test
@@ -67,6 +75,21 @@ class GroupLogicTest {
         assertEquals("Sierra Norte", decoded.name)
         assertEquals(3000, decoded.pointCount)
         assertTrue(decoded.distanceKm > 50.0)
+
+        val wireDest = CompactGroupTrackCodec.encodeRoute(
+            route = route,
+            senderId = "m_1",
+            senderName = "Carlos",
+            sentAtEpochMs = 2001L,
+            isDestination = true,
+            destinationCoord = GeoCoord(38.9201, -0.4215)
+        )
+        assertNotNull(wireDest)
+        val decodedDest = CompactGroupTrackCodec.toSharedGroupTrack(wireDest)
+        assertNotNull(decodedDest)
+        assertTrue(decodedDest.isDestination)
+        assertEquals(38.9201, decodedDest.destinationLat)
+        assertEquals(-0.4215, decodedDest.destinationLon)
 
         val reparsed = GPXParser.parse(decoded.gpxXml, fallbackName = "test.gpx")
         assertEquals(3000, reparsed.points.size)
@@ -116,6 +139,7 @@ class GroupLogicTest {
             latitude = 40.4800,
             longitude = -3.6500,
             status = RiderStatus.SOS,
+            statusMessage = "Pinchazo en la bajada del río",
             receivedAtEpochMs = 100_000L
         )
 
@@ -141,6 +165,7 @@ class GroupLogicTest {
         assertTrue(plan.edgeIndicators[0].edgeY in 100f..720f)
         assertNotNull(plan.alertBanner)
         assertTrue(plan.alertBanner!!.text.startsWith("SOS: CARLOS"))
+        assertEquals("PINCHAZO EN LA BAJADA DEL RIO", plan.alertBanner!!.subtext)
     }
 
     @Test

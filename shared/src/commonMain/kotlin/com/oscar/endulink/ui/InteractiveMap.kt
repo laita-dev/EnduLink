@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.oscar.endulink.group.GroupMember
+import com.oscar.endulink.group.GroupTftLayout
 import com.oscar.endulink.group.RiderStatus
 import com.oscar.endulink.platform.RiderTelemetry
 import com.oscar.endulink.tiles.*
@@ -80,6 +81,7 @@ fun InteractiveMap(
     val labelLayoutCache = remember { HashMap<String, TextLayoutResult>() }
     val routeDrawPath = remember { Path() }
     val chevronDrawPath = remember { Path() }
+    val edgeHitTargets = remember { mutableListOf<MobileGroupEdgeHitTarget>() }
     val currentOnSelectWaypoint by rememberUpdatedState(onSelectWaypoint)
     val currentOnSelectRoute by rememberUpdatedState(onSelectRoute)
     val currentOnSelectGroupMember by rememberUpdatedState(onSelectGroupMember)
@@ -127,8 +129,15 @@ fun InteractiveMap(
                         val pinOffsetPx = 14.dp.toPx().toDouble()
                         val hitRadiusPx = 28.dp.toPx().toDouble()
 
-                        // Comprobar si se ha pulsado sobre algún compañero del grupo
-                        val tappedMember = controller.groupMembers.value.lastOrNull { member ->
+                        // Comprobar si se ha pulsado sobre un indicador de borde (compañero fuera de pantalla)
+                        val edgePadPx = 8.dp.toPx()
+                        val tappedEdgeMember = edgeHitTargets.lastOrNull { hit ->
+                            tapOffset.x in (hit.left - edgePadPx)..(hit.right + edgePadPx) &&
+                                tapOffset.y in (hit.top - edgePadPx)..(hit.bottom + edgePadPx)
+                        }?.member
+
+                        // Comprobar si se ha pulsado sobre algún compañero del grupo visible en mapa
+                        val tappedMember = tappedEdgeMember ?: controller.groupMembers.value.lastOrNull { member ->
                             val (ptFracX, ptFracY) = TileMath.latLonToFractionalTile(member.latitude, member.longitude, zInt)
                             val unrotX = (ptFracX - centerFracX) * tileSizePx
                             val unrotY = (ptFracY - centerFracY) * tileSizePx
@@ -541,6 +550,24 @@ fun InteractiveMap(
                 val riderPos = geoToScreen(riderCoord)
                 drawRiderMarker(riderPos, rider)
             }
+        }
+
+        // 15b. Radar de borde en el mapa del móvil para compañeros fuera de pantalla
+        edgeHitTargets.clear()
+        if (groupMembers.isNotEmpty() && !isPickingOnMap) {
+            drawMobileGroupEdgeIndicators(
+                groupMembers = groupMembers,
+                referenceCoord = rider.coordinate ?: center,
+                centerFracX = centerFracX,
+                centerFracY = centerFracY,
+                zInt = zInt,
+                tileSizePx = tileSizePx,
+                heading = heading,
+                screenCenter = screenCenter,
+                textMeasurer = textMeasurer,
+                labelLayoutCache = labelLayoutCache,
+                hitTargetsOut = edgeHitTargets
+            )
         }
 
         // 16. Si estamos en modo selección en el mapa, pintar la mira fija en el centro de pantalla
@@ -969,6 +996,241 @@ private fun DrawScope.drawGroupMemberMarker(
         drawText(
             textLayoutResult = textLayout,
             topLeft = Offset(badgeLeft + padH, badgeTop + padV)
+        )
+    }
+}
+
+private data class MobileGroupEdgeHitTarget(
+    val member: GroupMember,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float
+)
+
+private data class MobileEdgeCandidate(
+    val member: GroupMember,
+    val edgeX: Float,
+    val edgeY: Float,
+    val angleRad: Float,
+    val distanceMeters: Double,
+    val isStale: Boolean
+)
+
+private fun DrawScope.drawMobileGroupEdgeIndicators(
+    groupMembers: List<GroupMember>,
+    referenceCoord: GeoCoord,
+    centerFracX: Double,
+    centerFracY: Double,
+    zInt: Int,
+    tileSizePx: Float,
+    heading: Double,
+    screenCenter: Offset,
+    textMeasurer: TextMeasurer,
+    labelLayoutCache: HashMap<String, TextLayoutResult>,
+    hitTargetsOut: MutableList<MobileGroupEdgeHitTarget>
+) {
+    val w = size.width
+    val h = size.height
+    if (w <= 0f || h <= 0f) return
+
+    val rad = -heading * PI / 180.0
+    val cosR = cos(rad)
+    val sinR = sin(rad)
+    val nowMs = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+
+    val visiblePadX = 16.dp.toPx()
+    val visibleTop = 62.dp.toPx()
+    val visibleBottom = h - 78.dp.toPx()
+
+    // Márgenes seguros para no tapar buscador/alertas arriba, barra inferior ni botones flotantes a la derecha
+    val safeLeft = 18.dp.toPx()
+    val safeRight = (w - 58.dp.toPx()).coerceAtLeast(safeLeft + 40f)
+    val safeTop = 108.dp.toPx()
+    val safeBottom = (h - 90.dp.toPx()).coerceAtLeast(safeTop + 40f)
+
+    val offScreen = ArrayList<MobileEdgeCandidate>()
+    for (member in groupMembers) {
+        val (ptFracX, ptFracY) = TileMath.latLonToFractionalTile(member.latitude, member.longitude, zInt)
+        val unrotX = (ptFracX - centerFracX) * tileSizePx
+        val unrotY = (ptFracY - centerFracY) * tileSizePx
+        val sx = screenCenter.x + (unrotX * cosR - unrotY * sinR).toFloat()
+        val sy = screenCenter.y + (unrotX * sinR + unrotY * cosR).toFloat()
+
+        val onScreen = sx in visiblePadX..(w - visiblePadX) && sy in visibleTop..visibleBottom
+        if (onScreen) continue
+
+        val dx = sx - screenCenter.x
+        val dy = sy - screenCenter.y
+        var tMin = Float.MAX_VALUE
+        if (dx > 1e-3f) {
+            val t = (safeRight - screenCenter.x) / dx
+            if (t > 0f && t < tMin) tMin = t
+        } else if (dx < -1e-3f) {
+            val t = (safeLeft - screenCenter.x) / dx
+            if (t > 0f && t < tMin) tMin = t
+        }
+        if (dy > 1e-3f) {
+            val t = (safeBottom - screenCenter.y) / dy
+            if (t > 0f && t < tMin) tMin = t
+        } else if (dy < -1e-3f) {
+            val t = (safeTop - screenCenter.y) / dy
+            if (t > 0f && t < tMin) tMin = t
+        }
+        if (tMin == Float.MAX_VALUE) tMin = 1f
+
+        val ex = (screenCenter.x + dx * tMin).coerceIn(safeLeft, safeRight)
+        val ey = (screenCenter.y + dy * tMin).coerceIn(safeTop, safeBottom)
+        offScreen.add(
+            MobileEdgeCandidate(
+                member = member,
+                edgeX = ex,
+                edgeY = ey,
+                angleRad = atan2(dy, dx),
+                distanceMeters = referenceCoord.distanceTo(member.coordinate),
+                isStale = member.isStale(nowMs)
+            )
+        )
+    }
+
+    if (offScreen.isEmpty()) return
+
+    // Priorizar alertas y compañeros más cercanos (máximo 8 indicadores)
+    val sorted = offScreen
+        .sortedWith(
+            compareByDescending<MobileEdgeCandidate> { it.member.status.alertPriority }
+                .thenBy { it.distanceMeters }
+        )
+        .take(8)
+        .toMutableList()
+
+    // Separar verticalmente indicadores muy próximos en el mismo borde
+    val minGapY = 30.dp.toPx()
+    val minGapX = 76.dp.toPx()
+    for (i in sorted.indices) {
+        for (j in 0 until i) {
+            val a = sorted[j]
+            val b = sorted[i]
+            if (abs(a.edgeX - b.edgeX) < minGapX && abs(a.edgeY - b.edgeY) < minGapY) {
+                val shiftedY = if (b.edgeY + minGapY <= safeBottom) {
+                    b.edgeY + minGapY
+                } else {
+                    (b.edgeY - minGapY).coerceAtLeast(safeTop)
+                }
+                sorted[i] = b.copy(edgeY = shiftedY)
+            }
+        }
+    }
+
+    val arrowTipDist = 11.dp.toPx()
+    val arrowBaseDist = 3.dp.toPx()
+    val arrowHalfW = 6.dp.toPx()
+    val padH = 7.dp.toPx()
+    val padV = 4.dp.toPx()
+    val dotR = 3.5.dp.toPx()
+    val dotGap = 5.dp.toPx()
+    val cornerR = 7.dp.toPx()
+    val badgeGap = 8.dp.toPx()
+    val arrowPath = Path()
+
+    for (ind in sorted) {
+        val m = ind.member
+        val baseColor = when (m.status) {
+            RiderStatus.SOS -> EnduPalette.Danger
+            RiderStatus.MECHANICAL -> EnduPalette.Accent
+            RiderStatus.STOPPED_WAIT -> EnduPalette.Warning
+            else -> Color(m.color.argb)
+        }
+        val accentColor = if (ind.isStale && !m.status.isAlert) baseColor.copy(alpha = 0.65f) else baseColor
+        val bgColor = when (m.status) {
+            RiderStatus.SOS -> Color(0xFF451218)
+            RiderStatus.MECHANICAL -> Color(0xFF3E220D)
+            RiderStatus.STOPPED_WAIT -> Color(0xFF3A2D0B)
+            else -> Color(0xFF0E141D)
+        }
+
+        val distStr = GroupTftLayout.formatCompactDistance(ind.distanceMeters)
+        val label = if (m.status.isAlert) {
+            "${m.status.tftTag} ${m.name.take(8)} · $distStr"
+        } else {
+            "${m.name.take(9)} · $distStr"
+        }
+
+        val textLayout = labelLayoutCache[label] ?: textMeasurer.measure(
+            text = label,
+            style = WaypointLabelTextStyle
+        ).also {
+            if (labelLayoutCache.size > 128) labelLayoutCache.clear()
+            labelLayoutCache[label] = it
+        }
+
+        // 1. Flecha direccional apuntando hacia la ubicación real del compañero
+        val cosA = cos(ind.angleRad)
+        val sinA = sin(ind.angleRad)
+        val tipX = ind.edgeX + cosA * arrowTipDist
+        val tipY = ind.edgeY + sinA * arrowTipDist
+        val baseX = ind.edgeX - cosA * arrowBaseDist
+        val baseY = ind.edgeY - sinA * arrowBaseDist
+        val leftX = baseX - sinA * arrowHalfW
+        val leftY = baseY + cosA * arrowHalfW
+        val rightX = baseX + sinA * arrowHalfW
+        val rightY = baseY - cosA * arrowHalfW
+
+        arrowPath.reset()
+        arrowPath.moveTo(tipX, tipY)
+        arrowPath.lineTo(leftX, leftY)
+        arrowPath.lineTo(rightX, rightY)
+        arrowPath.close()
+
+        drawPath(path = arrowPath, color = Color.Black, style = Stroke(width = 3.dp.toPx()))
+        drawPath(path = arrowPath, color = accentColor)
+
+        // 2. Pastilla opaca desplazada hacia el interior del mapa respecto a la flecha
+        val badgeW = padH + dotR * 2f + dotGap + textLayout.size.width + padH
+        val badgeH = textLayout.size.height + padV * 2f
+
+        val rawCenterX = ind.edgeX - cosA * (badgeW * 0.5f + badgeGap)
+        val rawCenterY = ind.edgeY - sinA * (badgeH * 0.5f + badgeGap)
+
+        val minLeft = 8.dp.toPx()
+        val maxLeft = (safeRight - badgeW).coerceAtLeast(minLeft)
+        val minTop = safeTop - 10.dp.toPx()
+        val maxTop = (safeBottom - badgeH + 10.dp.toPx()).coerceAtLeast(minTop)
+
+        val badgeLeft = (rawCenterX - badgeW * 0.5f).coerceIn(minLeft, maxLeft)
+        val badgeTop = (rawCenterY - badgeH * 0.5f).coerceIn(minTop, maxTop)
+
+        drawRoundRect(
+            color = bgColor,
+            topLeft = Offset(badgeLeft, badgeTop),
+            size = Size(badgeW, badgeH),
+            cornerRadius = CornerRadius(cornerR, cornerR)
+        )
+        drawRoundRect(
+            color = accentColor,
+            topLeft = Offset(badgeLeft, badgeTop),
+            size = Size(badgeW, badgeH),
+            cornerRadius = CornerRadius(cornerR, cornerR),
+            style = Stroke(width = 1.5.dp.toPx())
+        )
+        drawCircle(
+            color = accentColor,
+            radius = dotR,
+            center = Offset(badgeLeft + padH + dotR, badgeTop + badgeH * 0.5f)
+        )
+        drawText(
+            textLayoutResult = textLayout,
+            topLeft = Offset(badgeLeft + padH + dotR * 2f + dotGap, badgeTop + padV)
+        )
+
+        hitTargetsOut.add(
+            MobileGroupEdgeHitTarget(
+                member = m,
+                left = minOf(badgeLeft, tipX - arrowHalfW),
+                top = minOf(badgeTop, tipY - arrowHalfW),
+                right = maxOf(badgeLeft + badgeW, tipX + arrowHalfW),
+                bottom = maxOf(badgeTop + badgeH, tipY + arrowHalfW)
+            )
         )
     }
 }

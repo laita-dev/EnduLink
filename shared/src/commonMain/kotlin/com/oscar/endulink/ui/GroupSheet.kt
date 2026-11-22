@@ -666,7 +666,7 @@ fun GroupSheet(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                text = "TRACK GPX DEL GRUPO",
+                                text = "TRACK / DIRECCIÓN DEL GRUPO",
                                 color = EnduPalette.TextMuted,
                                 fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold
@@ -684,7 +684,7 @@ fun GroupSheet(
                                         .clickable { onShareActiveRoute() }
                                 ) {
                                     Text(
-                                        text = "Enviar track «$activeShareableRouteName» al grupo",
+                                        text = "Reenviar «$activeShareableRouteName» al grupo",
                                         color = EnduPalette.Accent,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
@@ -695,13 +695,20 @@ fun GroupSheet(
                                 }
                             } else {
                                 Text(
-                                    text = "Selecciona o calcula una ruta para enviarla a todos en 1 toque.",
+                                    text = "Al poner una ruta GPX o una dirección se compartirá automáticamente aquí para el grupo.",
                                     color = EnduPalette.TextMuted,
                                     fontSize = 11.sp
                                 )
                             }
 
                             if (sharedTrack != null) {
+                                val kindLabel = if (sharedTrack.isDestination) "Dirección" else "Track GPX"
+                                val originLabel = if (sharedTrack.isFromSelf) {
+                                    "Enviado por ti · $kindLabel"
+                                } else {
+                                    "De ${sharedTrack.senderName} · $kindLabel"
+                                }
+                                val btnLabel = if (sharedTrack.isDestination) "Ir ahí" else "Cargar"
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -713,13 +720,17 @@ fun GroupSheet(
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "Recibido de ${sharedTrack.senderName}",
+                                            text = originLabel,
                                             color = EnduPalette.AccentBlue,
                                             fontSize = 10.5.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                         Text(
-                                            text = "${sharedTrack.name} · ${(sharedTrack.distanceKm * 10.0).roundToInt() / 10.0} km",
+                                            text = if (sharedTrack.isDestination) {
+                                                sharedTrack.name
+                                            } else {
+                                                "${sharedTrack.name} · ${(sharedTrack.distanceKm * 10.0).roundToInt() / 10.0} km"
+                                            },
                                             color = EnduPalette.TextPrimary,
                                             fontSize = 12.5.sp,
                                             fontWeight = FontWeight.Bold,
@@ -727,18 +738,20 @@ fun GroupSheet(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     }
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(7.dp))
-                                            .background(EnduPalette.AccentBlue)
-                                            .clickable {
-                                                onImportSharedTrack()
-                                                onClose()
-                                            }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                                    ) {
-                                        Text("Cargar", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    if (!sharedTrack.isFromSelf) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(7.dp))
+                                                .background(EnduPalette.AccentBlue)
+                                                .clickable {
+                                                    onImportSharedTrack()
+                                                    onClose()
+                                                }
+                                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(btnLabel, color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(

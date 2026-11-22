@@ -9,6 +9,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.datetime.Clock
 import kotlin.math.roundToInt
 
@@ -171,10 +172,13 @@ class EnduController {
     val groupMyStatusMessage: StateFlow<String> = groupManager.myStatusMessage
     val groupConfig: StateFlow<GroupConfig> = groupManager.config
     val groupSharedTrack: StateFlow<SharedGroupTrack?> = groupManager.sharedTrack
+    val groupSharedTrackBannerVisible: StateFlow<Boolean> = groupManager.sharedTrackBannerVisible
     private val _pendingGroupJoinCode = MutableStateFlow<String?>(null)
     val pendingGroupJoinCode: StateFlow<String?> = _pendingGroupJoinCode.asStateFlow()
     private var lastGroupBattSampleMs: Long = 0L
     private var cachedGroupBattPct: Int = -1
+    private var lastNotifiedSharedTrackId: String? = null
+    private val lastNotifiedMemberAlerts = mutableMapOf<String, Pair<RiderStatus, String>>()
 
     // Descargas Offline
     private val _offlineProgress = MutableStateFlow(OfflineDownloadProgress())
@@ -225,6 +229,7 @@ class EnduController {
         val savedSettings = SettingsStore.loadSettings()
         _selectedLayer.value = MapLayer.fromRaw(savedSettings.selectedLayerRaw)
         _bikeMapConfig.value = savedSettings.bikeMapConfig
+        syncNotificationCenterConfig(savedSettings.bikeMapConfig)
         _bikeQr.value = savedSettings.bikeQr
         _allowLocalLanTesting.value = true
         _quickMarkers.value = WaypointStore.loadWaypoints()
@@ -342,6 +347,93 @@ class EnduController {
                     } else {
                         _trackProgress.value = null
                     }
+                }
+            }
+        }
+
+        // Refresco reactivo de notificaciones del móvil para vista previa y expiración automática
+        scope.launch {
+            PhoneNotificationCenter.activeNotification.collectLatest { notif ->
+                if (notif != null) {
+                    if (_isBikeSheetOpen.value) {
+                        refreshStaticPreview()
+                    }
+                    while (isActive) {
+                        val current = PhoneNotificationCenter.getActiveNotification()
+                        if (current == null) {
+                            if (_isBikeSheetOpen.value) refreshStaticPreview()
+                            break
+                        }
+                        delay(250L)
+                        if (_isBikeSheetOpen.value) {
+                            refreshStaticPreview()
+                        }
+                    }
+                } else if (_isBikeSheetOpen.value) {
+                    refreshStaticPreview()
+                }
+            }
+        }
+
+        // Reenviar avisos críticos del grupo y tracks recibidos al banner temporal del TFT
+        scope.launch {
+            groupManager.sharedTrack.collect { track ->
+                if (track != null && !track.isFromSelf && track.id != lastNotifiedSharedTrackId) {
+                    lastNotifiedSharedTrackId = track.id
+                    PhoneNotificationCenter.postNotification(
+                        appName = "Grupo EnduLink",
+                        title = if (track.isDestination) {
+                            "${track.senderName} puso un destino"
+                        } else {
+                            "${track.senderName} compartió un track"
+                        },
+                        text = "${track.name} (${(track.distanceKm * 10.0).roundToInt() / 10.0} km)",
+                        category = TftNotificationCategory.NAVIGATION,
+                        key = "grp_track_${track.id}"
+                    )
+                }
+            }
+        }
+
+        scope.launch {
+            groupManager.members.collect { membersList ->
+                val activeIds = HashSet<String>(membersList.size)
+                for (member in membersList) {
+                    activeIds.add(member.id)
+                    val prev = lastNotifiedMemberAlerts[member.id]
+                    if (member.status.isAlert) {
+                        val curPair = member.status to member.statusMessage
+                        if (prev != curPair) {
+                            lastNotifiedMemberAlerts[member.id] = curPair
+                            val category = when (member.status) {
+                                RiderStatus.SOS, RiderStatus.MECHANICAL -> TftNotificationCategory.ALERT
+                                else -> TftNotificationCategory.APP
+                            }
+                            val accent = when (member.status) {
+                                RiderStatus.SOS -> 0xFFFF3B30L
+                                RiderStatus.MECHANICAL -> 0xFFFF6B00L
+                                else -> 0xFFFFCC00L
+                            }
+                            val distText = riderTelemetry.value.coordinate?.let {
+                                " · a ${GroupTftLayout.formatCompactDistance(it.distanceTo(member.coordinate))}"
+                            }.orEmpty()
+                            val body = member.statusMessage.ifBlank { "${member.status.shortLabel}$distText" }
+                            PhoneNotificationCenter.postNotification(
+                                appName = "Grupo · ${member.status.shortLabel}",
+                                title = member.name,
+                                text = body,
+                                category = category,
+                                accentArgb = accent,
+                                key = "grp_alert_${member.id}_${member.status.raw}"
+                            )
+                        }
+                    } else {
+                        lastNotifiedMemberAlerts.remove(member.id)
+                    }
+                }
+                val it = lastNotifiedMemberAlerts.keys.iterator()
+                while (it.hasNext()) {
+                    if (!activeIds.contains(it.next())) it.remove()
                 }
             }
         }
@@ -486,7 +578,11 @@ class EnduController {
 
     // --- Búsqueda de Destinos y Rutas por Carretera (OSRM) ---
 
-    fun selectSearchResult(item: SearchResultItem, keepWaypoints: Boolean = false) {
+    fun selectSearchResult(
+        item: SearchResultItem,
+        keepWaypoints: Boolean = false,
+        autoShareWithGroup: Boolean = true
+    ) {
         // En MotIOS: seleccionar un destino desactiva el track GPX previo y calcula ruta
         _selectedRouteId.value = null
         _activeRouteFlow.value = null
@@ -503,7 +599,7 @@ class EnduController {
         // Centrar temporalmente en el destino
         _mapCenter.value = item.coordinate
 
-        calculateRouteToSearchPin(item)
+        calculateRouteToSearchPin(item, autoShareWithGroup = autoShareWithGroup)
     }
 
     /**
@@ -584,7 +680,7 @@ class EnduController {
         }
     }
 
-    fun calculateRouteToSearchPin(dest: SearchResultItem) {
+    fun calculateRouteToSearchPin(dest: SearchResultItem, autoShareWithGroup: Boolean = true) {
         routeCalcJob?.cancel()
         val origin = riderTelemetry.value.coordinate ?: _mapCenter.value
         val waypoints = _intermediateWaypoints.value.map { it.coordinate }
@@ -612,6 +708,13 @@ class EnduController {
                     val stopsMsg = if (waypoints.isNotEmpty()) " (${waypoints.size} parada${if (waypoints.size > 1) "s" else ""})" else ""
                     val offlineNote = if (first.isOfflineFallback) " · Sin cobertura (Enlace directo offline)" else ""
                     _statusBannerMessage.value = "Ruta a ${dest.title}$stopsMsg: ${(first.distanceKm * 10.0).roundToInt() / 10.0} km (~${first.expectedMinutes} min)$offlineNote"
+                    if (autoShareWithGroup && groupManager.activeRoomCode.value != null) {
+                        groupManager.shareRoute(
+                            route = first.asGPXRoute,
+                            isDestination = true,
+                            destinationCoord = dest.coordinate
+                        )
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -626,6 +729,15 @@ class EnduController {
         if (index in _destinationRouteOptions.value.indices) {
             _selectedDestinationOptionIndex.value = index
             _trackProgress.value = null
+            val chosen = _destinationRouteOptions.value.getOrNull(index)
+            val destCoord = _searchPin.value?.coordinate ?: chosen?.coordinates?.lastOrNull()
+            if (chosen != null && groupManager.activeRoomCode.value != null) {
+                groupManager.shareRoute(
+                    route = chosen.asGPXRoute,
+                    isDestination = true,
+                    destinationCoord = destCoord
+                )
+            }
         }
     }
 
@@ -769,11 +881,11 @@ class EnduController {
         selectRoute(route)
     }
 
-    fun importGPXContent(name: String, content: String) {
+    fun importGPXContent(name: String, content: String, autoShareWithGroup: Boolean = true) {
         try {
             val route = GPXParser.parse(content, fallbackName = name)
             addRoute(route)
-            selectRoute(route)
+            selectRoute(route, autoShareWithGroup = autoShareWithGroup)
             fitCoordinates(route.points.map { it.coordinate })
             val msg = "Track importado: ${route.name} (${(route.totalDistanceKm * 10.0).roundToInt() / 10.0} km)"
             _statusBannerMessage.value = msg
@@ -790,12 +902,12 @@ class EnduController {
             val route = GPXParser.parse(gpxXml, fallbackName = "$name.gpx")
             addRoute(route)
             if (_selectedRouteId.value == null) {
-                selectRoute(route)
+                selectRoute(route, autoShareWithGroup = false)
             }
         } catch (_: Exception) {}
     }
 
-    fun selectRoute(route: GPXRoute, fitToBounds: Boolean = true) {
+    fun selectRoute(route: GPXRoute, fitToBounds: Boolean = true, autoShareWithGroup: Boolean = true) {
         // Al seleccionar un GPX, limpiamos el destino de búsqueda
         clearSearchAndDestinationRoute()
         approachCalcJob?.cancel()
@@ -807,6 +919,9 @@ class EnduController {
         _activeRouteFlow.value = latest
         if (fitToBounds) {
             fitCoordinates(latest.points.map { it.coordinate })
+        }
+        if (autoShareWithGroup && groupManager.activeRoomCode.value != null) {
+            groupManager.shareRoute(latest, isDestination = false)
         }
     }
 
@@ -1341,6 +1456,11 @@ class EnduController {
         val bikeLayer = effectiveBikeLayer
         val currentGroupMembers = groupManager.members.value
         val activeGroupCount = if (groupManager.activeRoomCode.value != null) currentGroupMembers.size + 1 else 0
+        val activeNotif = if (_bikeMapConfig.value.showPhoneNotificationsOnTft) {
+            PhoneNotificationCenter.getActiveNotification()
+        } else {
+            null
+        }
 
         val rgba = bikeMapRenderer.renderRgba(
             width = width,
@@ -1358,7 +1478,8 @@ class EnduController {
             remainingMinutes = snap.remainingMinutes,
             routeTypeLabel = snap.routeTypeLabel,
             groupMembers = currentGroupMembers,
-            groupActiveCount = activeGroupCount
+            groupActiveCount = activeGroupCount,
+            activeNotification = activeNotif
         )
 
         // Actualizar preview periódicamente en el mismo hilo tras renderRgba para evitar contención de lock
@@ -1379,7 +1500,8 @@ class EnduController {
                 remainingMinutes = snap.remainingMinutes,
                 routeTypeLabel = snap.routeTypeLabel,
                 groupMembers = currentGroupMembers,
-                groupActiveCount = activeGroupCount
+                groupActiveCount = activeGroupCount,
+                activeNotification = activeNotif
             )
             if (preview != null) {
                 previewSeqLock.withLock { ++previewRequestSeq }
@@ -1456,6 +1578,11 @@ class EnduController {
             val snap = buildTftRouteHudSnapshot()
             val currentGroupMembers = groupManager.members.value
             val activeGroupCount = if (groupManager.activeRoomCode.value != null) currentGroupMembers.size + 1 else 0
+            val activeNotif = if (_bikeMapConfig.value.showPhoneNotificationsOnTft) {
+                PhoneNotificationCenter.getActiveNotification()
+            } else {
+                null
+            }
 
             val preview = bikeMapRenderer.renderPreview(
                 width = 296,
@@ -1473,7 +1600,8 @@ class EnduController {
                 remainingMinutes = snap.remainingMinutes,
                 routeTypeLabel = snap.routeTypeLabel,
                 groupMembers = currentGroupMembers,
-                groupActiveCount = activeGroupCount
+                groupActiveCount = activeGroupCount,
+                activeNotification = activeNotif
             )
             if (preview != null) {
                 val shouldPublish = previewSeqLock.withLock { seq == previewRequestSeq }
@@ -1547,24 +1675,50 @@ class EnduController {
     }
 
     fun shareActiveRouteWithGroup() {
-        val route = selectedRoute ?: destinationRoadRoute?.asGPXRoute
+        val activeGpx = selectedRoute
+        val activeDest = destinationRoadRoute
+        val route = activeGpx ?: activeDest?.asGPXRoute
         if (route == null) {
             showPlatformToast("Selecciona o calcula primero una ruta para compartirla")
             return
         }
-        if (groupManager.shareRoute(route)) {
-            val msg = "Track «${route.name}» compartido con el grupo"
+        val isDest = activeGpx == null && activeDest != null
+        val destCoord = if (isDest) {
+            _searchPin.value?.coordinate ?: activeDest?.coordinates?.lastOrNull()
+        } else {
+            null
+        }
+        if (groupManager.shareRoute(route, isDestination = isDest, destinationCoord = destCoord)) {
+            val label = if (isDest) "Dirección" else "Track"
+            val msg = "$label «${route.name}» compartida con el grupo"
             _statusBannerMessage.value = msg
             showPlatformToast(msg)
         } else {
-            showPlatformToast("Únete primero a un grupo para compartir el track")
+            showPlatformToast("Únete primero a un grupo para compartir la ruta")
         }
     }
 
     fun importSharedGroupTrack() {
         val shared = groupManager.sharedTrack.value ?: return
-        importGPXContent("${shared.name}.gpx", shared.gpxXml)
-        groupManager.dismissSharedTrack()
+        groupManager.dismissSharedTrackBanner()
+        if (shared.isDestination && shared.destinationLat != null && shared.destinationLon != null) {
+            val destCoord = GeoCoord(shared.destinationLat, shared.destinationLon)
+            val riderPos = riderTelemetry.value.coordinate
+            val item = SearchResultItem(
+                title = shared.name,
+                subtitle = "Dirección del grupo (${shared.senderName})",
+                coordinate = destCoord,
+                distanceKm = riderPos?.let { it.distanceTo(destCoord) / 1000.0 }
+            )
+            selectSearchResult(item, autoShareWithGroup = false)
+            showPlatformToast("Calculando ruta hacia «${shared.name}»")
+        } else {
+            importGPXContent("${shared.name}.gpx", shared.gpxXml, autoShareWithGroup = false)
+        }
+    }
+
+    fun dismissSharedGroupTrackBanner() {
+        groupManager.dismissSharedTrackBanner()
     }
 
     fun dismissSharedGroupTrack() {
@@ -1580,7 +1734,7 @@ class EnduController {
             coordinate = member.coordinate,
             distanceKm = dist
         )
-        selectSearchResult(item)
+        selectSearchResult(item, autoShareWithGroup = false)
     }
 
     fun addGroupMemberAsStop(member: GroupMember) {
@@ -1627,6 +1781,37 @@ class EnduController {
             showGroupAlertsOnTft = showAlerts
         )
         persistSettings()
+        refreshStaticPreview()
+    }
+
+    private fun syncNotificationCenterConfig(cfg: BikeMapConfig) {
+        PhoneNotificationCenter.enabledOnTft = cfg.showPhoneNotificationsOnTft
+        PhoneNotificationCenter.defaultDurationSeconds = cfg.tftNotificationDurationSeconds.coerceIn(3, 15)
+    }
+
+    fun setBikePhoneNotificationsConfig(enabled: Boolean, durationSeconds: Int) {
+        val clampedDuration = durationSeconds.coerceIn(3, 15)
+        val updated = _bikeMapConfig.value.copy(
+            showPhoneNotificationsOnTft = enabled,
+            tftNotificationDurationSeconds = clampedDuration
+        )
+        _bikeMapConfig.value = updated
+        syncNotificationCenterConfig(updated)
+        if (!enabled) {
+            PhoneNotificationCenter.dismissActive()
+        }
+        persistSettings()
+        refreshStaticPreview()
+    }
+
+    fun triggerTestTftNotification() {
+        if (!_bikeMapConfig.value.showPhoneNotificationsOnTft) {
+            setBikePhoneNotificationsConfig(
+                enabled = true,
+                durationSeconds = _bikeMapConfig.value.tftNotificationDurationSeconds
+            )
+        }
+        PhoneNotificationCenter.postSampleNotification(_bikeMapConfig.value.tftNotificationDurationSeconds)
         refreshStaticPreview()
     }
 

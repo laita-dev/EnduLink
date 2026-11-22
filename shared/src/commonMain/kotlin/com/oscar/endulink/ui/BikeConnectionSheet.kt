@@ -33,7 +33,10 @@ import com.oscar.endulink.bike.WifiSnapshot
 import com.oscar.endulink.bike.openPlatformWifiSettings
 import com.oscar.endulink.bike.rememberBikeQrScanner
 import com.oscar.endulink.platform.EncoderStats
+import com.oscar.endulink.platform.isPhoneNotificationAccessGranted
+import com.oscar.endulink.platform.openPhoneNotificationAccessSettings
 import com.oscar.endulink.platform.showPlatformToast
+import com.oscar.endulink.platform.supportsSystemWideNotificationCapture
 import com.oscar.endulink.tiles.MapLayer
 import kotlin.math.abs
 import kotlin.math.max
@@ -58,6 +61,8 @@ fun BikeConnectionSheet(
     onSetBitrate: (Int) -> Unit,
     onSetBikeMapLayer: (MapLayer?) -> Unit,
     onSetBikeGroupDisplayConfig: (showMembers: Boolean, showNames: Boolean, showEdgeRadar: Boolean, showHudBadge: Boolean, showAlerts: Boolean) -> Unit = { _, _, _, _, _ -> },
+    onSetBikePhoneNotificationsConfig: (enabled: Boolean, durationSeconds: Int) -> Unit = { _, _ -> },
+    onTriggerTestTftNotification: () -> Unit = {},
     onSetAllowLocalLanTesting: (Boolean) -> Unit,
     onSaveQr: (String) -> Boolean,
     onClearQr: () -> Unit = {},
@@ -83,6 +88,16 @@ fun BikeConnectionSheet(
     }
     val clipboardManager = LocalClipboardManager.current
     val scrollState = rememberScrollState()
+    val showSystemNotifAccess = remember { supportsSystemWideNotificationCapture() }
+    var hasNotificationAccess by remember { mutableStateOf(isPhoneNotificationAccessGranted()) }
+
+    LaunchedEffect(showSystemNotifAccess) {
+        if (!showSystemNotifAccess) return@LaunchedEffect
+        while (true) {
+            hasNotificationAccess = isPhoneNotificationAccessGranted()
+            kotlinx.coroutines.delay(1000L)
+        }
+    }
 
     val launchQrScanner = rememberBikeQrScanner(
         onQrScanned = { scanned ->
@@ -804,6 +819,17 @@ fun BikeConnectionSheet(
                             config = config,
                             onUpdate = onSetBikeGroupDisplayConfig
                         )
+
+                        HorizontalDivider(color = EnduPalette.Outline.copy(alpha = 0.4f))
+
+                        TftPhoneNotificationSettings(
+                            config = config,
+                            showSystemAccess = showSystemNotifAccess,
+                            hasNotificationAccess = hasNotificationAccess,
+                            onUpdate = onSetBikePhoneNotificationsConfig,
+                            onOpenAccessSettings = { openPhoneNotificationAccessSettings() },
+                            onTestNotification = onTriggerTestTftNotification
+                        )
                     }
                 }
 
@@ -1261,6 +1287,227 @@ private fun AutoZoomTierRow(
                 fontWeight = FontWeight.Bold
             )
             CompactStepButton(text = "+", enabled = zoomLevel < 18, onClick = onIncZoom)
+        }
+    }
+}
+
+@Composable
+private fun TftPhoneNotificationSettings(
+    config: BikeMapConfig,
+    showSystemAccess: Boolean,
+    hasNotificationAccess: Boolean,
+    onUpdate: (enabled: Boolean, durationSeconds: Int) -> Unit,
+    onOpenAccessSettings: () -> Unit,
+    onTestNotification: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = if (showSystemAccess) {
+                "NOTIFICACIONES DEL MÓVIL EN PANTALLA TFT"
+            } else {
+                "AVISOS Y NOTIFICACIONES EN PANTALLA TFT"
+            },
+            color = EnduPalette.TextMuted,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp)
+            ) {
+                Text(
+                    text = "Mostrar notificaciones en el TFT",
+                    color = EnduPalette.TextPrimary,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = if (showSystemAccess) {
+                        "WhatsApp, llamadas, Telegram, SMS y avisos durante unos segundos"
+                    } else {
+                        "Alertas de grupo, rutas compartidas y avisos de la app durante unos segundos"
+                    },
+                    color = EnduPalette.TextMuted,
+                    fontSize = 10.5.sp,
+                    lineHeight = 14.sp
+                )
+            }
+            Switch(
+                checked = config.showPhoneNotificationsOnTft,
+                onCheckedChange = { onUpdate(it, config.tftNotificationDurationSeconds) },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = EnduPalette.Accent,
+                    uncheckedThumbColor = EnduPalette.TextMuted,
+                    uncheckedTrackColor = EnduPalette.SurfaceHigh
+                )
+            )
+        }
+
+        if (config.showPhoneNotificationsOnTft) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Duración en pantalla",
+                    color = EnduPalette.TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    listOf(4, 6, 10).forEach { seconds ->
+                        val selected = (config.tftNotificationDurationSeconds == seconds)
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (selected) EnduPalette.Accent.copy(alpha = 0.25f) else EnduPalette.SurfaceHigh)
+                                .border(
+                                    1.dp,
+                                    if (selected) EnduPalette.Accent else Color.Transparent,
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .clickable { onUpdate(config.showPhoneNotificationsOnTft, seconds) }
+                                .padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = "$seconds s",
+                                color = if (selected) EnduPalette.Accent else EnduPalette.TextSecondary,
+                                fontSize = 10.5.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (showSystemAccess) {
+                if (hasNotificationAccess) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(EnduPalette.Success.copy(alpha = 0.14f))
+                            .border(1.dp, EnduPalette.Success.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "✓ Permiso de lectura de notificaciones activo",
+                            color = EnduPalette.Success,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        )
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(EnduPalette.SurfaceHigh)
+                                .clickable { onTestNotification() }
+                                .padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = "Probar en TFT",
+                                color = EnduPalette.TextPrimary,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(EnduPalette.Warning.copy(alpha = 0.12f))
+                            .border(1.dp, EnduPalette.Warning.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Activa el acceso a notificaciones de EnduLink en Android para ver WhatsApp, llamadas y mensajes en el TFT.",
+                            color = EnduPalette.TextPrimary,
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(EnduPalette.Accent)
+                                    .clickable { onOpenAccessSettings() }
+                                    .padding(horizontal = 10.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = "Activar permiso de notificaciones",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(EnduPalette.SurfaceHigh)
+                                    .clickable { onTestNotification() }
+                                    .padding(horizontal = 10.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = "Probar en TFT",
+                                    color = EnduPalette.TextPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Avisos de grupo y notificaciones recibidas por la app.",
+                        color = EnduPalette.TextMuted,
+                        fontSize = 10.5.sp,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp)
+                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(EnduPalette.SurfaceHigh)
+                            .clickable { onTestNotification() }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Probar en TFT",
+                            color = EnduPalette.Accent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -3,6 +3,7 @@ package com.oscar.endulink.bike
 import androidx.compose.ui.graphics.ImageBitmap
 import com.oscar.endulink.group.GroupMember
 import com.oscar.endulink.platform.RiderTelemetry
+import com.oscar.endulink.platform.TftPhoneNotification
 import com.oscar.endulink.tiles.MapLayer
 import com.oscar.endulink.tiles.TileStore
 import com.oscar.endulink.trail.GPXRoute
@@ -55,7 +56,9 @@ data class BikeMapConfig(
     val showGroupNamesOnTft: Boolean = true,
     val showGroupEdgeRadarOnTft: Boolean = true,
     val showGroupHudBadgeOnTft: Boolean = true,
-    val showGroupAlertsOnTft: Boolean = true
+    val showGroupAlertsOnTft: Boolean = true,
+    val showPhoneNotificationsOnTft: Boolean = true,
+    val tftNotificationDurationSeconds: Int = 6
 ) {
     fun resolveEffectiveZoom(speedKmh: Double): Int {
         if (!autoZoomBySpeed) return zoom.coerceIn(5, 18)
@@ -122,7 +125,8 @@ expect class BikeMapRenderer(tileStore: TileStore) {
         remainingMinutes: Int? = null,
         routeTypeLabel: String? = null,
         groupMembers: List<GroupMember> = emptyList(),
-        groupActiveCount: Int = 0
+        groupActiveCount: Int = 0,
+        activeNotification: TftPhoneNotification? = null
     ): ByteArray?
 
     fun renderPreview(
@@ -141,6 +145,7 @@ expect class BikeMapRenderer(tileStore: TileStore) {
         remainingMinutes: Int? = null,
         routeTypeLabel: String? = null,
         groupMembers: List<GroupMember> = emptyList(),
-        groupActiveCount: Int = 0
+        groupActiveCount: Int = 0,
+        activeNotification: TftPhoneNotification? = null
     ): ImageBitmap?
 }
