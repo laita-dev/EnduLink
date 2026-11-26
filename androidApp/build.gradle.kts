@@ -1,9 +1,38 @@
+import java.io.StringReader
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     kotlin("android")
 }
+
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        val text = keystorePropsFile.readText(Charsets.UTF_8).removePrefix("\uFEFF")
+        StringReader(text).use { load(it) }
+    }
+}
+
+val resolvedStorePath = System.getenv("ANDROID_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+    ?: keystoreProps.getProperty("storeFile")?.takeIf { it.isNotBlank() }
+val resolvedStoreFile = resolvedStorePath?.let { path ->
+    val candidate = file(path)
+    if (candidate.exists()) candidate else rootProject.file(path)
+}?.takeIf { it.exists() }
+val resolvedStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }
+    ?: keystoreProps.getProperty("storePassword")?.takeIf { it.isNotBlank() }
+val resolvedKeyAlias = System.getenv("ANDROID_KEY_ALIAS")?.takeIf { it.isNotBlank() }
+    ?: keystoreProps.getProperty("keyAlias")?.takeIf { it.isNotBlank() }
+val resolvedKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+    ?: keystoreProps.getProperty("keyPassword")?.takeIf { it.isNotBlank() }
+
+val hasReleaseSigning = resolvedStoreFile != null &&
+    resolvedStorePassword != null &&
+    resolvedKeyAlias != null &&
+    resolvedKeyPassword != null
 
 android {
     namespace = "com.oscar.endulink"
@@ -35,11 +64,13 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file("endulink-keystore.jks")
-            storePassword = "endulink123"
-            keyAlias = "endulink"
-            keyPassword = "endulink123"
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = resolvedStoreFile
+                storePassword = resolvedStorePassword
+                keyAlias = resolvedKeyAlias
+                keyPassword = resolvedKeyPassword
+            }
         }
     }
 
@@ -50,14 +81,14 @@ android {
             ndk {
                 abiFilters += listOf("armeabi-v7a", "arm64-v8a")
             }
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.findByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

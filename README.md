@@ -108,3 +108,9 @@ Antes de abrir **motillOS** por primera vez tras instalarla:
 Por limitaciones de Apple, iOS no permite instalar actualizaciones automáticamente desde dentro de la app. Cuando pulses el icono de **Ajustes (⚙️)**, la app te avisará si hay una versión nueva disponible; para actualizarla, descarga el nuevo `EnduLink-unsigned.ipa` desde Releases y vuelve a instalarlo con **Sideloadly** encima del anterior (conservarás todos tus tracks y mapas offline).
 
 > *Nota avanzada:* Si usas **SideStore** en tu iPhone, también puedes añadir la fuente `https://raw.githubusercontent.com/laita-dev/EnduLink/main/sidestore-source.json` para instalar y renovar la app directamente desde el teléfono sin ordenador.
+
+---
+
+## Licencia
+
+Copyright © 2026 Oscar Laita (`laita-dev`). Todos los derechos reservados. Consulta el archivo [LICENSE](LICENSE) para más información: las versiones oficiales publicadas en Releases son de uso personal y gratuito, pero **no está permitida la copia, modificación, redistribución ni publicación en tiendas de aplicaciones** sin autorización expresa por escrito.
