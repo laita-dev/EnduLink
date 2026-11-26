@@ -30,9 +30,9 @@
         </dict>
     </array>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.0</string>
+    <string>0.3.1</string>
     <key>CFBundleVersion</key>
-    <string>300</string>
+    <string>301</string>
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
     <key>LSRequiresIPhoneOS</key>
