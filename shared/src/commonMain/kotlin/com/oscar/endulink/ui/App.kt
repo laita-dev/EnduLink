@@ -20,10 +20,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import com.oscar.endulink.group.GroupMember
+import com.oscar.endulink.platform.AppUpdateManager
 import com.oscar.endulink.platform.PlatformBackHandler
 import com.oscar.endulink.platform.PlatformToastCenter
 import com.oscar.endulink.platform.closeApp
 import com.oscar.endulink.platform.rememberPlatformSafeAreaPadding
+import com.oscar.endulink.platform.setPlatformKeepScreenOn
 import com.oscar.endulink.platform.showPlatformToast
 import com.oscar.endulink.trail.*
 import kotlinx.datetime.Clock
@@ -97,6 +99,16 @@ fun App() {
     val groupSharedTrackBannerVisible by controller.groupSharedTrackBannerVisible.collectAsState()
     val pendingGroupJoinCode by controller.pendingGroupJoinCode.collectAsState()
     val isOffGpxTrack by controller.isOffGpxTrack.collectAsState()
+    val displaySettings by controller.appDisplaySettings.collectAsState()
+
+    val keepScreenOn = when (displaySettings.keepScreenOnMode) {
+        KeepScreenOnMode.OFF -> false
+        KeepScreenOnMode.WHILE_ACTIVE -> isNavigating || isRecording
+        KeepScreenOnMode.ALWAYS -> true
+    }
+    LaunchedEffect(keepScreenOn) {
+        setPlatformKeepScreenOn(keepScreenOn)
+    }
 
     LaunchedEffect(inAppToast?.id) {
         val current = inAppToast ?: return@LaunchedEffect
@@ -124,8 +136,15 @@ fun App() {
     var showElevationSheet by remember { mutableStateOf(false) }
     var showSaveRecordingDialog by remember { mutableStateOf(false) }
     var pendingRecordingStats by remember { mutableStateOf(Triple(0.0, 0.0, 0L)) }
-    var showUpdateDialog by remember { mutableStateOf(false) }
+    var showSettingsScreen by remember { mutableStateOf(false) }
+    var hasUpdateAvailable by remember { mutableStateOf(false) }
     var routeForDetailId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        AppUpdateManager.checkForUpdate().onSuccess { info ->
+            hasUpdateAvailable = info.isNewer
+        }
+    }
     var routeToEditId by remember { mutableStateOf<String?>(null) }
     var showGroupSheet by remember { mutableStateOf(false) }
     var selectedGroupMemberId by remember { mutableStateOf<String?>(null) }
@@ -176,7 +195,7 @@ fun App() {
     var lastBackPressTime by remember { mutableStateOf(0L) }
     PlatformBackHandler(enabled = true) {
         when {
-            showUpdateDialog -> showUpdateDialog = false
+            showSettingsScreen -> showSettingsScreen = false
             showLayersPanel -> showLayersPanel = false
             showSearchSheet -> {
                 isSearchingForStop = false
@@ -242,6 +261,7 @@ fun App() {
                     groupMembers = groupMembers,
                     isOffGpxTrack = isOffGpxTrack,
                     isPickingOnMap = isPickingOnMap,
+                    displaySettings = displaySettings,
                     onSelectWaypoint = { wpt ->
                         selectedGroupMemberId = null
                         routeForDetailId = null
@@ -343,7 +363,7 @@ fun App() {
                     },
                     onOpenLayers = { showLayersPanel = !showLayersPanel },
                     onOpenOffline = { showOfflineSheet = true },
-                    onOpenSettings = { showUpdateDialog = true },
+                    onOpenSettings = { showSettingsScreen = true },
                     onOpenRoutes = { showRoutesSheet = true },
                     onOpenBikeSheet = { showBikeSheet = true },
                     onOpenQuickMarker = { showQuickMarkerSheet = true },
@@ -431,8 +451,10 @@ fun App() {
                     showGpxOffTrackWarning = bikeMapConfig.showGpxOffTrackWarning,
                     onDisableGpxOffTrackWarning = {
                         controller.setGpxOffTrackWarningEnabled(false)
-                        showPlatformToast("Aviso fuera de GPX desactivado (reactívalo en Track o Moto)")
-                    }
+                        showPlatformToast("Aviso fuera de GPX desactivado (reactívalo en Ajustes o Moto)")
+                    },
+                    displaySettings = displaySettings,
+                    hasUpdateAvailable = hasUpdateAvailable
                 )
 
                 // Panel flotante selector de Capas (Carreteras, Satélite, Trail OSM, IGN Topo)
@@ -614,7 +636,9 @@ fun App() {
                         onCancelDownload = { controller.tileStore.cancelDownload() },
                         onClearCache = { controller.tileStore.clearDiskCache() },
                         onClose = { showOfflineSheet = false },
-                        modifier = largeSheetModifier
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(35f)
                     )
                 }
 
@@ -953,10 +977,27 @@ fun App() {
                     )
                 }
 
-                // Diálogo de comprobación y descarga de actualizaciones
-                if (showUpdateDialog) {
-                    AppUpdateDialog(
-                        onDismiss = { showUpdateDialog = false }
+                // Pantalla completa de Ajustes y Actualizaciones
+                if (showSettingsScreen) {
+                    AppSettingsScreen(
+                        settings = displaySettings,
+                        showGpxOffTrackWarning = bikeMapConfig.showGpxOffTrackWarning,
+                        downloadedPackagesCount = downloadedPackages.size,
+                        onUpdateSettings = { transform -> controller.updateAppDisplaySettings(transform) },
+                        onSetGpxOffTrackWarning = { enabled -> controller.setGpxOffTrackWarningEnabled(enabled) },
+                        onResetSettings = {
+                            controller.resetAppDisplaySettings()
+                            showPlatformToast("Ajustes restablecidos por defecto")
+                        },
+                        onOpenOfflineMaps = {
+                            showSettingsScreen = false
+                            showOfflineSheet = true
+                        },
+                        onUpdateAvailabilityChanged = { available -> hasUpdateAvailable = available },
+                        onClose = { showSettingsScreen = false },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(40f)
                     )
                 }
 

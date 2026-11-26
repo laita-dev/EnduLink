@@ -63,6 +63,7 @@ fun InteractiveMap(
     groupMembers: List<GroupMember> = emptyList(),
     isOffGpxTrack: Boolean = false,
     isPickingOnMap: Boolean = false,
+    displaySettings: AppDisplaySettings = AppDisplaySettings(),
     onSelectWaypoint: (GPXWaypoint) -> Unit = {},
     onSelectRoute: (GPXRoute) -> Unit = {},
     onSelectGroupMember: (GroupMember) -> Unit = {},
@@ -79,7 +80,24 @@ fun InteractiveMap(
     val crowFliesActive by controller.crowFliesModeActive.collectAsState()
     val scrubbedPoint by controller.scrubbedPoint.collectAsState()
     val textMeasurer = rememberTextMeasurer()
-    val labelLayoutCache = remember { HashMap<String, TextLayoutResult>() }
+    val mapFontScale = displaySettings.hudFontScale.coerceIn(0.9f, 1.8f)
+    val pinScale = 1f + (mapFontScale - 1f) * 0.45f
+    val waypointLabelStyle = remember(mapFontScale) {
+        TextStyle(
+            color = Color.White,
+            fontSize = (10f * mapFontScale).sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+    val groupLabelStyle = remember(mapFontScale) {
+        TextStyle(
+            color = Color.White,
+            fontSize = (10f * mapFontScale.coerceAtMost(1.45f)).sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+    val labelLayoutCache = remember(mapFontScale) { HashMap<String, TextLayoutResult>() }
+    val groupLabelLayoutCache = remember(mapFontScale) { HashMap<String, TextLayoutResult>() }
     val routeDrawPath = remember { Path() }
     val chevronDrawPath = remember { Path() }
     val edgeHitTargets = remember { mutableListOf<MobileGroupEdgeHitTarget>() }
@@ -88,6 +106,7 @@ fun InteractiveMap(
     val currentOnSelectGroupMember by rememberUpdatedState(onSelectGroupMember)
     val currentIsPickingOnMap by rememberUpdatedState(isPickingOnMap)
     val currentLayer by rememberUpdatedState(layer)
+    val currentPinScale by rememberUpdatedState(pinScale)
     val useNativeBackdrop = isNativeAppleMapsSupported() && layer == MapLayer.CARRETERAS
     val density = LocalDensity.current.density.toDouble().coerceAtLeast(1.0)
     val baseTileDp = if (layer.isRetina512) 148.dp else 132.dp
@@ -127,8 +146,8 @@ fun InteractiveMap(
                         val baseTilePx = maxOf(256.0, baseTileDp.toPx().toDouble())
                         val tileSizePx = baseTilePx * (2.0.pow(curZoom - zInt))
                         val (centerFracX, centerFracY) = TileMath.latLonToFractionalTile(curCenter.latitude, curCenter.longitude, zInt)
-                        val pinOffsetPx = 14.dp.toPx().toDouble()
-                        val hitRadiusPx = 28.dp.toPx().toDouble()
+                        val pinOffsetPx = (14f * currentPinScale).dp.toPx().toDouble()
+                        val hitRadiusPx = (28f * currentPinScale).dp.toPx().toDouble()
 
                         // Comprobar si se ha pulsado sobre un indicador de borde (compañero fuera de pantalla)
                         val edgePadPx = 8.dp.toPx()
@@ -312,6 +331,9 @@ fun InteractiveMap(
                 )
             }
 
+            val trackStrokeScale = displaySettings.trackStrokeScale.coerceIn(0.75f, 1.5f)
+            val showTrackArrows = displaySettings.showTrackDirectionArrows
+
             // 2. Rutas secundarias GPX
             for (sec in secondaryRoutes) {
                 if (sec.isVisible && sec.id != activeRoute?.id) {
@@ -333,7 +355,8 @@ fun InteractiveMap(
                         baseColor = Color(sec.color.rgbHex),
                         geoToScreen = ::geoToScreen,
                         isSecondary = true,
-                        showArrows = true
+                        showArrows = showTrackArrows,
+                        strokeScale = trackStrokeScale
                     )
                 }
             }
@@ -457,14 +480,17 @@ fun InteractiveMap(
                     chevronPath = chevronDrawPath,
                     baseColor = Color(activeRoute.color.rgbHex),
                     geoToScreen = ::geoToScreen,
-                    isSecondary = false
+                    isSecondary = false,
+                    showArrows = showTrackArrows,
+                    strokeScale = trackStrokeScale
                 )
             }
 
             // 8. Ruta en línea recta al punto más cercano del GPX o flecha DMD2 de reconexión
             if (trackProgress != null && rider.coordinate != null) {
+                val gpxThresholdM = displaySettings.gpxOffTrackThresholdMeters.toDouble().coerceIn(20.0, 200.0)
                 val isGpxOnly = activeRoute != null && activeRoute.isVisible && activeRoad == null && curApproachRoad == null
-                if (isGpxOnly && (isOffGpxTrack || trackProgress.offTrackMeters >= 35.0)) {
+                if (isGpxOnly && (isOffGpxTrack || trackProgress.offTrackMeters >= gpxThresholdM)) {
                     val rPos = geoToScreen(rider.coordinate)
                     val targetPos = geoToScreen(trackProgress.projectedCoordinate)
                     drawLine(
@@ -553,12 +579,30 @@ fun InteractiveMap(
             if (activeRoute != null && activeRoute.isVisible) {
                 for (wpt in activeRoute.waypoints) {
                     val pt = geoToScreen(wpt.coordinate)
-                    drawWaypointMarker(pt, wpt, heading, textMeasurer, labelLayoutCache)
+                    drawWaypointMarker(
+                        pos = pt,
+                        wpt = wpt,
+                        heading = heading,
+                        textMeasurer = textMeasurer,
+                        labelLayoutCache = labelLayoutCache,
+                        labelStyle = waypointLabelStyle,
+                        showLabel = displaySettings.showWaypointLabelsOnMap,
+                        pinScale = pinScale
+                    )
                 }
             }
             for (wpt in quickMarkers) {
                 val pt = geoToScreen(wpt.coordinate)
-                drawWaypointMarker(pt, wpt, heading, textMeasurer, labelLayoutCache)
+                drawWaypointMarker(
+                    pos = pt,
+                    wpt = wpt,
+                    heading = heading,
+                    textMeasurer = textMeasurer,
+                    labelLayoutCache = labelLayoutCache,
+                    labelStyle = waypointLabelStyle,
+                    showLabel = displaySettings.showWaypointLabelsOnMap,
+                    pinScale = pinScale
+                )
             }
 
             // 14b. Compañeros del grupo en tiempo real
@@ -566,7 +610,15 @@ fun InteractiveMap(
                 val nowMs = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
                 for (member in groupMembers) {
                     val pt = geoToScreen(member.coordinate)
-                    drawGroupMemberMarker(pt, member, heading, nowMs, textMeasurer, labelLayoutCache)
+                    drawGroupMemberMarker(
+                        pos = pt,
+                        member = member,
+                        heading = heading,
+                        nowMs = nowMs,
+                        textMeasurer = textMeasurer,
+                        labelLayoutCache = groupLabelLayoutCache,
+                        labelStyle = groupLabelStyle
+                    )
                 }
             }
 
@@ -590,7 +642,8 @@ fun InteractiveMap(
                 heading = heading,
                 screenCenter = screenCenter,
                 textMeasurer = textMeasurer,
-                labelLayoutCache = labelLayoutCache,
+                labelLayoutCache = groupLabelLayoutCache,
+                labelStyle = groupLabelStyle,
                 hitTargetsOut = edgeHitTargets
             )
         }
@@ -707,7 +760,8 @@ private fun DrawScope.drawRoutePolyline(
     geoToScreen: (GeoCoord) -> Offset,
     isSecondary: Boolean,
     showArrows: Boolean = !isSecondary,
-    drawEndpoints: Boolean = !isSecondary
+    drawEndpoints: Boolean = !isSecondary,
+    strokeScale: Float = 1.0f
 ) {
     val hasNorm = normX != null && normY != null && normX.size == coords.size && normY.size == coords.size
     val count = coords.size
@@ -808,7 +862,7 @@ private fun DrawScope.drawRoutePolyline(
         drawPath(
             path = routePath,
             color = baseColor.copy(alpha = 0.55f),
-            style = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            style = Stroke(width = (3.5f * strokeScale).dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
         if (hasChevrons) {
             drawPath(
@@ -827,12 +881,12 @@ private fun DrawScope.drawRoutePolyline(
         drawPath(
             path = routePath,
             color = haloColor,
-            style = Stroke(width = 7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            style = Stroke(width = (7f * strokeScale).dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
         drawPath(
             path = routePath,
             color = baseColor,
-            style = Stroke(width = 4.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            style = Stroke(width = (4.5f * strokeScale).dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
         if (hasChevrons) {
             drawPath(
@@ -865,7 +919,10 @@ private fun DrawScope.drawWaypointMarker(
     wpt: GPXWaypoint,
     heading: Double,
     textMeasurer: TextMeasurer,
-    labelLayoutCache: HashMap<String, TextLayoutResult>
+    labelLayoutCache: HashMap<String, TextLayoutResult>,
+    labelStyle: TextStyle = WaypointLabelTextStyle,
+    showLabel: Boolean = true,
+    pinScale: Float = 1.0f
 ) {
     val markerColor = when (wpt.symbol?.lowercase()) {
         "gate" -> Color(0xFFFF9800)
@@ -880,8 +937,8 @@ private fun DrawScope.drawWaypointMarker(
     // Contrarrotar respecto al heading para que la chincheta y el texto queden siempre verticales
     rotate(degrees = heading.toFloat(), pivot = pos) {
         // 1. Sombra en el suelo
-        val sw = 10.dp.toPx()
-        val sh = 4.5.dp.toPx()
+        val sw = (10f * pinScale).dp.toPx()
+        val sh = (4.5f * pinScale).dp.toPx()
         drawOval(
             color = Color.Black.copy(alpha = 0.35f),
             topLeft = Offset(pos.x - sw / 2f, pos.y - sh / 2f),
@@ -889,59 +946,61 @@ private fun DrawScope.drawWaypointMarker(
         )
 
         // 2. Vástago/aguja de la chincheta
-        val pinHeadY = pos.y - 14.dp.toPx()
+        val pinHeadY = pos.y - (14f * pinScale).dp.toPx()
         drawLine(
             color = Color.Black,
-            start = Offset(pos.x, pinHeadY + 3.dp.toPx()),
+            start = Offset(pos.x, pinHeadY + (3f * pinScale).dp.toPx()),
             end = pos,
-            strokeWidth = 3.2.dp.toPx()
+            strokeWidth = (3.2f * pinScale).dp.toPx()
         )
         drawLine(
             color = Color.White,
-            start = Offset(pos.x, pinHeadY + 3.dp.toPx()),
+            start = Offset(pos.x, pinHeadY + (3f * pinScale).dp.toPx()),
             end = pos,
-            strokeWidth = 1.8.dp.toPx()
+            strokeWidth = (1.8f * pinScale).dp.toPx()
         )
 
         // 3. Cabeza de la chincheta
         val pinCenter = Offset(pos.x, pinHeadY)
-        drawCircle(color = Color.Black, radius = 9.5.dp.toPx(), center = pinCenter)
-        drawCircle(color = markerColor, radius = 8.dp.toPx(), center = pinCenter)
-        drawCircle(color = Color.White, radius = 4.2.dp.toPx(), center = pinCenter)
-        drawCircle(color = Color(0xFF0F172A), radius = 2.4.dp.toPx(), center = pinCenter)
+        drawCircle(color = Color.Black, radius = (9.5f * pinScale).dp.toPx(), center = pinCenter)
+        drawCircle(color = markerColor, radius = (8f * pinScale).dp.toPx(), center = pinCenter)
+        drawCircle(color = Color.White, radius = (4.2f * pinScale).dp.toPx(), center = pinCenter)
+        drawCircle(color = Color(0xFF0F172A), radius = (2.4f * pinScale).dp.toPx(), center = pinCenter)
 
         // 4. Cartela flotante con el nombre del Waypoint (cacheada entre frames)
-        val textLayout = labelLayoutCache[wpt.name] ?: textMeasurer.measure(
-            text = wpt.name,
-            style = WaypointLabelTextStyle
-        ).also {
-            if (labelLayoutCache.size > 128) labelLayoutCache.clear()
-            labelLayoutCache[wpt.name] = it
-        }
-        val padH = 5.dp.toPx()
-        val padV = 2.5.dp.toPx()
-        val badgeW = textLayout.size.width + padH * 2
-        val badgeH = textLayout.size.height + padV * 2
-        val badgeLeft = pos.x - badgeW / 2f
-        val badgeTop = pinHeadY - 10.dp.toPx() - badgeH
+        if (showLabel && wpt.name.isNotBlank()) {
+            val textLayout = labelLayoutCache[wpt.name] ?: textMeasurer.measure(
+                text = wpt.name,
+                style = labelStyle
+            ).also {
+                if (labelLayoutCache.size > 128) labelLayoutCache.clear()
+                labelLayoutCache[wpt.name] = it
+            }
+            val padH = (5f * pinScale).dp.toPx()
+            val padV = (2.5f * pinScale).dp.toPx()
+            val badgeW = textLayout.size.width + padH * 2
+            val badgeH = textLayout.size.height + padV * 2
+            val badgeLeft = pos.x - badgeW / 2f
+            val badgeTop = pinHeadY - (10f * pinScale).dp.toPx() - badgeH
 
-        drawRoundRect(
-            color = Color(0xEE0B111A),
-            topLeft = Offset(badgeLeft, badgeTop),
-            size = Size(badgeW, badgeH),
-            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
-        )
-        drawRoundRect(
-            color = markerColor,
-            topLeft = Offset(badgeLeft, badgeTop),
-            size = Size(badgeW, badgeH),
-            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
-            style = Stroke(width = 1.dp.toPx())
-        )
-        drawText(
-            textLayoutResult = textLayout,
-            topLeft = Offset(badgeLeft + padH, badgeTop + padV)
-        )
+            drawRoundRect(
+                color = Color(0xEE0B111A),
+                topLeft = Offset(badgeLeft, badgeTop),
+                size = Size(badgeW, badgeH),
+                cornerRadius = CornerRadius((4f * pinScale).dp.toPx(), (4f * pinScale).dp.toPx())
+            )
+            drawRoundRect(
+                color = markerColor,
+                topLeft = Offset(badgeLeft, badgeTop),
+                size = Size(badgeW, badgeH),
+                cornerRadius = CornerRadius((4f * pinScale).dp.toPx(), (4f * pinScale).dp.toPx()),
+                style = Stroke(width = 1.dp.toPx())
+            )
+            drawText(
+                textLayoutResult = textLayout,
+                topLeft = Offset(badgeLeft + padH, badgeTop + padV)
+            )
+        }
     }
 }
 
@@ -951,7 +1010,8 @@ private fun DrawScope.drawGroupMemberMarker(
     heading: Double,
     nowMs: Long,
     textMeasurer: TextMeasurer,
-    labelLayoutCache: HashMap<String, TextLayoutResult>
+    labelLayoutCache: HashMap<String, TextLayoutResult>,
+    labelStyle: TextStyle = WaypointLabelTextStyle
 ) {
     val memberColor = Color(member.color.argb)
     val stale = member.isStale(nowMs)
@@ -992,7 +1052,7 @@ private fun DrawScope.drawGroupMemberMarker(
         val label = member.name.take(14) + tag
         val textLayout = labelLayoutCache[label] ?: textMeasurer.measure(
             text = label,
-            style = WaypointLabelTextStyle
+            style = labelStyle
         ).also {
             if (labelLayoutCache.size > 128) labelLayoutCache.clear()
             labelLayoutCache[label] = it
@@ -1053,6 +1113,7 @@ private fun DrawScope.drawMobileGroupEdgeIndicators(
     screenCenter: Offset,
     textMeasurer: TextMeasurer,
     labelLayoutCache: HashMap<String, TextLayoutResult>,
+    labelStyle: TextStyle = WaypointLabelTextStyle,
     hitTargetsOut: MutableList<MobileGroupEdgeHitTarget>
 ) {
     val w = size.width
@@ -1183,7 +1244,7 @@ private fun DrawScope.drawMobileGroupEdgeIndicators(
 
         val textLayout = labelLayoutCache[label] ?: textMeasurer.measure(
             text = label,
-            style = WaypointLabelTextStyle
+            style = labelStyle
         ).also {
             if (labelLayoutCache.size > 128) labelLayoutCache.clear()
             labelLayoutCache[label] = it

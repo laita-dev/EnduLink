@@ -29,6 +29,7 @@ import com.oscar.endulink.group.GroupTftLayout
 import com.oscar.endulink.group.RiderStatus
 import com.oscar.endulink.group.SharedGroupTrack
 import com.oscar.endulink.platform.RiderTelemetry
+import com.oscar.endulink.trail.AppDisplaySettings
 import com.oscar.endulink.trail.CalculatedRoadRoute
 import com.oscar.endulink.trail.GPXRoute
 import com.oscar.endulink.trail.TrackProgress
@@ -105,6 +106,8 @@ fun HudOverlay(
     isOffGpxTrack: Boolean = false,
     showGpxOffTrackWarning: Boolean = true,
     onDisableGpxOffTrackWarning: () -> Unit = {},
+    displaySettings: AppDisplaySettings = AppDisplaySettings(),
+    hasUpdateAvailable: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(
@@ -114,6 +117,9 @@ fun HudOverlay(
     ) {
         val isTablet = maxWidth >= 600.dp
         val isCompactHeight = maxHeight < 500.dp
+        val fontScale = displaySettings.hudFontScale.coerceIn(0.9f, 1.8f)
+        val cardFontScale = fontScale.coerceAtMost(1.45f)
+        val bannerFontScale = fontScale.coerceAtMost(1.5f)
         val overlayMaxWidth = if (isTablet) 680.dp else Dp.Unspecified
         val sideBtnSize = if (isTablet) 44.dp else 38.dp
         val zoomBtnHeight = if (isTablet) 38.dp else 34.dp
@@ -127,11 +133,162 @@ fun HudOverlay(
         // ==========================================
         // 1. ZONA SUPERIOR: Buscador + Capas + HUD Telemetría
         // ==========================================
-        Column(
+        HudTopSection(
+            rider = rider,
+            trackProgress = trackProgress,
+            isNavigating = isNavigating,
+            isRecording = isRecording,
+            recordingStats = recordingStats,
+            searchPin = searchPin,
+            roadOptions = roadOptions,
+            selectedRoadIndex = selectedRoadIndex,
+            statusBannerMessage = statusBannerMessage,
+            selectedRoute = selectedRoute,
+            approachRoute = approachRoute,
+            isPickingOnMap = isPickingOnMap,
+            groupMembers = groupMembers,
+            groupSharedTrack = groupSharedTrack,
+            isOffGpxTrack = isOffGpxTrack,
+            showGpxOffTrackWarning = showGpxOffTrackWarning,
+            displaySettings = displaySettings,
+            hasUpdateAvailable = hasUpdateAvailable,
+            fontScale = fontScale,
+            cardFontScale = cardFontScale,
+            bannerFontScale = bannerFontScale,
+            onOpenSearch = onOpenSearch,
+            onClearDestination = onClearDestination,
+            onPickOnMap = onPickOnMap,
+            onOpenLayers = onOpenLayers,
+            onOpenOffline = onOpenOffline,
+            onOpenSettings = onOpenSettings,
+            onDismissBanner = onDismissBanner,
+            onRequestApproach = onRequestApproach,
+            onDisableGpxOffTrackWarning = onDisableGpxOffTrackWarning,
+            onSelectAlertMember = onSelectAlertMember,
+            onNavigateToAlertMember = onNavigateToAlertMember,
+            onImportSharedTrack = onImportSharedTrack,
+            onDismissSharedTrack = onDismissSharedTrack,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .widthIn(max = overlayMaxWidth)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+        )
+
+        // ==========================================
+        // 2. BOTONES FLOTANTES DERECHA (Estilo 1:1 MotIOS: botones circulares limpios)
+        // ==========================================
+        HudRightControls(
+            followMode = followMode,
+            isTablet = isTablet,
+            sideBtnSize = sideBtnSize,
+            zoomBtnHeight = zoomBtnHeight,
+            sideBtnSpacing = sideBtnSpacing,
+            showFitRoute = roadOptions.isNotEmpty() || selectedRoute != null,
+            onToggleOrientation = onToggleOrientation,
+            onZoomIn = onZoomIn,
+            onZoomOut = onZoomOut,
+            onFitMap = onFitMap,
+            onOpenQuickMarker = onOpenQuickMarker,
+            onToggleFollowMode = onToggleFollowMode,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(bottom = sideBottomPadding)
+        )
+
+        // ==========================================
+        // 3. ZONA INFERIOR: Tarjeta de Track/Destino + Barra de Control
+        // ==========================================
+        HudBottomSection(
+            trackProgress = trackProgress,
+            bikeState = bikeState,
+            isNavigating = isNavigating,
+            isRecording = isRecording,
+            searchPin = searchPin,
+            droppedPin = droppedPin,
+            intermediateWaypoints = intermediateWaypoints,
+            roadOptions = roadOptions,
+            selectedRoadIndex = selectedRoadIndex,
+            isCalculatingRoute = isCalculatingRoute,
+            selectedRoute = selectedRoute,
+            approachRoute = approachRoute,
+            isPickingOnMap = isPickingOnMap,
+            isSearchingForStop = isSearchingForStop,
+            pickingCoordAddress = pickingCoordAddress,
+            groupRoomCode = groupRoomCode,
+            groupMembers = groupMembers,
+            cardFontScale = cardFontScale,
+            onClearDestination = onClearDestination,
+            onClearDroppedPin = onClearDroppedPin,
+            onSetDroppedPinAsDestination = onSetDroppedPinAsDestination,
+            onAddDroppedPinAsStop = onAddDroppedPinAsStop,
+            onRemoveIntermediateWaypoint = onRemoveIntermediateWaypoint,
+            onOpenAddStopSearch = onOpenAddStopSearch,
+            onDeselectRoute = onDeselectRoute,
+            onSelectRoadAlternative = onSelectRoadAlternative,
+            onRequestStartNavigation = onRequestStartNavigation,
+            onStopNavigation = onStopNavigation,
+            onRequestApproach = onRequestApproach,
+            onClearApproach = onClearApproach,
+            onToggleRecording = onToggleRecording,
+            onOpenRoutes = onOpenRoutes,
+            onOpenBikeSheet = onOpenBikeSheet,
+            onSaveDroppedPinAsWaypoint = onSaveDroppedPinAsWaypoint,
+            onOpenWaypoints = onOpenWaypoints,
+            onOpenElevation = onOpenElevation,
+            onShareSelectedRoute = onShareSelectedRoute,
+            onOpenSelectedRouteOptions = onOpenSelectedRouteOptions,
+            onConfirmPickOnMap = onConfirmPickOnMap,
+            onConfirmPickAsStop = onConfirmPickAsStop,
+            onCancelPickOnMap = onCancelPickOnMap,
+            onOpenGroupSheet = onOpenGroupSheet,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .widthIn(max = overlayMaxWidth)
+                .fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun HudTopSection(
+    rider: RiderTelemetry,
+    trackProgress: TrackProgress?,
+    isNavigating: Boolean,
+    isRecording: Boolean,
+    recordingStats: Triple<Double, Double, Long>,
+    searchPin: SearchResultItem?,
+    roadOptions: List<CalculatedRoadRoute>,
+    selectedRoadIndex: Int,
+    statusBannerMessage: String?,
+    selectedRoute: GPXRoute?,
+    approachRoute: CalculatedRoadRoute?,
+    isPickingOnMap: Boolean,
+    groupMembers: List<GroupMember>,
+    groupSharedTrack: SharedGroupTrack?,
+    isOffGpxTrack: Boolean,
+    showGpxOffTrackWarning: Boolean,
+    displaySettings: AppDisplaySettings,
+    hasUpdateAvailable: Boolean,
+    fontScale: Float,
+    cardFontScale: Float,
+    bannerFontScale: Float,
+    onOpenSearch: () -> Unit,
+    onClearDestination: () -> Unit,
+    onPickOnMap: () -> Unit,
+    onOpenLayers: () -> Unit,
+    onOpenOffline: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onDismissBanner: () -> Unit,
+    onRequestApproach: () -> Unit,
+    onDisableGpxOffTrackWarning: () -> Unit,
+    onSelectAlertMember: (GroupMember) -> Unit,
+    onNavigateToAlertMember: (GroupMember) -> Unit,
+    onImportSharedTrack: () -> Unit,
+    onDismissSharedTrack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+        Column(
+            modifier = modifier,
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (isPickingOnMap) {
@@ -246,14 +403,24 @@ fun HudOverlay(
                             .clickable { onOpenSettings() }
                     ) {
                         SettingsGearIcon(color = EnduPalette.TextPrimary, size = 19.dp)
+                        if (hasUpdateAvailable) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(6.dp)
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(EnduPalette.Success)
+                            )
+                        }
                     }
                 }
             }
 
-            // Tira de Telemetría Activa (Durante Navegación)
-            if (isNavigating) {
+            // Tira de Telemetría (Durante Navegación o siempre visible según ajuste)
+            if (isNavigating || displaySettings.alwaysShowTelemetryBar) {
                 val activeRoad = roadOptions.getOrNull(selectedRoadIndex) ?: approachRoute
-                val remKm = trackProgress?.remainingKm ?: activeRoad?.distanceKm ?: selectedRoute?.totalDistanceKm ?: 0.0
+                val remKm = trackProgress?.remainingKm ?: activeRoad?.distanceKm ?: selectedRoute?.totalDistanceKm
 
                 Column(
                     modifier = Modifier
@@ -270,44 +437,55 @@ fun HudOverlay(
                         TelemetryItem(
                             label = "VEL",
                             value = "${rider.speedKmh.roundToInt()}",
-                            unit = "km/h"
+                            unit = "km/h",
+                            fontScale = fontScale
                         )
 
-                        TelemetryItem(
-                            label = "RESTAN",
-                            value = "${(remKm * 10.0).roundToInt() / 10.0}",
-                            unit = "km",
-                            color = EnduPalette.Success
-                        )
+                        if (isNavigating || remKm != null) {
+                            val showKm = remKm ?: 0.0
+                            TelemetryItem(
+                                label = "RESTAN",
+                                value = "${(showKm * 10.0).roundToInt() / 10.0}",
+                                unit = "km",
+                                color = EnduPalette.Success,
+                                fontScale = fontScale
+                            )
+                        }
 
-                        if (activeRoad != null) {
-                            val ratio = (remKm / activeRoad.distanceKm.coerceAtLeast(0.1)).coerceIn(0.0, 1.0)
-                            val remMinutes = if (remKm <= 0.05) 0 else maxOf(1, (activeRoad.expectedMinutes * ratio).roundToInt())
+                        if (isNavigating && activeRoad != null) {
+                            val showKm = remKm ?: activeRoad.distanceKm
+                            val ratio = (showKm / activeRoad.distanceKm.coerceAtLeast(0.1)).coerceIn(0.0, 1.0)
+                            val remMinutes = if (showKm <= 0.05) 0 else maxOf(1, (activeRoad.expectedMinutes * ratio).roundToInt())
                             TelemetryItem(
                                 label = "TIEMPO",
                                 value = "~$remMinutes",
                                 unit = "min",
-                                color = EnduPalette.Accent
+                                color = EnduPalette.Accent,
+                                fontScale = fontScale
                             )
                         } else {
                             TelemetryItem(
                                 label = "ALT",
                                 value = "${rider.altitudeM.roundToInt()}",
-                                unit = "m"
+                                unit = "m",
+                                fontScale = fontScale
                             )
                         }
                     }
 
-                    val step = activeRoad?.currentInstruction(rider.coordinate)
-                    if (!step.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = "↳ $step",
-                            color = EnduPalette.Accent,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1
-                        )
+                    if (isNavigating) {
+                        val step = activeRoad?.currentInstruction(rider.coordinate)
+                        if (!step.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "↳ $step",
+                                color = EnduPalette.Accent,
+                                fontSize = (11f * bannerFontScale).sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
@@ -347,14 +525,14 @@ fun HudOverlay(
                         Text(
                             text = "REC EN VIVO",
                             color = EnduPalette.Danger,
-                            fontSize = 11.sp,
+                            fontSize = (11f * cardFontScale).sp,
                             fontWeight = FontWeight.Black
                         )
                     }
                     Text(
                         text = "$recKm km · +$recElev m · $timeStr",
                         color = EnduPalette.TextPrimary,
-                        fontSize = 12.sp,
+                        fontSize = (12f * bannerFontScale).sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -410,7 +588,7 @@ fun HudOverlay(
                         Text(
                             text = "⚠ TE HAS SALIDO DEL TRACK GPX",
                             color = EnduPalette.Warning,
-                            fontSize = 11.5.sp,
+                            fontSize = (11.5f * cardFontScale).sp,
                             fontWeight = FontWeight.Black,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -418,8 +596,8 @@ fun HudOverlay(
                         Text(
                             text = "A $offDist · Línea recta rumbo $cardinal al punto más cercano",
                             color = Color.White,
-                            fontSize = 10.5.sp,
-                            maxLines = 1,
+                            fontSize = (10.5f * cardFontScale).sp,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
@@ -557,14 +735,26 @@ fun HudOverlay(
                 }
             }
         }
+}
 
-        // ==========================================
-        // 2. BOTONES FLOTANTES DERECHA (Estilo 1:1 MotIOS: botones circulares limpios)
-        // ==========================================
+@Composable
+private fun HudRightControls(
+    followMode: MapFollowMode,
+    isTablet: Boolean,
+    sideBtnSize: Dp,
+    zoomBtnHeight: Dp,
+    sideBtnSpacing: Dp,
+    showFitRoute: Boolean,
+    onToggleOrientation: () -> Unit,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
+    onFitMap: () -> Unit,
+    onOpenQuickMarker: () -> Unit,
+    onToggleFollowMode: () -> Unit,
+    modifier: Modifier = Modifier
+) {
         Column(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(bottom = sideBottomPadding),
+            modifier = modifier,
             verticalArrangement = Arrangement.spacedBy(sideBtnSpacing),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -622,7 +812,7 @@ fun HudOverlay(
             }
 
             // 3. Ver ruta completa en pantalla (solo si hay ruta activa)
-            if (roadOptions.isNotEmpty() || selectedRoute != null) {
+            if (showFitRoute) {
                 MapCircleButton(buttonSize = sideBtnSize, onClick = onFitMap) {
                     FitRouteBoundsIcon(color = EnduPalette.Accent)
                 }
@@ -653,15 +843,56 @@ fun HudOverlay(
                 )
             }
         }
+}
 
-        // ==========================================
-        // 3. ZONA INFERIOR: Tarjeta de Track/Destino + Barra de Control
-        // ==========================================
+@Composable
+private fun HudBottomSection(
+    trackProgress: TrackProgress?,
+    bikeState: BikeState,
+    isNavigating: Boolean,
+    isRecording: Boolean,
+    searchPin: SearchResultItem?,
+    droppedPin: SearchResultItem?,
+    intermediateWaypoints: List<SearchResultItem>,
+    roadOptions: List<CalculatedRoadRoute>,
+    selectedRoadIndex: Int,
+    isCalculatingRoute: Boolean,
+    selectedRoute: GPXRoute?,
+    approachRoute: CalculatedRoadRoute?,
+    isPickingOnMap: Boolean,
+    isSearchingForStop: Boolean,
+    pickingCoordAddress: String?,
+    groupRoomCode: String?,
+    groupMembers: List<GroupMember>,
+    cardFontScale: Float,
+    onClearDestination: () -> Unit,
+    onClearDroppedPin: () -> Unit,
+    onSetDroppedPinAsDestination: () -> Unit,
+    onAddDroppedPinAsStop: () -> Unit,
+    onRemoveIntermediateWaypoint: (Int) -> Unit,
+    onOpenAddStopSearch: () -> Unit,
+    onDeselectRoute: () -> Unit,
+    onSelectRoadAlternative: (Int) -> Unit,
+    onRequestStartNavigation: () -> Unit,
+    onStopNavigation: () -> Unit,
+    onRequestApproach: () -> Unit,
+    onClearApproach: () -> Unit,
+    onToggleRecording: () -> Unit,
+    onOpenRoutes: () -> Unit,
+    onOpenBikeSheet: () -> Unit,
+    onSaveDroppedPinAsWaypoint: () -> Unit,
+    onOpenWaypoints: () -> Unit,
+    onOpenElevation: () -> Unit,
+    onShareSelectedRoute: () -> Unit,
+    onOpenSelectedRouteOptions: () -> Unit,
+    onConfirmPickOnMap: () -> Unit,
+    onConfirmPickAsStop: () -> Unit,
+    onCancelPickOnMap: () -> Unit,
+    onOpenGroupSheet: () -> Unit,
+    modifier: Modifier = Modifier
+) {
         Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .widthIn(max = overlayMaxWidth)
-                .fillMaxWidth(),
+            modifier = modifier,
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (isPickingOnMap) {
@@ -927,15 +1158,16 @@ fun HudOverlay(
                             Text(
                                 text = searchPin.title,
                                 color = EnduPalette.TextPrimary,
-                                fontSize = 13.sp,
+                                fontSize = (13f * cardFontScale).sp,
                                 fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             if (isCalculatingRoute) {
                                 Text(
                                     text = "Calculando cómo llegar…",
                                     color = EnduPalette.TextMuted,
-                                    fontSize = 11.sp
+                                    fontSize = (11f * cardFontScale).sp
                                 )
                             } else if (activeOpt != null) {
                                 val stopCountText = if (intermediateWaypoints.isNotEmpty()) {
@@ -944,15 +1176,16 @@ fun HudOverlay(
                                 Text(
                                     text = "${activeOpt.expectedMinutes} min · ${(activeOpt.distanceKm * 10.0).roundToInt() / 10.0} km$stopCountText",
                                     color = EnduPalette.Accent,
-                                    fontSize = 11.sp,
+                                    fontSize = (11f * cardFontScale).sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             } else {
                                 Text(
                                     text = searchPin.subtitle,
                                     color = EnduPalette.TextMuted,
-                                    fontSize = 11.sp,
-                                    maxLines = 1
+                                    fontSize = (11f * cardFontScale).sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -1114,7 +1347,7 @@ fun HudOverlay(
                             Text(
                                 text = "Track: ${selectedRoute.name}",
                                 color = EnduPalette.TextPrimary,
-                                fontSize = 12.5.sp,
+                                fontSize = (12.5f * cardFontScale).sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1127,7 +1360,7 @@ fun HudOverlay(
                             Text(
                                 text = "${(selectedRoute.totalDistanceKm * 10.0).roundToInt() / 10.0} km · +${selectedRoute.elevationGainM.roundToInt()} m$gpxRemText",
                                 color = EnduPalette.TextMuted,
-                                fontSize = 10.5.sp,
+                                fontSize = (10.5f * cardFontScale).sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1521,7 +1754,6 @@ fun HudOverlay(
             }
             }
         }
-    }
 }
 
 @Composable
@@ -1529,27 +1761,31 @@ private fun TelemetryItem(
     label: String,
     value: String,
     unit: String,
-    color: Color = EnduPalette.TextPrimary
+    color: Color = EnduPalette.TextPrimary,
+    fontScale: Float = 1.0f
 ) {
+    val labelScale = fontScale.coerceAtMost(1.45f)
+    val unitScale = fontScale.coerceAtMost(1.5f)
     Column {
         Text(
             text = label,
             color = EnduPalette.TextMuted,
-            fontSize = 9.sp,
+            fontSize = (9f * labelScale).sp,
             fontWeight = FontWeight.Bold
         )
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 text = value,
                 color = color,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = (16f * fontScale).sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
             )
             Spacer(modifier = Modifier.width(2.dp))
             Text(
                 text = unit,
                 color = EnduPalette.TextMuted,
-                fontSize = 10.sp,
+                fontSize = (10f * unitScale).sp,
                 modifier = Modifier.padding(bottom = 1.dp)
             )
         }

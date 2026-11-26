@@ -9,6 +9,11 @@
 -keepclassmembers class com.oscar.endulink.** {
     *** Companion;
 }
+-keep enum com.oscar.endulink.** { *; }
+-keepclassmembers enum com.oscar.endulink.** {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
 
 # Servicios y componentes declarados en AndroidManifest
 -keep class com.oscar.endulink.platform.BikeForegroundService { *; }

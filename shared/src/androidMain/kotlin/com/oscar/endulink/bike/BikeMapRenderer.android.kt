@@ -597,6 +597,11 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
 
         // 4. Polilíneas de rutas y flechas de sentido (cero asignaciones por frame)
         val scale = (w / 592f).coerceIn(0.45f, 1.5f)
+        val ts = config.tftHudFontScale.coerceIn(1.0f, 1.4f)
+        val strokeScale = config.trackStrokeScale.coerceIn(0.75f, 1.5f)
+        val showArrows = config.showTrackDirectionArrows
+        routePaint.strokeWidth = 10f * strokeScale
+        approachPaint.strokeWidth = 9f * strokeScale
         val maxBound = hypot(w, h) * 0.85f
         val maxArrowRange = hypot(w, h) * 0.78f
         val worldN = (1 shl zoom).toDouble()
@@ -619,7 +624,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                     maxArrowRange = maxArrowRange
                 )
                 canvas.drawPath(routePath, routePaint)
-                if (hasChevrons) drawBatchedChevrons(canvas, scale)
+                if (showArrows && hasChevrons) drawBatchedChevrons(canvas, scale)
             }
         }
 
@@ -634,7 +639,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                 maxArrowRange = maxArrowRange
             )
             canvas.drawPath(approachPath, approachPaint)
-            if (hasChevrons) drawBatchedChevrons(canvas, scale)
+            if (showArrows && hasChevrons) drawBatchedChevrons(canvas, scale)
         }
 
         // 4a. Ruta en línea recta al punto más cercano del GPX cuando te sales del track
@@ -681,22 +686,27 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                     sym.contains("fuel") || sym.contains("gas") -> android.graphics.Color.rgb(48, 209, 88)
                     else -> android.graphics.Color.rgb(0, 229, 255)
                 }
+                val wptPinScale = 1f + (ts - 1f) * 0.45f
                 waypointPinPaint.color = android.graphics.Color.BLACK
-                canvas.drawCircle(wx, wy, 9.5f, waypointPinPaint)
+                canvas.drawCircle(wx, wy, 9.5f * wptPinScale, waypointPinPaint)
                 waypointPinPaint.color = pinColor
-                canvas.drawCircle(wx, wy, 7.5f, waypointPinPaint)
+                canvas.drawCircle(wx, wy, 7.5f * wptPinScale, waypointPinPaint)
                 waypointPinPaint.color = android.graphics.Color.WHITE
-                canvas.drawCircle(wx, wy, 3f, waypointPinPaint)
+                canvas.drawCircle(wx, wy, 3f * wptPinScale, waypointPinPaint)
 
-                if (wpt.name.isNotBlank()) {
+                if (config.showWaypointLabelsOnTft && wpt.name.isNotBlank()) {
                     canvas.save()
                     canvas.translate(wx, wy)
                     canvas.rotate(heading.toFloat())
+                    waypointLabelPaint.textSize = 11.5f * ts
                     val label = if (wpt.name.length > 16) wpt.name.take(15) + "…" else wpt.name
                     val tw = waypointLabelPaint.measureText(label)
-                    tmpTagRect.set(-tw / 2f - 6f, -26f, tw / 2f + 6f, -11f)
+                    val tagPadX = 6f * wptPinScale
+                    val tagBottom = -11f * wptPinScale
+                    val tagTop = tagBottom - (15f * ts)
+                    tmpTagRect.set(-tw / 2f - tagPadX, tagTop, tw / 2f + tagPadX, tagBottom)
                     canvas.drawRoundRect(tmpTagRect, 5f, 5f, hudCardPaint)
-                    canvas.drawText(label, -tw / 2f, -15f, waypointLabelPaint)
+                    canvas.drawText(label, -tw / 2f, tagBottom - 3.5f * ts, waypointLabelPaint)
                     canvas.restore()
                 }
             }
@@ -768,50 +778,75 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         canvas.save()
         canvas.scale(hudScale, hudScale)
 
+        // Aplicar escala de texto HUD configurable al cuadro TFT
+        speedTextPaint.textSize = 42f * ts
+        speedUnitPaint.textSize = 14f * ts
+        textPrimaryPaint.textSize = 17f * ts
+        textMutedPaint.textSize = 12f * ts
+        batteryTextPaint.textSize = 15f * ts
+        val boxGrowth = 1f + (ts - 1f) * 0.55f
+
         // 6. HUD de Moto: Velocímetro (Esquina inferior izquierda)
-        val speedBox = RectF(14f, vh - 82f, 150f, vh - 14f)
+        val spdStr = "${rider.speedKmh.toInt()}"
+        val spdTextW = speedTextPaint.measureText(spdStr)
+        val unitTextW = speedUnitPaint.measureText("km/h")
+        val speedBoxH = 68f * boxGrowth
+        val speedBoxW = maxOf(136f * (1f + (ts - 1f) * 0.42f), 16f + spdTextW + 8f + unitTextW + 14f)
+        val speedBox = RectF(14f, vh - speedBoxH - 14f, 14f + speedBoxW, vh - 14f)
         canvas.drawRoundRect(speedBox, 12f, 12f, hudCardPaint)
         canvas.drawRoundRect(speedBox, 12f, 12f, hudBorderPaint)
 
-        val spdStr = "${rider.speedKmh.toInt()}"
-        canvas.drawText(spdStr, speedBox.left + 16f, speedBox.bottom - 18f, speedTextPaint)
-        canvas.drawText("km/h", speedBox.left + 18f + speedTextPaint.measureText(spdStr) + 6f, speedBox.bottom - 18f, speedUnitPaint)
+        canvas.drawText(spdStr, speedBox.left + 14f, speedBox.bottom - 16f * boxGrowth, speedTextPaint)
+        canvas.drawText("km/h", speedBox.left + 14f + spdTextW + 7f, speedBox.bottom - 16f * boxGrowth, speedUnitPaint)
 
         // 7. HUD de Moto: Altitud (Esquina inferior derecha, siempre visible aunque haya enlace o ruta)
-        val infoBox = RectF(vw - 146f - 14f, vh - 72f, vw - 14f, vh - 14f)
+        val altStr = "${rider.altitudeM.toInt()} m"
+        val altBoxH = 58f * boxGrowth
+        val altBoxW = maxOf(
+            146f * (1f + (ts - 1f) * 0.35f),
+            24f + maxOf(textMutedPaint.measureText("ALTITUD"), textPrimaryPaint.measureText(altStr))
+        )
+        val infoBox = RectF(vw - altBoxW - 14f, vh - altBoxH - 14f, vw - 14f, vh - 14f)
         canvas.drawRoundRect(infoBox, 12f, 12f, hudCardPaint)
         canvas.drawRoundRect(infoBox, 12f, 12f, hudBorderPaint)
-        val altStr = "${rider.altitudeM.toInt()} m"
-        canvas.drawText("ALTITUD", infoBox.left + 12f, infoBox.top + 20f, textMutedPaint)
-        canvas.drawText(altStr, infoBox.left + 12f, infoBox.bottom - 14f, textPrimaryPaint)
+        canvas.drawText("ALTITUD", infoBox.left + 12f, infoBox.top + 19f * boxGrowth, textMutedPaint)
+        canvas.drawText(altStr, infoBox.left + 12f, infoBox.bottom - 12f * boxGrowth, textPrimaryPaint)
 
         // 8. HUD de Moto: Batería y Hora del móvil en tiempo real (Esquina superior derecha)
         val battStatus = getFreshBatteryStatus()
         val pct = if (battStatus.percentage >= 0) battStatus.percentage.coerceIn(0, 100) else 100
         val isCharging = battStatus.isCharging
 
-        val battBoxWidth = if (isCharging) 108f else 96f
-        val battBox = RectF(vw - battBoxWidth - 14f, 12f, vw - 14f, 50f)
+        val topPillH = 38f * (1f + (ts - 1f) * 0.45f)
+        val topPillBottom = 12f + topPillH
+        val pctStr = "$pct%"
+        val pctTextW = batteryTextPaint.measureText(pctStr)
+        val battBoxWidth = maxOf(
+            (if (isCharging) 108f else 96f) * (1f + (ts - 1f) * 0.28f),
+            (if (isCharging) 52f else 42f) + pctTextW + 10f
+        )
+        val battBox = RectF(vw - battBoxWidth - 14f, 12f, vw - 14f, topPillBottom)
         canvas.drawRoundRect(battBox, 10f, 10f, hudCardPaint)
         canvas.drawRoundRect(battBox, 10f, 10f, hudBorderPaint)
 
         // Hora actual justo a la izquierda de la batería
-        val clockBoxWidth = 66f
-        val clockBox = RectF(battBox.left - 8f - clockBoxWidth, 12f, battBox.left - 8f, 50f)
-        canvas.drawRoundRect(clockBox, 10f, 10f, hudCardPaint)
-        canvas.drawRoundRect(clockBox, 10f, 10f, hudBorderPaint)
         val clockStr = currentTftClockHm()
         val clockTextW = batteryTextPaint.measureText(clockStr)
+        val clockBoxWidth = maxOf(66f * (1f + (ts - 1f) * 0.35f), clockTextW + 16f)
+        val clockBox = RectF(battBox.left - 8f - clockBoxWidth, 12f, battBox.left - 8f, topPillBottom)
+        canvas.drawRoundRect(clockBox, 10f, 10f, hudCardPaint)
+        canvas.drawRoundRect(clockBox, 10f, 10f, hudBorderPaint)
+        val pillBaselineY = clockBox.centerY() + (batteryTextPaint.textSize * 0.35f)
         canvas.drawText(
             clockStr,
             clockBox.left + ((clockBoxWidth - clockTextW) * 0.5f).coerceAtLeast(6f),
-            clockBox.bottom - 13f,
+            pillBaselineY,
             batteryTextPaint
         )
 
-        // Icono de contorno de batería: 22px ancho x 13px alto
+        // Icono de contorno de batería: 22px ancho x 14px alto centrado verticalmente
         val iconLeft = battBox.left + 10f
-        val iconTop = battBox.top + 12f
+        val iconTop = battBox.centerY() - 7f
         val iconRight = iconLeft + 22f
         val iconBottom = iconTop + 14f
         val iconBody = RectF(iconLeft, iconTop, iconRight, iconBottom)
@@ -842,7 +877,6 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         }
 
         // Rayo de carga o texto del porcentaje
-        val pctStr = "$pct%"
         val textX = if (isCharging) {
             // Dibujar pequeño rayo vector ⚡
             val bx = iconRight + 9f
@@ -860,33 +894,39 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         } else {
             iconRight + 8f
         }
-        canvas.drawText(pctStr, textX, battBox.bottom - 13f, batteryTextPaint)
+        canvas.drawText(pctStr, textX, pillBaselineY, batteryTextPaint)
 
         // 9. HUD de Moto: Resumen de Enlace / Ruta / GPX (Esquina superior izquierda, sin instrucciones de giro)
         val hasRoadTiming = remainingKm != null && remainingKm > 0.0 && remainingMinutes != null
         val hasGpxRemaining = !hasRoadTiming && remainingKm != null && (remainingKm > 0.0 || routeTypeLabel == "TRACK")
+        val navBoxBottom = 12f + 44f * boxGrowth
         if (hasRoadTiming || hasGpxRemaining) {
-            val navRight = minOf(clockBox.left - 10f, 14f + if (hasRoadTiming) 244f else 156f)
-            val navBox = RectF(14f, 12f, navRight, 56f)
-            canvas.drawRoundRect(navBox, 10f, 10f, hudCardPaint)
-            canvas.drawRoundRect(navBox, 10f, 10f, hudBorderPaint)
-
-            if (hasRoadTiming && remainingKm != null && remainingMinutes != null) {
+            val (topNavLine, mainNavLine) = if (hasRoadTiming && remainingKm != null && remainingMinutes != null) {
                 val kind = routeTypeLabel ?: "RUTA"
                 val etaStr = formatTftEtaHm(remainingMinutes)
                 val kmStr = "${(remainingKm * 10.0).roundToInt() / 10.0} km"
                 val durStr = formatTftDuration(remainingMinutes)
-                canvas.drawText("$kind · Llegada $etaStr", navBox.left + 12f, navBox.top + 18f, speedUnitPaint)
-                canvas.drawText("$kmStr · $durStr", navBox.left + 12f, navBox.bottom - 11f, textPrimaryPaint)
-            } else if (hasGpxRemaining && remainingKm != null) {
-                val remStr = "${(remainingKm * 10.0).roundToInt() / 10.0} km"
-                canvas.drawText("GPX · RESTAN", navBox.left + 12f, navBox.top + 18f, speedUnitPaint)
-                canvas.drawText(remStr, navBox.left + 12f, navBox.bottom - 11f, textPrimaryPaint)
+                "$kind · Llegada $etaStr" to "$kmStr · $durStr"
+            } else {
+                val remStr = "${((remainingKm ?: 0.0) * 10.0).roundToInt() / 10.0} km"
+                "GPX · RESTAN" to remStr
             }
+            val neededNavW = maxOf(
+                if (hasRoadTiming) 244f else 156f,
+                maxOf(speedUnitPaint.measureText(topNavLine), textPrimaryPaint.measureText(mainNavLine)) + 24f
+            )
+            val navRight = minOf(clockBox.left - 10f, 14f + neededNavW)
+            val navBox = RectF(14f, 12f, navRight, navBoxBottom)
+            canvas.drawRoundRect(navBox, 10f, 10f, hudCardPaint)
+            canvas.drawRoundRect(navBox, 10f, 10f, hudBorderPaint)
+
+            canvas.drawText(topNavLine, navBox.left + 12f, navBox.top + 17f * boxGrowth, speedUnitPaint)
+            canvas.drawText(mainNavLine, navBox.left + 12f, navBox.bottom - 10f * boxGrowth, textPrimaryPaint)
         }
 
         // 9b. Contador discreto de grupo en HUD (debajo de hora/batería)
-        val grpBox = RectF(vw - 86f - 14f, 56f, vw - 14f, 82f)
+        val grpTop = topPillBottom + 6f
+        val grpBox = RectF(vw - 86f - 14f, grpTop, vw - 14f, grpTop + 26f)
         if (groupActiveCount > 0 && config.showGroupHudBadgeOnTft) {
             canvas.drawRoundRect(grpBox, 8f, 8f, hudCardPaint)
             canvas.drawRoundRect(grpBox, 8f, 8f, hudBorderPaint)
@@ -915,7 +955,7 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
             val expanded = alertBanner.isExpanded
             val alertRight = if (expanded) vw - 14f else minOf(maxAlertRight, 14f + 250f)
             if (alertRight > 54f) {
-                val alertTop = 62f
+                val alertTop = maxOf(navBoxBottom, topPillBottom) + 6f
                 val innerPadX = if (expanded) 12f else 9f
                 val innerW = (alertRight - 14f - innerPadX * 2f).coerceAtLeast(40f)
                 groupTextPaint.textSize = if (expanded) 15f else 11.2f
@@ -1013,11 +1053,13 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
         }
 
         // 9e. Advertencia configurable de salida del track GPX activo
-        if (config.showGpxOffTrackWarning && gpxOffTrackMeters != null && gpxOffTrackMeters >= 35.0) {
-            val warnLeft = 160f
-            val warnRight = vw - 168f
-            if (warnRight > warnLeft + 120f) {
-                groupRect.set(warnLeft, vh - 64f, warnRight, vh - 14f)
+        val gpxWarnThreshold = config.gpxOffTrackThresholdMeters.toDouble().coerceIn(20.0, 200.0)
+        if (config.showGpxOffTrackWarning && gpxOffTrackMeters != null && gpxOffTrackMeters >= gpxWarnThreshold) {
+            val warnLeft = speedBox.right + 10f
+            val warnRight = infoBox.left - 10f
+            if (warnRight > warnLeft + 110f) {
+                val warnH = 50f * boxGrowth
+                groupRect.set(warnLeft, vh - warnH - 14f, warnRight, vh - 14f)
                 canvas.drawRoundRect(groupRect, 10f, 10f, gpxReturnWarnBgPaint)
                 canvas.drawRoundRect(groupRect, 10f, 10f, gpxReturnWarnStrokePaint)
 
@@ -1031,11 +1073,11 @@ actual class BikeMapRenderer actual constructor(private val tileStore: TileStore
                 }
                 val warnCenterX = groupRect.centerX()
                 gpxReturnWarnTextPaint.color = android.graphics.Color.rgb(255, 224, 90)
-                gpxReturnWarnTextPaint.textSize = 11.5f
-                canvas.drawText("⚠ FUERA DEL GPX", warnCenterX, groupRect.top + 20f, gpxReturnWarnTextPaint)
+                gpxReturnWarnTextPaint.textSize = 11.5f * ts.coerceAtMost(1.25f)
+                canvas.drawText("⚠ FUERA DEL GPX", warnCenterX, groupRect.top + 19f * boxGrowth, gpxReturnWarnTextPaint)
                 gpxReturnWarnTextPaint.color = android.graphics.Color.WHITE
-                gpxReturnWarnTextPaint.textSize = 13.5f
-                canvas.drawText("A $distLabel$dirLabel", warnCenterX, groupRect.bottom - 10f, gpxReturnWarnTextPaint)
+                gpxReturnWarnTextPaint.textSize = 13.5f * ts.coerceAtMost(1.25f)
+                canvas.drawText("A $distLabel$dirLabel", warnCenterX, groupRect.bottom - 10f * boxGrowth, gpxReturnWarnTextPaint)
             }
         }
 

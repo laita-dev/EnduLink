@@ -59,7 +59,12 @@ data class BikeMapConfig(
     val showGroupAlertsOnTft: Boolean = true,
     val showPhoneNotificationsOnTft: Boolean = true,
     val tftNotificationDurationSeconds: Int = 6,
-    val showGpxOffTrackWarning: Boolean = true
+    val showGpxOffTrackWarning: Boolean = true,
+    val tftHudFontScale: Float = 1.0f,
+    val showWaypointLabelsOnTft: Boolean = true,
+    val gpxOffTrackThresholdMeters: Int = 35,
+    val trackStrokeScale: Float = 1.0f,
+    val showTrackDirectionArrows: Boolean = true
 ) {
     fun resolveEffectiveZoom(speedKmh: Double): Int {
         if (!autoZoomBySpeed) return zoom.coerceIn(5, 18)

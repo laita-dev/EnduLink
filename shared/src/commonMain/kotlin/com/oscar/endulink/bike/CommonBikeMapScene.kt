@@ -514,7 +514,10 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         }
 
         // 4. Polilíneas de rutas y flechas de sentido (sin asignaciones por frame)
-        routePaint.strokeWidth = 10f * scale
+        val ts = config.tftHudFontScale.coerceIn(1.0f, 1.4f)
+        val strokeScale = config.trackStrokeScale.coerceIn(0.75f, 1.5f)
+        val showArrows = config.showTrackDirectionArrows
+        routePaint.strokeWidth = 10f * scale * strokeScale
         val maxBound = hypot(w, h) * 0.85f
         val maxArrowRange = hypot(w, h) * 0.78f
         val worldN = (1 shl zoom).toDouble()
@@ -537,11 +540,11 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                     maxArrowRange = maxArrowRange
                 )
                 canvas.drawPath(routePath, routePaint)
-                if (hasChevrons) drawBatchedChevrons(canvas, scale)
+                if (showArrows && hasChevrons) drawBatchedChevrons(canvas, scale)
             }
         }
 
-        approachPaint.strokeWidth = 9f * scale
+        approachPaint.strokeWidth = 9f * scale * strokeScale
         if (roadRouteCoordinates != null && roadRouteCoordinates.size >= 2) {
             val hasChevrons = buildClippedRouteAndChevronsFromCoords(
                 outPath = approachPath,
@@ -553,7 +556,7 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                 maxArrowRange = maxArrowRange
             )
             canvas.drawPath(approachPath, approachPaint)
-            if (hasChevrons) drawBatchedChevrons(canvas, scale)
+            if (showArrows && hasChevrons) drawBatchedChevrons(canvas, scale)
         }
 
         // 4a. Ruta en línea recta al punto más cercano del GPX cuando te sales del track
@@ -603,12 +606,37 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                     sym.contains("fuel") || sym.contains("gas") -> Color(48, 209, 88)
                     else -> Color(0, 229, 255)
                 }
+                val wptPinScale = 1f + (ts - 1f) * 0.45f
                 waypointPinPaint.color = Color.Black
-                canvas.drawCircle(Offset(wx, wy), 9.5f * scale, waypointPinPaint)
+                canvas.drawCircle(Offset(wx, wy), 9.5f * scale * wptPinScale, waypointPinPaint)
                 waypointPinPaint.color = pinColor
-                canvas.drawCircle(Offset(wx, wy), 7.5f * scale, waypointPinPaint)
+                canvas.drawCircle(Offset(wx, wy), 7.5f * scale * wptPinScale, waypointPinPaint)
                 waypointPinPaint.color = Color.White
-                canvas.drawCircle(Offset(wx, wy), 3f * scale, waypointPinPaint)
+                canvas.drawCircle(Offset(wx, wy), 3f * scale * wptPinScale, waypointPinPaint)
+
+                if (config.showWaypointLabelsOnTft && wpt.name.isNotBlank()) {
+                    canvas.save()
+                    canvas.translate(wx, wy)
+                    canvas.rotate(heading.toFloat())
+                    val label = if (wpt.name.length > 16) wpt.name.take(15) else wpt.name
+                    val lblSize = 10.5f * scale * ts
+                    val tw = TftVectorText.measureText(label, lblSize)
+                    val padX = 6f * scale * wptPinScale
+                    val tagBottom = -11f * scale * wptPinScale
+                    val tagTop = tagBottom - (15f * scale * ts)
+                    val tagR = 5f * scale
+                    canvas.drawRoundRect(-tw / 2f - padX, tagTop, tw / 2f + padX, tagBottom, tagR, tagR, hudCardPaint)
+                    TftVectorText.drawText(
+                        canvas = canvas,
+                        text = label,
+                        x = -tw / 2f,
+                        y = tagBottom - 3.5f * scale * ts,
+                        size = lblSize,
+                        color = Color.White,
+                        strokeW = 1.5f * scale * ts
+                    )
+                    canvas.restore()
+                }
             }
         }
 
@@ -669,40 +697,52 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         canvas.drawPath(corePath, riderArrowCorePaint)
         canvas.restore()
 
+        val boxGrowth = 1f + (ts - 1f) * 0.55f
+
         // 6. HUD Velocímetro (Esquina inferior izquierda)
+        val spdStr = "${rider.speedKmh.toInt()}"
+        val spdSize = 36f * scale * ts
+        val spdUnitSize = 11.5f * scale * ts
+        val spdWidth = TftVectorText.measureText(spdStr, spdSize)
+        val unitWidth = TftVectorText.measureText("KM/H", spdUnitSize)
         val speedLeft = 14f * scale
-        val speedTop = h - 82f * scale
-        val speedRight = 152f * scale
+        val speedBoxH = 68f * scale * boxGrowth
+        val speedBoxW = maxOf(138f * scale * (1f + (ts - 1f) * 0.42f), 14f * scale + spdWidth + 8f * scale + unitWidth + 14f * scale)
+        val speedTop = h - speedBoxH - 14f * scale
+        val speedRight = speedLeft + speedBoxW
         val speedBottom = h - 14f * scale
         val rCard = 12f * scale
         canvas.drawRoundRect(speedLeft, speedTop, speedRight, speedBottom, rCard, rCard, hudCardPaint)
         canvas.drawRoundRect(speedLeft, speedTop, speedRight, speedBottom, rCard, rCard, hudBorderPaint)
 
-        val spdStr = "${rider.speedKmh.toInt()}"
-        val spdSize = 36f * scale
-        val spdWidth = TftVectorText.measureText(spdStr, spdSize)
         TftVectorText.drawText(
             canvas = canvas,
             text = spdStr,
             x = speedLeft + 14f * scale,
-            y = speedBottom - 16f * scale,
+            y = speedBottom - 16f * scale * boxGrowth,
             size = spdSize,
             color = Color.White,
-            strokeW = 3.6f * scale
+            strokeW = 3.6f * scale * ts
         )
         TftVectorText.drawText(
             canvas = canvas,
             text = "KM/H",
             x = speedLeft + 18f * scale + spdWidth,
-            y = speedBottom - 16f * scale,
-            size = 11.5f * scale,
+            y = speedBottom - 16f * scale * boxGrowth,
+            size = spdUnitSize,
             color = Color(255, 107, 0),
-            strokeW = 1.8f * scale
+            strokeW = 1.8f * scale * ts
         )
 
         // 7. HUD Altitud (Esquina inferior derecha, siempre visible aunque haya enlace o ruta)
-        val infoWidth = 146f * scale
-        val infoHeight = 58f * scale
+        val altLblSize = 10.5f * scale * ts
+        val altValSize = 15.5f * scale * ts
+        val altValStr = "${rider.altitudeM.toInt()} M"
+        val infoWidth = maxOf(
+            146f * scale * (1f + (ts - 1f) * 0.35f),
+            24f * scale + maxOf(TftVectorText.measureText("ALTITUD", altLblSize), TftVectorText.measureText(altValStr, altValSize))
+        )
+        val infoHeight = 58f * scale * boxGrowth
         val infoLeft = w - infoWidth - 14f * scale
         val infoTop = h - infoHeight - 14f * scale
         val infoRight = w - 14f * scale
@@ -714,19 +754,19 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             canvas = canvas,
             text = "ALTITUD",
             x = infoLeft + 12f * scale,
-            y = infoTop + 21f * scale,
-            size = 10.5f * scale,
+            y = infoTop + 20f * scale * boxGrowth,
+            size = altLblSize,
             color = Color(139, 148, 158),
-            strokeW = 1.5f * scale
+            strokeW = 1.5f * scale * ts
         )
         TftVectorText.drawText(
             canvas = canvas,
-            text = "${rider.altitudeM.toInt()} M",
+            text = altValStr,
             x = infoLeft + 12f * scale,
-            y = infoBottom - 14f * scale,
-            size = 15.5f * scale,
+            y = infoBottom - 12f * scale * boxGrowth,
+            size = altValSize,
             color = Color.White,
-            strokeW = 2.1f * scale
+            strokeW = 2.1f * scale * ts
         )
 
         // 8. HUD Batería y Hora del móvil en tiempo real (Esquina superior derecha)
@@ -734,36 +774,44 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         val pct = if (battStatus.percentage >= 0) battStatus.percentage.coerceIn(0, 100) else 100
         val isCharging = battStatus.isCharging
 
-        val battBoxWidth = (if (isCharging) 108f else 96f) * scale
+        val clockTextSize = 13.5f * scale * ts
+        val pctStr = "$pct%"
+        val pctTextW = TftVectorText.measureText(pctStr, clockTextSize)
+        val topPillH = 38f * scale * (1f + (ts - 1f) * 0.45f)
+        val battBoxWidth = maxOf(
+            (if (isCharging) 108f else 96f) * scale * (1f + (ts - 1f) * 0.28f),
+            (if (isCharging) 52f else 42f) * scale + pctTextW + 10f * scale
+        )
         val battLeft = w - battBoxWidth - 14f * scale
         val battTop = 12f * scale
         val battRight = w - 14f * scale
-        val battBottom = 50f * scale
+        val battBottom = battTop + topPillH
         val rBatt = 10f * scale
         canvas.drawRoundRect(battLeft, battTop, battRight, battBottom, rBatt, rBatt, hudCardPaint)
         canvas.drawRoundRect(battLeft, battTop, battRight, battBottom, rBatt, rBatt, hudBorderPaint)
 
         // Hora actual justo a la izquierda de la batería
-        val clockBoxWidth = 66f * scale
+        val clockStr = currentTftClockHm()
+        val clockTextW = TftVectorText.measureText(clockStr, clockTextSize)
+        val clockBoxWidth = maxOf(66f * scale * (1f + (ts - 1f) * 0.35f), clockTextW + 16f * scale)
         val clockRight = battLeft - 8f * scale
         val clockLeft = clockRight - clockBoxWidth
         canvas.drawRoundRect(clockLeft, battTop, clockRight, battBottom, rBatt, rBatt, hudCardPaint)
         canvas.drawRoundRect(clockLeft, battTop, clockRight, battBottom, rBatt, rBatt, hudBorderPaint)
-        val clockStr = currentTftClockHm()
-        val clockTextSize = 13.5f * scale
-        val clockTextW = TftVectorText.measureText(clockStr, clockTextSize)
+        val pillMidY = (battTop + battBottom) * 0.5f
+        val pillBaselineY = pillMidY + clockTextSize * 0.38f
         TftVectorText.drawText(
             canvas = canvas,
             text = clockStr,
             x = clockLeft + ((clockBoxWidth - clockTextW) * 0.5f).coerceAtLeast(6f * scale),
-            y = battBottom - 13f * scale,
+            y = pillBaselineY,
             size = clockTextSize,
             color = Color.White,
-            strokeW = 1.9f * scale
+            strokeW = 1.9f * scale * ts
         )
 
         val iconLeft = battLeft + 10f * scale
-        val iconTop = battTop + 12f * scale
+        val iconTop = pillMidY - 7f * scale
         val iconRight = iconLeft + 22f * scale
         val iconBottom = iconTop + 14f * scale
         batteryOutlinePaint.strokeWidth = 1.8f * scale
@@ -799,7 +847,6 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             )
         }
 
-        val pctStr = "$pct%"
         val textX = if (isCharging) {
             val bx = iconRight + 9f * scale
             val by = (battTop + battBottom) * 0.5f
@@ -820,24 +867,17 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             canvas = canvas,
             text = pctStr,
             x = textX,
-            y = battBottom - 13f * scale,
-            size = 13.5f * scale,
+            y = pillBaselineY,
+            size = clockTextSize,
             color = Color.White,
-            strokeW = 1.9f * scale
+            strokeW = 1.9f * scale * ts
         )
 
         // 9. HUD Resumen de Enlace / Ruta / GPX (Esquina superior izquierda, sin instrucciones de giro)
         val hasRoadTiming = remainingKm != null && remainingKm > 0.0 && remainingMinutes != null
         val hasGpxRemaining = !hasRoadTiming && remainingKm != null && (remainingKm > 0.0 || routeTypeLabel == "TRACK")
+        val navBottom = battTop + 44f * scale * boxGrowth
         if (hasRoadTiming || hasGpxRemaining) {
-            val navLeft = 14f * scale
-            val maxNavRight = clockLeft - 10f * scale
-            val desiredW = (if (hasRoadTiming) 244f else 156f) * scale
-            val navRight = minOf(maxNavRight, navLeft + desiredW)
-            val navBottom = 56f * scale
-            canvas.drawRoundRect(navLeft, battTop, navRight, navBottom, rBatt, rBatt, hudCardPaint)
-            canvas.drawRoundRect(navLeft, battTop, navRight, navBottom, rBatt, rBatt, hudBorderPaint)
-
             val (topLbl, mainVal) = if (hasRoadTiming && remainingKm != null && remainingMinutes != null) {
                 val kind = routeTypeLabel ?: "RUTA"
                 val etaStr = formatTftEtaHm(remainingMinutes)
@@ -849,31 +889,43 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                 "GPX - RESTAN" to kmStr
             }
 
+            val navTopSize = 9.5f * scale * ts
+            val navMainSize = 12.5f * scale * ts
+            val navLeft = 14f * scale
+            val maxNavRight = clockLeft - 10f * scale
+            val desiredW = maxOf(
+                (if (hasRoadTiming) 244f else 156f) * scale,
+                maxOf(TftVectorText.measureText(topLbl, navTopSize), TftVectorText.measureText(mainVal, navMainSize)) + 24f * scale
+            )
+            val navRight = minOf(maxNavRight, navLeft + desiredW)
+            canvas.drawRoundRect(navLeft, battTop, navRight, navBottom, rBatt, rBatt, hudCardPaint)
+            canvas.drawRoundRect(navLeft, battTop, navRight, navBottom, rBatt, rBatt, hudBorderPaint)
+
             TftVectorText.drawText(
                 canvas = canvas,
                 text = topLbl,
                 x = navLeft + 10f * scale,
-                y = battTop + 17f * scale,
-                size = 9.5f * scale,
+                y = battTop + 17f * scale * boxGrowth,
+                size = navTopSize,
                 color = Color(255, 107, 0),
-                strokeW = 1.4f * scale
+                strokeW = 1.4f * scale * ts
             )
             TftVectorText.drawText(
                 canvas = canvas,
                 text = mainVal,
                 x = navLeft + 10f * scale,
-                y = navBottom - 10f * scale,
-                size = 12.5f * scale,
+                y = navBottom - 10f * scale * boxGrowth,
+                size = navMainSize,
                 color = Color.White,
-                strokeW = 1.8f * scale
+                strokeW = 1.8f * scale * ts
             )
         }
 
         // 9b. Contador discreto de grupo en HUD (debajo de hora/batería)
         val grpBoxWidth = 86f * scale
         val grpLeft = w - grpBoxWidth - 14f * scale
-        val grpTop = 56f * scale
-        val grpBottom = 82f * scale
+        val grpTop = battBottom + 6f * scale
+        val grpBottom = grpTop + 26f * scale
         if (groupActiveCount > 0 && config.showGroupHudBadgeOnTft) {
             canvas.drawRoundRect(grpLeft, grpTop, w - 14f * scale, grpBottom, 8f * scale, 8f * scale, hudCardPaint)
             canvas.drawRoundRect(grpLeft, grpTop, w - 14f * scale, grpBottom, 8f * scale, 8f * scale, hudBorderPaint)
@@ -909,7 +961,7 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
             } else {
                 minOf(maxAlertRight, alertLeft + 250f * scale)
             }
-            val alertTop = 62f * scale
+            val alertTop = maxOf(navBottom, battBottom) + 6f * scale
             val innerPadX = if (expanded) 12f * scale else 9f * scale
             val innerW = (alertRight - alertLeft - innerPadX * 2f).coerceAtLeast(40f * scale)
             val headerSize = if (expanded) 14.5f * scale else 10.2f * scale
@@ -1020,11 +1072,13 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         }
 
         // 9e. Advertencia configurable de salida del track GPX activo (franja inferior central libre de HUD)
-        if (config.showGpxOffTrackWarning && gpxOffTrackMeters != null && gpxOffTrackMeters >= 35.0) {
-            val warnLeft = 160f * scale
-            val warnRight = w - 168f * scale
-            if (warnRight > warnLeft + 120f * scale) {
-                val warnTop = h - 64f * scale
+        val gpxWarnThreshold = config.gpxOffTrackThresholdMeters.toDouble().coerceIn(20.0, 200.0)
+        if (config.showGpxOffTrackWarning && gpxOffTrackMeters != null && gpxOffTrackMeters >= gpxWarnThreshold) {
+            val warnLeft = speedRight + 10f * scale
+            val warnRight = infoLeft - 10f * scale
+            if (warnRight > warnLeft + 110f * scale) {
+                val warnH = 50f * scale * boxGrowth
+                val warnTop = h - warnH - 14f * scale
                 val warnBottom = h - 14f * scale
                 val warnR = 10f * scale
                 canvas.drawRoundRect(warnLeft, warnTop, warnRight, warnBottom, warnR, warnR, gpxReturnWarnBgPaint)
@@ -1039,10 +1093,11 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                 } else {
                     ""
                 }
+                val warnTs = ts.coerceAtMost(1.25f)
                 val titleStr = "! FUERA DEL GPX"
                 val subStr = "A $distLabel$dirLabel"
-                val warnTitleSize = 11f * scale
-                val warnSubSize = 12f * scale
+                val warnTitleSize = 11f * scale * warnTs
+                val warnSubSize = 12f * scale * warnTs
                 val titleW = TftVectorText.measureText(titleStr, warnTitleSize)
                 val subW = TftVectorText.measureText(subStr, warnSubSize)
                 val warnCenterX = (warnLeft + warnRight) * 0.5f
@@ -1051,16 +1106,16 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                     canvas = canvas,
                     text = titleStr,
                     x = warnCenterX - titleW * 0.5f,
-                    y = warnTop + 20f * scale,
+                    y = warnTop + 19f * scale * boxGrowth,
                     size = warnTitleSize,
                     color = Color(255, 224, 90),
-                    strokeW = 1.7f * scale
+                    strokeW = 1.7f * scale * warnTs
                 )
                 TftVectorText.drawText(
                     canvas = canvas,
                     text = subStr,
                     x = warnCenterX - subW * 0.5f,
-                    y = warnBottom - 10f * scale,
+                    y = warnBottom - 10f * scale * boxGrowth,
                     size = warnSubSize,
                     color = Color.White,
                     strokeW = 1.85f * scale

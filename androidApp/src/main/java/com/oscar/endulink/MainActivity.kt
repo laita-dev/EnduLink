@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.IntentCompat
 import com.oscar.endulink.bike.AndroidBikeKeysStorage
 import com.oscar.endulink.platform.AndroidAppContext
+import com.oscar.endulink.platform.AndroidScreenWakeHost
 import com.oscar.endulink.trail.importGPXFromUri
 import com.oscar.endulink.ui.App
 
@@ -32,6 +33,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        AndroidScreenWakeHost.detach(this)
         if (isFinishing && !isChangingConfigurations) {
             com.oscar.endulink.ui.EnduController.shared.stop()
         }
@@ -48,6 +50,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         AndroidBikeKeysStorage.appContext = applicationContext
         AndroidAppContext.appContext = applicationContext
+        AndroidScreenWakeHost.attach(this)
 
         val permissions = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,

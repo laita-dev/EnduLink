@@ -198,6 +198,10 @@ class EnduController {
     private val _bikeMapConfig = MutableStateFlow(BikeMapConfig())
     val bikeMapConfig: StateFlow<BikeMapConfig> = _bikeMapConfig.asStateFlow()
 
+    // Ajustes generales de visualización y conducción (Móvil + sincronización TFT)
+    private val _appDisplaySettings = MutableStateFlow(AppDisplaySettings())
+    val appDisplaySettings: StateFlow<AppDisplaySettings> = _appDisplaySettings.asStateFlow()
+
     private val _livePreviewBitmap = MutableStateFlow<androidx.compose.ui.graphics.ImageBitmap?>(null)
     val livePreviewBitmap: StateFlow<androidx.compose.ui.graphics.ImageBitmap?> = _livePreviewBitmap.asStateFlow()
 
@@ -243,9 +247,18 @@ class EnduController {
     init {
         // Cargar ajustes, waypoints y tracks GPX persistidos en almacenamiento local
         val savedSettings = SettingsStore.loadSettings()
+        val normalizedDisplay = savedSettings.appDisplaySettings.normalized()
+        _appDisplaySettings.value = normalizedDisplay
         _selectedLayer.value = MapLayer.fromRaw(savedSettings.selectedLayerRaw)
-        _bikeMapConfig.value = savedSettings.bikeMapConfig
-        syncNotificationCenterConfig(savedSettings.bikeMapConfig)
+        val mergedBikeConfig = savedSettings.bikeMapConfig.copy(
+            tftHudFontScale = normalizedDisplay.tftHudFontScale,
+            showWaypointLabelsOnTft = normalizedDisplay.showWaypointLabelsOnMap,
+            gpxOffTrackThresholdMeters = normalizedDisplay.gpxOffTrackThresholdMeters,
+            trackStrokeScale = normalizedDisplay.trackStrokeScale,
+            showTrackDirectionArrows = normalizedDisplay.showTrackDirectionArrows
+        )
+        _bikeMapConfig.value = mergedBikeConfig
+        syncNotificationCenterConfig(mergedBikeConfig)
         _bikeQr.value = savedSettings.bikeQr
         _allowLocalLanTesting.value = true
         _quickMarkers.value = WaypointStore.loadWaypoints()
@@ -439,7 +452,9 @@ class EnduController {
                             } else {
                                 0.0
                             }
-                            val enterThreshold = maxOf(35.0, accGpxAllowance)
+                            val userGpxThreshold = _appDisplaySettings.value.gpxOffTrackThresholdMeters.toDouble().coerceIn(20.0, 200.0)
+                            val enterThreshold = maxOf(userGpxThreshold, accGpxAllowance)
+                            val exitThreshold = (userGpxThreshold * 0.62).coerceAtLeast(15.0)
                             if (!_isOffGpxTrack.value) {
                                 if (progress.offTrackMeters >= enterThreshold) {
                                     consecutiveOffGpxSamples++
@@ -449,7 +464,7 @@ class EnduController {
                                 } else {
                                     consecutiveOffGpxSamples = 0
                                 }
-                            } else if (progress.offTrackMeters <= 22.0) {
+                            } else if (progress.offTrackMeters <= exitThreshold) {
                                 consecutiveOffGpxSamples = 0
                                 _isOffGpxTrack.value = false
                             }
@@ -675,8 +690,42 @@ class EnduController {
             bikeConfig = _bikeMapConfig.value,
             bikeQr = _bikeQr.value,
             allowLocalLanTesting = _allowLocalLanTesting.value,
-            groupConfig = groupManager.config.value
+            groupConfig = groupManager.config.value,
+            appDisplaySettings = _appDisplaySettings.value
         )
+    }
+
+    private fun syncBikeConfigWithDisplaySettings(display: AppDisplaySettings) {
+        _bikeMapConfig.value = _bikeMapConfig.value.copy(
+            tftHudFontScale = display.tftHudFontScale,
+            showWaypointLabelsOnTft = display.showWaypointLabelsOnMap,
+            gpxOffTrackThresholdMeters = display.gpxOffTrackThresholdMeters,
+            trackStrokeScale = display.trackStrokeScale,
+            showTrackDirectionArrows = display.showTrackDirectionArrows
+        )
+    }
+
+    fun updateAppDisplaySettings(transform: (AppDisplaySettings) -> AppDisplaySettings) {
+        val updated = transform(_appDisplaySettings.value).normalized()
+        _appDisplaySettings.value = updated
+        syncBikeConfigWithDisplaySettings(updated)
+        persistSettings()
+        refreshStaticPreview()
+    }
+
+    fun resetAppDisplaySettings() {
+        val defaults = AppDisplaySettings()
+        _appDisplaySettings.value = defaults
+        _bikeMapConfig.value = _bikeMapConfig.value.copy(
+            showGpxOffTrackWarning = true,
+            tftHudFontScale = defaults.tftHudFontScale,
+            showWaypointLabelsOnTft = defaults.showWaypointLabelsOnMap,
+            gpxOffTrackThresholdMeters = defaults.gpxOffTrackThresholdMeters,
+            trackStrokeScale = defaults.trackStrokeScale,
+            showTrackDirectionArrows = defaults.showTrackDirectionArrows
+        )
+        persistSettings()
+        refreshStaticPreview()
     }
 
     fun setLayer(layer: MapLayer) {

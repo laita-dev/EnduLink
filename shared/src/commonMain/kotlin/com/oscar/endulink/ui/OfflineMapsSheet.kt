@@ -38,9 +38,9 @@ private enum class OfflineSheetTab {
 }
 
 /**
- * Gestor completo de Mapas Offline para EnduLink:
- * - Pestaña "Descargar zonas": selector de capa, selector de zoom máximo, estimación de tamaño y catálogo.
- * - Pestaña "Descargados": administración de paquetes guardados y uso de almacenamiento por capa en segundo plano.
+ * Pantalla completa del gestor de Mapas Offline para EnduLink / motillOS.
+ * Todos los controles (pestañas, capa, zoom, categorías, buscador y lista) viven dentro
+ * de una única LazyColumn para que funcione igual de fluida tanto en vertical como en horizontal.
  */
 @Composable
 fun OfflineMapsSheet(
@@ -122,724 +122,829 @@ fun OfflineMapsSheet(
         }
     }
 
-    Card(
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-        colors = CardDefaults.cardColors(containerColor = EnduPalette.Surface),
-        modifier = modifier.fillMaxWidth().fillMaxHeight(0.90f)
+    Surface(
+        color = EnduPalette.Background,
+        modifier = modifier.fillMaxSize()
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // 1. Cabecera con título, resumen y botón de cierre
+        Column(modifier = Modifier.fillMaxSize()) {
+            // 1. Barra superior fija y compacta (compatible con vertical y horizontal)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "← Volver",
+                    color = EnduPalette.Accent,
+                    fontSize = 14.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onClose() }
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                )
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Mapas Offline",
+                        color = EnduPalette.TextPrimary,
+                        fontSize = 16.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    val sizeText = if (isScanningStorage && totalBytes == 0L) "calculando..." else "${formatBytesCompact(totalBytes)} en caché"
+                    Text(
+                        text = "${downloadedPackages.size} zonas · $sizeText",
+                        color = if (downloadedPackages.isNotEmpty()) EnduPalette.Success else EnduPalette.TextMuted,
+                        fontSize = 11.sp
+                    )
+                }
+
+                // Espaciador equilibrado a la derecha para centrar el título
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(EnduPalette.Accent.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    DownloadTrayIcon(color = EnduPalette.Accent, size = 17.dp)
+                }
+            }
+
+            HorizontalDivider(color = EnduPalette.Outline.copy(alpha = 0.5f))
+
+            // 2. Contenido completo desplazable en una sola LazyColumn (vertical y horizontal)
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .widthIn(max = 720.dp)
+                        .fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Selector de pestañas: Descargar vs Descargados
+                    item(key = "offline_tabs") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(EnduPalette.Surface)
+                                .border(0.5.dp, EnduPalette.Outline, RoundedCornerShape(10.dp))
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            OfflineTabButton(
+                                label = "Descargar zonas",
+                                isSelected = (activeTab == OfflineSheetTab.DOWNLOAD),
+                                badge = null,
+                                onClick = { activeTab = OfflineSheetTab.DOWNLOAD },
+                                modifier = Modifier.weight(1f)
+                            )
+                            OfflineTabButton(
+                                label = "Descargados",
+                                isSelected = (activeTab == OfflineSheetTab.MANAGE),
+                                badge = "${downloadedPackages.size}",
+                                onClick = { activeTab = OfflineSheetTab.MANAGE },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    // Tarjeta de descarga en curso (visible en ambas pestañas)
+                    if (progress.isDownloading) {
+                        item(key = "download_progress") {
+                            OfflineProgressCard(
+                                progress = progress,
+                                onCancelDownload = onCancelDownload
+                            )
+                        }
+                    }
+
+                    if (activeTab == OfflineSheetTab.DOWNLOAD) {
+                        // Controles de capa, zoom, categorías y buscador (desplazables en horizontal)
+                        item(key = "download_controls") {
+                            OfflineDownloadControlsCard(
+                                offlineTargetLayer = offlineTargetLayer,
+                                selectedMaxZoomOverride = selectedMaxZoomOverride,
+                                categories = categories,
+                                selectedCategory = selectedCategory,
+                                filterQuery = filterQuery,
+                                onSelectTargetLayer = { lay ->
+                                    offlineTargetLayer = lay
+                                    onSelectLayer(lay)
+                                },
+                                onSelectMaxZoom = { selectedMaxZoomOverride = it },
+                                onSelectCategory = { selectedCategory = it },
+                                onFilterQueryChange = { filterQuery = it }
+                            )
+                        }
+
+                        if (filteredPresets.isEmpty()) {
+                            item(key = "empty_search") {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "No se encontraron regiones con '$filterQuery'",
+                                        color = EnduPalette.TextMuted,
+                                        fontSize = 12.5.sp
+                                    )
+                                }
+                            }
+                        } else {
+                            items(filteredPresets, key = { it.id }) { preset ->
+                                val existingEntry = downloadedPackageByPresetLayer[preset.id to offlineTargetLayer]
+                                OfflinePresetRow(
+                                    preset = preset,
+                                    offlineTargetLayer = offlineTargetLayer,
+                                    selectedMaxZoomOverride = selectedMaxZoomOverride,
+                                    existingEntry = existingEntry,
+                                    onDownload = { effMaxZ -> onDownloadRegion(preset, offlineTargetLayer, effMaxZ) },
+                                    onRemove = { key ->
+                                        onRemovePackage(key)
+                                        storageRevision++
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        // Pestaña 2: Administrar mapas descargados
+                        item(key = "storage_summary") {
+                            OfflineStorageSummaryCard(
+                                isScanningStorage = isScanningStorage,
+                                totalBytes = totalBytes,
+                                downloadedCount = downloadedPackages.size,
+                                layerStorage = layerStorage,
+                                onClearCache = {
+                                    onClearCache()
+                                    storageRevision++
+                                },
+                                onClearLayerCache = { lay ->
+                                    onClearLayerCache(lay)
+                                    storageRevision++
+                                }
+                            )
+                        }
+
+                        if (parsedDownloadedItems.isEmpty()) {
+                            item(key = "empty_downloaded") {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 32.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    DownloadTrayIcon(color = EnduPalette.TextMuted, size = 30.dp)
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = "No tienes zonas descargadas",
+                                        color = EnduPalette.TextPrimary,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Descarga una comunidad, país o zona trail para navegar sin cobertura.",
+                                        color = EnduPalette.TextMuted,
+                                        fontSize = 11.5.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Button(
+                                        onClick = { activeTab = OfflineSheetTab.DOWNLOAD },
+                                        colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.Accent),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Explorar zonas para descargar", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        } else {
+                            items(parsedDownloadedItems, key = { it.first }) { (packageKey, spec) ->
+                                OfflineDownloadedPackageRow(
+                                    packageKey = packageKey,
+                                    spec = spec,
+                                    onRefresh = { onDownloadRegion(spec.preset, spec.layer, spec.maxZoom) },
+                                    onRemove = {
+                                        onRemovePackage(packageKey)
+                                        storageRevision++
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfflineProgressCard(
+    progress: OfflineDownloadProgress,
+    onCancelDownload: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = EnduPalette.Surface),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, EnduPalette.Accent.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+                Text(
+                    text = "Descargando ${progress.label}...",
+                    color = EnduPalette.Accent,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Cancelar",
+                    color = EnduPalette.Danger,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clickable { onCancelDownload() }
+                        .padding(4.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            val pct = if (progress.total > 0) progress.completed.toFloat() / progress.total.toFloat() else 0f
+            LinearProgressIndicator(
+                progress = { pct },
+                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                color = EnduPalette.Accent,
+                trackColor = EnduPalette.Outline
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            val totalText = if (progress.total > 0) "${progress.completed} / ${progress.total} teselas (${(pct * 100).toInt()}%)" else "Preparando teselas..."
+            Text(
+                text = totalText,
+                color = EnduPalette.TextSecondary,
+                fontSize = 11.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun OfflineDownloadControlsCard(
+    offlineTargetLayer: MapLayer,
+    selectedMaxZoomOverride: Int?,
+    categories: List<String>,
+    selectedCategory: String,
+    filterQuery: String,
+    onSelectTargetLayer: (MapLayer) -> Unit,
+    onSelectMaxZoom: (Int?) -> Unit,
+    onSelectCategory: (String) -> Unit,
+    onFilterQueryChange: (String) -> Unit
+) {
+    val row1Layers = remember {
+        listOf(
+            Triple(MapLayer.OSMAND, "OsmAnd HD", "Pistas y curvas"),
+            Triple(MapLayer.TRAIL_OSM, "Trail OSM", "Caminos y relieve"),
+            Triple(MapLayer.IGN_TOPO, "IGN Topo", "MTN25 España")
+        )
+    }
+    val row2Layers = remember {
+        listOf(
+            Triple(MapLayer.ESRI_STREET, "Esri Street", "Vial clásico"),
+            Triple(MapLayer.SATELITE_PURO, "Satélite Puro", "Ortofoto Esri"),
+            Triple(MapLayer.SATELITE_HIBRIDO, "Sat + Calles", "Híbrido HD")
+        )
+    }
+    val zoomOptions = remember { listOf<Int?>(null, 11, 12, 13, 14, 15, 16) }
+
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = EnduPalette.Surface),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Cartografía a descargar",
+                    color = EnduPalette.TextSecondary,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = offlineTargetLayer.shortBadge,
+                    color = EnduPalette.Accent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(row1Layers, row2Layers).forEach { rowItems ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        for ((lay, title, sub) in rowItems) {
+                            val isSel = (offlineTargetLayer == lay)
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSel) EnduPalette.Accent.copy(alpha = 0.20f) else EnduPalette.SurfaceHigh)
+                                    .border(
+                                        width = if (isSel) 1.5.dp else 0.5.dp,
+                                        color = if (isSel) EnduPalette.Accent else EnduPalette.Outline,
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    .clickable { onSelectTargetLayer(lay) }
+                                    .padding(horizontal = 8.dp, vertical = 7.dp)
+                            ) {
+                                Column {
+                                    Text(
+                                        text = title,
+                                        color = if (isSel) EnduPalette.Accent else EnduPalette.TextPrimary,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = sub,
+                                        color = EnduPalette.TextMuted,
+                                        fontSize = 9.5.sp,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Selector de detalle / zoom máximo a descargar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Nivel de zoom máximo",
+                    color = EnduPalette.TextSecondary,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = selectedMaxZoomOverride?.let { "Hasta Z$it (máx. capa Z${offlineTargetLayer.maxNativeZoom})" }
+                        ?: "Estándar por región",
+                    color = EnduPalette.TextMuted,
+                    fontSize = 10.sp
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                zoomOptions.forEach { zOpt ->
+                    val isSel = (selectedMaxZoomOverride == zOpt)
+                    val isSupported = zOpt == null || zOpt <= offlineTargetLayer.maxNativeZoom
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(EnduPalette.Accent.copy(alpha = 0.16f))
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                when {
+                                    !isSupported -> EnduPalette.SurfaceHigh.copy(alpha = 0.45f)
+                                    isSel -> EnduPalette.Accent
+                                    else -> EnduPalette.SurfaceHigh
+                                }
+                            )
+                            .border(
+                                width = if (isSel) 1.dp else 0.5.dp,
+                                color = if (isSel) EnduPalette.Accent else EnduPalette.Outline,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable(enabled = isSupported) { onSelectMaxZoom(zOpt) }
+                            .padding(vertical = 6.dp)
                     ) {
-                        DownloadTrayIcon(color = EnduPalette.Accent, size = 18.dp)
-                    }
-                    Column {
                         Text(
-                            text = "Mapas Offline",
-                            color = EnduPalette.TextPrimary,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        val sizeText = if (isScanningStorage && totalBytes == 0L) "calculando..." else "${formatBytesCompact(totalBytes)} en caché"
-                        Text(
-                            text = "${downloadedPackages.size} zonas · $sizeText",
-                            color = if (downloadedPackages.isNotEmpty()) EnduPalette.Success else EnduPalette.TextMuted,
-                            fontSize = 11.sp
+                            text = zOpt?.let { "Z$it" } ?: "Auto",
+                            color = when {
+                                !isSupported -> EnduPalette.TextMuted.copy(alpha = 0.45f)
+                                isSel -> Color.White
+                                else -> EnduPalette.TextSecondary
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
                         )
                     }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(30.dp)
-                        .clip(CircleShape)
-                        .clickable { onClose() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    CloseCrossIcon(color = EnduPalette.TextMuted, size = 14.dp)
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 2. Selector de pestañas: Descargar vs Descargados
+            // Selector de Categorías
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(EnduPalette.Background)
-                    .padding(3.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                OfflineTabButton(
-                    label = "Descargar zonas",
-                    isSelected = (activeTab == OfflineSheetTab.DOWNLOAD),
-                    badge = null,
-                    onClick = { activeTab = OfflineSheetTab.DOWNLOAD },
-                    modifier = Modifier.weight(1f)
-                )
-                OfflineTabButton(
-                    label = "Descargados",
-                    isSelected = (activeTab == OfflineSheetTab.MANAGE),
-                    badge = "${downloadedPackages.size}",
-                    onClick = { activeTab = OfflineSheetTab.MANAGE },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // 3. Tarjeta de descarga en curso (visible en ambas pestañas)
-            if (progress.isDownloading) {
-                Card(
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = EnduPalette.SurfaceHigh),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Descargando ${progress.label}...",
-                                color = EnduPalette.Accent,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Cancelar",
-                                color = EnduPalette.Danger,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .clickable { onCancelDownload() }
-                                    .padding(4.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        val pct = if (progress.total > 0) progress.completed.toFloat() / progress.total.toFloat() else 0f
-                        LinearProgressIndicator(
-                            progress = { pct },
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            color = EnduPalette.Accent,
-                            trackColor = EnduPalette.Outline
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        val totalText = if (progress.total > 0) "${progress.completed} / ${progress.total} teselas (${(pct * 100).toInt()}%)" else "Preparando teselas..."
+                categories.forEach { cat ->
+                    val isSelected = (selectedCategory == cat)
+                    val label = when (cat) {
+                        "Comunidades España" -> "Comunidades (17)"
+                        "Países" -> "Países"
+                        "Zonas Trail" -> "Zonas Trail"
+                        else -> "Todas (${OfflineRegionPreset.catalog.size})"
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSelected) EnduPalette.Accent else EnduPalette.SurfaceHigh)
+                            .clickable { onSelectCategory(cat) }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
                         Text(
-                            text = totalText,
-                            color = EnduPalette.TextSecondary,
-                            fontSize = 11.sp
+                            text = label,
+                            color = if (isSelected) Color.White else EnduPalette.TextSecondary,
+                            fontSize = 11.5.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(10.dp))
             }
 
-            if (activeTab == OfflineSheetTab.DOWNLOAD) {
-                // ==========================================
-                // PESTAÑA 1: DESCARGAR ZONAS
-                // ==========================================
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Cartografía a descargar",
-                        color = EnduPalette.TextSecondary,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold
+            // Buscador de regiones
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(EnduPalette.SurfaceHigh)
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SearchLensIcon(color = EnduPalette.TextMuted, size = 14.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    BasicTextField(
+                        value = filterQuery,
+                        onValueChange = onFilterQueryChange,
+                        textStyle = TextStyle(color = EnduPalette.TextPrimary, fontSize = 12.sp),
+                        cursorBrush = SolidColor(EnduPalette.Accent),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { innerTextField ->
+                            if (filterQuery.isEmpty()) {
+                                Text(
+                                    text = "Buscar región (ej. Valencia, Pirineos, Portugal...)",
+                                    color = EnduPalette.TextMuted,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                            innerTextField()
+                        }
                     )
+                    if (filterQuery.isNotEmpty()) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clickable { onFilterQueryChange("") }
+                        ) {
+                            CloseCrossIcon(color = EnduPalette.TextMuted, size = 11.dp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfflinePresetRow(
+    preset: OfflineRegionPreset,
+    offlineTargetLayer: MapLayer,
+    selectedMaxZoomOverride: Int?,
+    existingEntry: Pair<String, OfflinePackageSpec>?,
+    onDownload: (Int) -> Unit,
+    onRemove: (String) -> Unit
+) {
+    val isDownloaded = existingEntry != null
+    val effMaxZ = minOf(
+        maxOf(selectedMaxZoomOverride ?: preset.maxZoom, preset.minZoom),
+        offlineTargetLayer.maxNativeZoom
+    )
+    val estimate = remember(preset.id, offlineTargetLayer, effMaxZ) {
+        val bbox = MapBoundingBox(preset.minLat, preset.maxLat, preset.minLon, preset.maxLon)
+        val tiles = TileMath.countBoundingBoxTilesLong(
+            bbox = bbox,
+            minZ = preset.minZoom,
+            maxZ = effMaxZ,
+            maxNativeZ = offlineTargetLayer.maxNativeZoom
+        )
+        tiles to (tiles * offlineTargetLayer.estimatedTileBytes)
+    }
+    val estTiles = estimate.first
+    val estBytes = estimate.second
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(EnduPalette.Surface)
+            .border(
+                width = if (isDownloaded) 1.dp else 0.5.dp,
+                color = if (isDownloaded) EnduPalette.Success.copy(alpha = 0.65f) else EnduPalette.Outline,
+                shape = RoundedCornerShape(10.dp)
+            )
+            .padding(10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = preset.name,
+                    color = EnduPalette.TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (isDownloaded) {
+                    CheckCircleIcon(color = EnduPalette.Success, size = 14.dp)
+                }
+            }
+            Text(
+                text = "Z${preset.minZoom}–Z$effMaxZ · ~${formatTileCountCompact(estTiles)} teselas · ~${formatBytesCompact(estBytes)}",
+                color = EnduPalette.AccentBlue,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium
+            )
+            if (existingEntry != null) {
+                Text(
+                    text = "Guardado hasta Z${existingEntry.second.maxZoom} · ${preset.category}",
+                    color = EnduPalette.TextMuted,
+                    fontSize = 10.sp
+                )
+            } else {
+                Text(
+                    text = preset.category,
+                    color = EnduPalette.TextMuted,
+                    fontSize = 10.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Button(
+                onClick = { onDownload(effMaxZ) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isDownloaded) EnduPalette.SurfaceHigh else EnduPalette.Accent
+                ),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    if (isDownloaded) {
+                        RefreshArrowsIcon(color = EnduPalette.TextPrimary, size = 12.dp)
+                    } else {
+                        DownloadTrayIcon(
+                            color = Color.White,
+                            size = 12.dp
+                        )
+                    }
                     Text(
-                        text = offlineTargetLayer.shortBadge,
-                        color = EnduPalette.Accent,
+                        text = if (isDownloaded) "Actualizar" else "Descargar",
+                        color = if (isDownloaded) EnduPalette.TextPrimary else Color.White,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
-                Spacer(modifier = Modifier.height(6.dp))
+            }
 
-                val row1Layers = remember {
-                    listOf(
-                        Triple(MapLayer.OSMAND, "OsmAnd HD", "Pistas y curvas"),
-                        Triple(MapLayer.TRAIL_OSM, "Trail OSM", "Caminos y relieve"),
-                        Triple(MapLayer.IGN_TOPO, "IGN Topo", "MTN25 España")
-                    )
-                }
-                val row2Layers = remember {
-                    listOf(
-                        Triple(MapLayer.ESRI_STREET, "Esri Street", "Vial clásico"),
-                        Triple(MapLayer.SATELITE_PURO, "Satélite Puro", "Ortofoto Esri"),
-                        Triple(MapLayer.SATELITE_HIBRIDO, "Sat + Calles", "Híbrido HD")
-                    )
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(row1Layers, row2Layers).forEach { rowItems ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            for ((lay, title, sub) in rowItems) {
-                                val isSel = (offlineTargetLayer == lay)
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (isSel) EnduPalette.Accent.copy(alpha = 0.20f) else EnduPalette.SurfaceHigh)
-                                        .border(
-                                            width = if (isSel) 1.5.dp else 0.5.dp,
-                                            color = if (isSel) EnduPalette.Accent else EnduPalette.Outline,
-                                            shape = RoundedCornerShape(10.dp)
-                                        )
-                                        .clickable {
-                                            offlineTargetLayer = lay
-                                            onSelectLayer(lay)
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 7.dp)
-                                ) {
-                                    Column {
-                                        Text(
-                                            text = title,
-                                            color = if (isSel) EnduPalette.Accent else EnduPalette.TextPrimary,
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1
-                                        )
-                                        Text(
-                                            text = sub,
-                                            color = EnduPalette.TextMuted,
-                                            fontSize = 9.5.sp,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Selector de detalle / zoom máximo a descargar
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            if (existingEntry != null) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(EnduPalette.Danger.copy(alpha = 0.12f))
+                        .clickable { onRemove(existingEntry.first) },
+                    contentAlignment = Alignment.Center
                 ) {
+                    TrashDeleteIcon(color = EnduPalette.Danger, size = 14.dp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfflineStorageSummaryCard(
+    isScanningStorage: Boolean,
+    totalBytes: Long,
+    downloadedCount: Int,
+    layerStorage: List<Triple<MapLayer, Int, Long>>,
+    onClearCache: () -> Unit,
+    onClearLayerCache: (MapLayer) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(EnduPalette.Surface)
+            .border(0.5.dp, EnduPalette.Outline, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val usedStr = if (isScanningStorage && totalBytes == 0L) "calculando..." else formatBytesCompact(totalBytes)
+            Text(
+                text = "Espacio usado: $usedStr",
+                color = EnduPalette.TextPrimary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Bold
+            )
+            if (totalBytes > 0L || downloadedCount > 0) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(EnduPalette.Danger.copy(alpha = 0.14f))
+                        .clickable { onClearCache() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    TrashDeleteIcon(color = EnduPalette.Danger, size = 12.dp)
                     Text(
-                        text = "Nivel de zoom máximo",
-                        color = EnduPalette.TextSecondary,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = selectedMaxZoomOverride?.let { "Hasta Z$it (máx. capa Z${offlineTargetLayer.maxNativeZoom})" }
-                            ?: "Estándar por región",
-                        color = EnduPalette.TextMuted,
-                        fontSize = 10.sp
+                        text = "Vaciar todo",
+                        color = EnduPalette.Danger,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
-                Spacer(modifier = Modifier.height(5.dp))
-                val zoomOptions = remember { listOf<Int?>(null, 11, 12, 13, 14, 15, 16) }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    zoomOptions.forEach { zOpt ->
-                        val isSel = (selectedMaxZoomOverride == zOpt)
-                        val isSupported = zOpt == null || zOpt <= offlineTargetLayer.maxNativeZoom
+            }
+        }
+
+        if (layerStorage.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                layerStorage.forEach { (lay, count, size) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(EnduPalette.SurfaceHigh)
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = "${lay.shortBadge}: ${formatBytesCompact(size)}" + if (count > 0) " ($count)" else "",
+                            color = EnduPalette.TextSecondary,
+                            fontSize = 10.5.sp
+                        )
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    when {
-                                        !isSupported -> EnduPalette.SurfaceHigh.copy(alpha = 0.45f)
-                                        isSel -> EnduPalette.Accent
-                                        else -> EnduPalette.SurfaceHigh
-                                    }
-                                )
-                                .border(
-                                    width = if (isSel) 1.dp else 0.5.dp,
-                                    color = if (isSel) EnduPalette.Accent else EnduPalette.Outline,
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                                .clickable(enabled = isSupported) { selectedMaxZoomOverride = zOpt }
-                                .padding(vertical = 6.dp)
+                                .size(16.dp)
+                                .clickable { onClearLayerCache(lay) }
                         ) {
-                            Text(
-                                text = zOpt?.let { "Z$it" } ?: "Auto",
-                                color = when {
-                                    !isSupported -> EnduPalette.TextMuted.copy(alpha = 0.45f)
-                                    isSel -> Color.White
-                                    else -> EnduPalette.TextSecondary
-                                },
-                                fontSize = 11.sp,
-                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
-                            )
+                            CloseCrossIcon(color = EnduPalette.TextMuted, size = 10.dp)
                         }
                     }
                 }
+            }
+        }
+    }
+}
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Selector de Categorías
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    categories.forEach { cat ->
-                        val isSelected = (selectedCategory == cat)
-                        val label = when (cat) {
-                            "Comunidades España" -> "Comunidades (17)"
-                            "Países" -> "Países"
-                            "Zonas Trail" -> "Zonas Trail"
-                            else -> "Todas (${OfflineRegionPreset.catalog.size})"
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) EnduPalette.Accent else EnduPalette.SurfaceHigh)
-                                .clickable { selectedCategory = cat }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = label,
-                                color = if (isSelected) Color.White else EnduPalette.TextSecondary,
-                                fontSize = 11.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Buscador de regiones
+@Composable
+private fun OfflineDownloadedPackageRow(
+    packageKey: String,
+    spec: OfflinePackageSpec,
+    onRefresh: () -> Unit,
+    onRemove: () -> Unit
+) {
+    val estBytes = remember(packageKey) {
+        val bbox = MapBoundingBox(spec.preset.minLat, spec.preset.maxLat, spec.preset.minLon, spec.preset.maxLon)
+        val tiles = TileMath.countBoundingBoxTilesLong(bbox, spec.preset.minZoom, spec.maxZoom, spec.layer.maxNativeZoom)
+        tiles * spec.layer.estimatedTileBytes
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(EnduPalette.Surface)
+            .border(0.8.dp, EnduPalette.Success.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                CheckCircleIcon(color = EnduPalette.Success, size = 14.dp)
+                Text(
+                    text = spec.preset.name,
+                    color = EnduPalette.TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(EnduPalette.SurfaceHigh)
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(EnduPalette.Accent.copy(alpha = 0.18f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        SearchLensIcon(color = EnduPalette.TextMuted, size = 14.dp)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        BasicTextField(
-                            value = filterQuery,
-                            onValueChange = { filterQuery = it },
-                            textStyle = TextStyle(color = EnduPalette.TextPrimary, fontSize = 12.sp),
-                            cursorBrush = SolidColor(EnduPalette.Accent),
-                            modifier = Modifier.weight(1f),
-                            decorationBox = { innerTextField ->
-                                if (filterQuery.isEmpty()) {
-                                    Text(
-                                        text = "Buscar región (ej. Valencia, Pirineos, Portugal...)",
-                                        color = EnduPalette.TextMuted,
-                                        fontSize = 11.5.sp
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        )
-                        if (filterQuery.isNotEmpty()) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clickable { filterQuery = "" }
-                            ) {
-                                CloseCrossIcon(color = EnduPalette.TextMuted, size = 11.dp)
-                            }
-                        }
-                    }
+                    Text(
+                        text = spec.layer.shortBadge,
+                        color = EnduPalette.Accent,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
+                Text(
+                    text = "Z${spec.preset.minZoom}–Z${spec.maxZoom} · ~${formatBytesCompact(estBytes)} · ${spec.preset.category}",
+                    color = EnduPalette.TextMuted,
+                    fontSize = 10.5.sp
+                )
+            }
+        }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Lista filtrada de zonas con tamaño estimado por nivel de zoom
-                if (filteredPresets.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No se encontraron regiones con '$filterQuery'",
-                            color = EnduPalette.TextMuted,
-                            fontSize = 12.sp
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(filteredPresets, key = { it.id }) { preset ->
-                            val existingEntry = downloadedPackageByPresetLayer[preset.id to offlineTargetLayer]
-                            val isDownloaded = existingEntry != null
-                            val effMaxZ = minOf(
-                                maxOf(selectedMaxZoomOverride ?: preset.maxZoom, preset.minZoom),
-                                offlineTargetLayer.maxNativeZoom
-                            )
-                            val estimate = remember(preset.id, offlineTargetLayer, effMaxZ) {
-                                val bbox = MapBoundingBox(preset.minLat, preset.maxLat, preset.minLon, preset.maxLon)
-                                val tiles = TileMath.countBoundingBoxTilesLong(
-                                    bbox = bbox,
-                                    minZ = preset.minZoom,
-                                    maxZ = effMaxZ,
-                                    maxNativeZ = offlineTargetLayer.maxNativeZoom
-                                )
-                                tiles to (tiles * offlineTargetLayer.estimatedTileBytes)
-                            }
-                            val estTiles = estimate.first
-                            val estBytes = estimate.second
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(EnduPalette.Background)
-                                    .border(
-                                        width = if (isDownloaded) 1.dp else 0.5.dp,
-                                        color = if (isDownloaded) EnduPalette.Success.copy(alpha = 0.65f) else EnduPalette.Outline,
-                                        shape = RoundedCornerShape(10.dp)
-                                    )
-                                    .padding(10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(
-                                            text = preset.name,
-                                            color = EnduPalette.TextPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        if (isDownloaded) {
-                                            CheckCircleIcon(color = EnduPalette.Success, size = 14.dp)
-                                        }
-                                    }
-                                    Text(
-                                        text = "Z${preset.minZoom}–Z$effMaxZ · ~${formatTileCountCompact(estTiles)} teselas · ~${formatBytesCompact(estBytes)}",
-                                        color = EnduPalette.AccentBlue,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    if (existingEntry != null) {
-                                        Text(
-                                            text = "Guardado hasta Z${existingEntry.second.maxZoom} · ${preset.category}",
-                                            color = EnduPalette.TextMuted,
-                                            fontSize = 10.sp
-                                        )
-                                    } else {
-                                        Text(
-                                            text = preset.category,
-                                            color = EnduPalette.TextMuted,
-                                            fontSize = 10.sp
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.width(8.dp))
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Button(
-                                        onClick = { onDownloadRegion(preset, offlineTargetLayer, effMaxZ) },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isDownloaded) EnduPalette.SurfaceHigh else EnduPalette.Accent
-                                        ),
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        modifier = Modifier.height(32.dp)
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                        ) {
-                                            if (isDownloaded) {
-                                                RefreshArrowsIcon(color = EnduPalette.TextPrimary, size = 12.dp)
-                                            } else {
-                                                DownloadTrayIcon(
-                                                    color = Color.White,
-                                                    size = 12.dp
-                                                )
-                                            }
-                                            Text(
-                                                text = if (isDownloaded) "Actualizar" else "Descargar",
-                                                color = if (isDownloaded) EnduPalette.TextPrimary else Color.White,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-
-                                    if (existingEntry != null) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(32.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(EnduPalette.Danger.copy(alpha = 0.12f))
-                                                .clickable {
-                                                    onRemovePackage(existingEntry.first)
-                                                    storageRevision++
-                                                },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            TrashDeleteIcon(color = EnduPalette.Danger, size = 14.dp)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                // ==========================================
-                // PESTAÑA 2: ADMINISTRAR MAPAS DESCARGADOS
-                // ==========================================
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(EnduPalette.Background)
-                        .border(0.5.dp, EnduPalette.Outline, RoundedCornerShape(10.dp))
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val usedStr = if (isScanningStorage && totalBytes == 0L) "calculando..." else formatBytesCompact(totalBytes)
-                        Text(
-                            text = "Espacio usado: $usedStr",
-                            color = EnduPalette.TextPrimary,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (totalBytes > 0L || downloadedPackages.isNotEmpty()) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(EnduPalette.Danger.copy(alpha = 0.14f))
-                                    .clickable {
-                                        onClearCache()
-                                        storageRevision++
-                                    }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                TrashDeleteIcon(color = EnduPalette.Danger, size = 12.dp)
-                                Text(
-                                    text = "Vaciar todo",
-                                    color = EnduPalette.Danger,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    if (layerStorage.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            layerStorage.forEach { (lay, count, size) ->
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(EnduPalette.SurfaceHigh)
-                                        .padding(horizontal = 8.dp, vertical = 5.dp)
-                                ) {
-                                    Text(
-                                        text = "${lay.shortBadge}: ${formatBytesCompact(size)}" + if (count > 0) " ($count)" else "",
-                                        color = EnduPalette.TextSecondary,
-                                        fontSize = 10.5.sp
-                                    )
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier
-                                            .size(16.dp)
-                                            .clickable {
-                                                onClearLayerCache(lay)
-                                                storageRevision++
-                                            }
-                                    ) {
-                                        CloseCrossIcon(color = EnduPalette.TextMuted, size = 10.dp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                if (parsedDownloadedItems.isEmpty()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        DownloadTrayIcon(color = EnduPalette.TextMuted, size = 30.dp)
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "No tienes zonas descargadas",
-                            color = EnduPalette.TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Descarga una comunidad, país o zona trail para navegar sin cobertura.",
-                            color = EnduPalette.TextMuted,
-                            fontSize = 11.5.sp
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(
-                            onClick = { activeTab = OfflineSheetTab.DOWNLOAD },
-                            colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.Accent),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Explorar zonas para descargar", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(parsedDownloadedItems, key = { it.first }) { (packageKey, spec) ->
-                            val estBytes = remember(packageKey) {
-                                val bbox = MapBoundingBox(spec.preset.minLat, spec.preset.maxLat, spec.preset.minLon, spec.preset.maxLon)
-                                val tiles = TileMath.countBoundingBoxTilesLong(bbox, spec.preset.minZoom, spec.maxZoom, spec.layer.maxNativeZoom)
-                                tiles * spec.layer.estimatedTileBytes
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(EnduPalette.Background)
-                                    .border(0.8.dp, EnduPalette.Success.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                                    .padding(10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        CheckCircleIcon(color = EnduPalette.Success, size = 14.dp)
-                                        Text(
-                                            text = spec.preset.name,
-                                            color = EnduPalette.TextPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(EnduPalette.Accent.copy(alpha = 0.18f))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = spec.layer.shortBadge,
-                                                color = EnduPalette.Accent,
-                                                fontSize = 9.5.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                        Text(
-                                            text = "Z${spec.preset.minZoom}–Z${spec.maxZoom} · ~${formatBytesCompact(estBytes)} · ${spec.preset.category}",
-                                            color = EnduPalette.TextMuted,
-                                            fontSize = 10.5.sp
-                                        )
-                                    }
-                                }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(EnduPalette.SurfaceHigh)
-                                            .clickable { onDownloadRegion(spec.preset, spec.layer, spec.maxZoom) }
-                                    ) {
-                                        RefreshArrowsIcon(color = EnduPalette.Accent, size = 14.dp)
-                                    }
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(EnduPalette.Danger.copy(alpha = 0.14f))
-                                            .clickable {
-                                                onRemovePackage(packageKey)
-                                                storageRevision++
-                                            }
-                                    ) {
-                                        TrashDeleteIcon(color = EnduPalette.Danger, size = 14.dp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(EnduPalette.SurfaceHigh)
+                    .clickable { onRefresh() }
+            ) {
+                RefreshArrowsIcon(color = EnduPalette.Accent, size = 14.dp)
+            }
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(EnduPalette.Danger.copy(alpha = 0.14f))
+                    .clickable { onRemove() }
+            ) {
+                TrashDeleteIcon(color = EnduPalette.Danger, size = 14.dp)
             }
         }
     }
