@@ -27,6 +27,7 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 SECRET_RELAY_URL = os.environ.get("BUG_RELAY_WEBHOOK_URL", "").strip()
 EVENT_NAME = os.environ.get("GITHUB_EVENT_NAME", "repository_dispatch")
+GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 
 ARCH_MAP = """
 Arquitectura de EnduLink (Kotlin Multiplatform Android + iOS):
@@ -119,21 +120,25 @@ def ensure_labels(labels: list[str]):
 def call_gemini(prompt: str) -> dict | None:
     if not GEMINI_API_KEY:
         return None
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-        body = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
-        }
-        req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST")
-        req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=35) as resp:
-            parsed = json.loads(resp.read().decode("utf-8"))
-            text = parsed["candidates"][0]["content"]["parts"][0]["text"]
-            return json.loads(text)
-    except Exception as exc:
-        print(f"Gemini API fallback ({exc})")
-        return None
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
+    }
+    # Se prueban varios alias porque Google retira/renombra modelos (HTTP 404)
+    for model in GEMINI_MODELS:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+            req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST")
+            req.add_header("Content-Type", "application/json")
+            with urllib.request.urlopen(req, timeout=35) as resp:
+                parsed = json.loads(resp.read().decode("utf-8"))
+                text = parsed["candidates"][0]["content"]["parts"][0]["text"]
+                result = json.loads(text)
+                if isinstance(result, dict):
+                    return result
+        except Exception as exc:
+            print(f"Gemini model '{model}' fallback ({exc})")
+    return None
 
 
 def _normalize_text(text: str) -> str:
@@ -173,6 +178,7 @@ def heuristic_triage(report: dict, open_issues: list[dict]) -> dict:
     norm_title = _normalize_text(raw_title)
     norm_msg = _normalize_text(raw_msg)
     norm_combined = _normalize_text(f"{raw_title} {raw_msg}")
+    combined = f"{raw_title} {raw_msg}".lower()
     combined_tokens = set(norm_combined.split())
 
     best_num = None
