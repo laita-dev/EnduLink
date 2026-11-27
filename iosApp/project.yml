@@ -23,6 +23,7 @@ targets:
       - path: iosApp
         excludes:
           - Info.plist
+          - EnduLink.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.laitadev.endulink
@@ -30,6 +31,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: iosApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: iosApp/EnduLink.entitlements
         ENABLE_BITCODE: NO
         CODE_SIGN_STYLE: Automatic
         FRAMEWORK_SEARCH_PATHS:
