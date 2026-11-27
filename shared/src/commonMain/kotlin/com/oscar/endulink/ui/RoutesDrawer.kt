@@ -34,6 +34,7 @@ fun RoutesDrawer(
     onShareRoute: (GPXRoute) -> Unit = {},
     onDeleteRoute: (GPXRoute) -> Unit = {},
     onImportGPX: () -> Unit,
+    onOpenRouteGenerator: () -> Unit = {},
     onLoadSample: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
@@ -51,40 +52,72 @@ fun RoutesDrawer(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Gestor de Rutas GPX",
+                    text = "Tracks GPX",
                     color = EnduPalette.TextPrimary,
                     fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = "✕",
-                    color = EnduPalette.TextMuted,
-                    fontSize = 18.sp,
-                    modifier = Modifier.clickable { onClose() }.padding(4.dp)
-                )
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(EnduPalette.SurfaceHigh)
+                        .clickable { onClose() }
+                ) {
+                    CloseCrossIcon(color = EnduPalette.TextPrimary, size = 13.dp)
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Botón Importar GPX desde almacenamiento del móvil
-            Button(
-                onClick = onImportGPX,
-                colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.Accent),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth()
+            // Botón Importar GPX + Generar Ruta/Loop
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                Button(
+                    onClick = onImportGPX,
+                    colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.Accent),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1.05f)
                 ) {
-                    FolderImportIcon(color = Color.White, size = 16.dp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Importar archivo .GPX del teléfono",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        FolderImportIcon(color = Color.White, size = 15.dp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Importar GPX",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            maxLines = 1
+                        )
+                    }
+                }
+                Button(
+                    onClick = onOpenRouteGenerator,
+                    colors = ButtonDefaults.buttonColors(containerColor = EnduPalette.SurfaceHigh),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        RoutePathIcon(color = EnduPalette.Accent, size = 15.dp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Generar Ruta",
+                            color = EnduPalette.Accent,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
 

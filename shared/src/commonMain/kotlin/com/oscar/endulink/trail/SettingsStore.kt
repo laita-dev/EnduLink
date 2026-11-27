@@ -18,6 +18,85 @@ enum class KeepScreenOnMode {
 }
 
 @Serializable
+enum class HudButtonSlot(val label: String, val shortLabel: String) {
+    BOTTOM("Barra inferior", "Abajo"),
+    RIGHT("Lateral derecho", "Derecha"),
+    LEFT("Lateral izquierdo", "Izquierda"),
+    HIDDEN("Oculto", "Oculto")
+}
+
+@Serializable
+enum class HudLayoutPreset(val title: String, val subtitle: String) {
+    BALANCED("Equilibrado", "Abajo: REC, Tracks, Grupo, Moto · Derecha: Mapa y Puntos"),
+    MINIMAL_BAR("Barra Minimalista", "Abajo: Tracks, Grupo, Moto · Derecha: REC, Puntos y Mapa"),
+    CLASSIC_FULL("Barra Completa", "Abajo: REC, Tracks, Crear Ruta, Puntos, Grupo, Moto"),
+    LEFT_HAND("Controles a la Izquierda", "Izquierda: Brújula, Zoom, REC, Puntos · Abajo: Tracks, Grupo, Moto")
+}
+
+@Serializable
+data class HudButtonsLayout(
+    val recSlot: HudButtonSlot = HudButtonSlot.BOTTOM,
+    val routesSlot: HudButtonSlot = HudButtonSlot.BOTTOM,
+    val routeGeneratorSlot: HudButtonSlot = HudButtonSlot.HIDDEN,
+    val waypointsSlot: HudButtonSlot = HudButtonSlot.HIDDEN,
+    val quickPinSlot: HudButtonSlot = HudButtonSlot.RIGHT,
+    val groupSlot: HudButtonSlot = HudButtonSlot.BOTTOM,
+    val bikeSlot: HudButtonSlot = HudButtonSlot.BOTTOM,
+    val compassSlot: HudButtonSlot = HudButtonSlot.RIGHT,
+    val zoomSlot: HudButtonSlot = HudButtonSlot.RIGHT,
+    val gpsSide: HudButtonSlot = HudButtonSlot.RIGHT
+) {
+    fun normalized(): HudButtonsLayout = copy(
+        routesSlot = if (routesSlot == HudButtonSlot.HIDDEN) HudButtonSlot.BOTTOM else routesSlot,
+        compassSlot = if (compassSlot == HudButtonSlot.BOTTOM) HudButtonSlot.RIGHT else compassSlot,
+        zoomSlot = if (zoomSlot == HudButtonSlot.BOTTOM) HudButtonSlot.RIGHT else zoomSlot,
+        gpsSide = if (gpsSide == HudButtonSlot.LEFT) HudButtonSlot.LEFT else HudButtonSlot.RIGHT
+    )
+
+    companion object {
+        fun fromPreset(preset: HudLayoutPreset): HudButtonsLayout = when (preset) {
+            HudLayoutPreset.BALANCED -> HudButtonsLayout()
+            HudLayoutPreset.MINIMAL_BAR -> HudButtonsLayout(
+                recSlot = HudButtonSlot.RIGHT,
+                routesSlot = HudButtonSlot.BOTTOM,
+                routeGeneratorSlot = HudButtonSlot.HIDDEN,
+                waypointsSlot = HudButtonSlot.HIDDEN,
+                quickPinSlot = HudButtonSlot.RIGHT,
+                groupSlot = HudButtonSlot.BOTTOM,
+                bikeSlot = HudButtonSlot.BOTTOM,
+                compassSlot = HudButtonSlot.RIGHT,
+                zoomSlot = HudButtonSlot.RIGHT,
+                gpsSide = HudButtonSlot.RIGHT
+            )
+            HudLayoutPreset.CLASSIC_FULL -> HudButtonsLayout(
+                recSlot = HudButtonSlot.BOTTOM,
+                routesSlot = HudButtonSlot.BOTTOM,
+                routeGeneratorSlot = HudButtonSlot.BOTTOM,
+                waypointsSlot = HudButtonSlot.BOTTOM,
+                quickPinSlot = HudButtonSlot.RIGHT,
+                groupSlot = HudButtonSlot.BOTTOM,
+                bikeSlot = HudButtonSlot.BOTTOM,
+                compassSlot = HudButtonSlot.RIGHT,
+                zoomSlot = HudButtonSlot.RIGHT,
+                gpsSide = HudButtonSlot.RIGHT
+            )
+            HudLayoutPreset.LEFT_HAND -> HudButtonsLayout(
+                recSlot = HudButtonSlot.LEFT,
+                routesSlot = HudButtonSlot.BOTTOM,
+                routeGeneratorSlot = HudButtonSlot.HIDDEN,
+                waypointsSlot = HudButtonSlot.HIDDEN,
+                quickPinSlot = HudButtonSlot.LEFT,
+                groupSlot = HudButtonSlot.BOTTOM,
+                bikeSlot = HudButtonSlot.BOTTOM,
+                compassSlot = HudButtonSlot.LEFT,
+                zoomSlot = HudButtonSlot.LEFT,
+                gpsSide = HudButtonSlot.LEFT
+            )
+        }
+    }
+}
+
+@Serializable
 data class AppDisplaySettings(
     val hudFontScale: Float = 1.0f,
     val tftHudFontScale: Float = 1.0f,
@@ -26,13 +105,15 @@ data class AppDisplaySettings(
     val trackStrokeScale: Float = 1.0f,
     val showTrackDirectionArrows: Boolean = true,
     val gpxOffTrackThresholdMeters: Int = 35,
-    val keepScreenOnMode: KeepScreenOnMode = KeepScreenOnMode.OFF
+    val keepScreenOnMode: KeepScreenOnMode = KeepScreenOnMode.OFF,
+    val hudLayout: HudButtonsLayout = HudButtonsLayout()
 ) {
     fun normalized(): AppDisplaySettings = copy(
         hudFontScale = hudFontScale.coerceIn(0.9f, 1.8f),
         tftHudFontScale = tftHudFontScale.coerceIn(1.0f, 1.4f),
         trackStrokeScale = trackStrokeScale.coerceIn(0.75f, 1.5f),
-        gpxOffTrackThresholdMeters = gpxOffTrackThresholdMeters.coerceIn(20, 200)
+        gpxOffTrackThresholdMeters = gpxOffTrackThresholdMeters.coerceIn(20, 200),
+        hudLayout = hudLayout.normalized()
     )
 }
 

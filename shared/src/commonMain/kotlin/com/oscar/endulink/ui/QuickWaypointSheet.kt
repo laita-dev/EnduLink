@@ -29,37 +29,40 @@ fun QuickWaypointSheet(
         modifier = modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
-            // Cabecera
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Marcador Rápido Off-Road",
+                    text = "Puntos y Marcadores",
                     color = EnduPalette.TextPrimary,
                     fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = "✕",
-                    color = EnduPalette.TextMuted,
-                    fontSize = 18.sp,
-                    modifier = Modifier.clickable { onClose() }.padding(4.dp)
-                )
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(EnduPalette.SurfaceHigh)
+                        .clickable { onClose() }
+                ) {
+                    CloseCrossIcon(color = EnduPalette.TextPrimary, size = 13.dp)
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Botones de 1 Toque
             Text(text = "Marcado rápido en tu posición actual:", color = EnduPalette.TextSecondary, fontSize = 12.sp)
             Spacer(modifier = Modifier.height(10.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 QuickButtonItem(
-                    icon = "🚪",
                     title = "Cancela / Valla",
-                    color = Color(0xFF, 0xAA, 0x00),
+                    color = Color(0xFFFFAA00),
+                    icon = { tint -> GateBarrierIcon(color = tint, size = 20.dp) },
                     modifier = Modifier.weight(1f)
                 ) {
                     onAddMarker("Cancela / Valla", "gate")
@@ -67,9 +70,9 @@ fun QuickWaypointSheet(
                 }
 
                 QuickButtonItem(
-                    icon = "🪨",
                     title = "Paso Difícil",
                     color = EnduPalette.Accent,
+                    icon = { tint -> EnduroMountainIcon(color = tint, size = 20.dp) },
                     modifier = Modifier.weight(1f)
                 ) {
                     onAddMarker("Paso Difícil", "rock")
@@ -81,9 +84,9 @@ fun QuickWaypointSheet(
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 QuickButtonItem(
-                    icon = "💧",
                     title = "Fuente / Agua",
                     color = EnduPalette.AccentBlue,
+                    icon = { tint -> WaterDropIcon(color = tint, size = 20.dp) },
                     modifier = Modifier.weight(1f)
                 ) {
                     onAddMarker("Fuente / Agua", "water")
@@ -91,9 +94,9 @@ fun QuickWaypointSheet(
                 }
 
                 QuickButtonItem(
-                    icon = "⚠️",
                     title = "Peligro / Cortado",
                     color = EnduPalette.Danger,
+                    icon = { tint -> WarningTriangleIcon(color = tint, size = 20.dp) },
                     modifier = Modifier.weight(1f)
                 ) {
                     onAddMarker("Peligro en Pista", "danger")
@@ -103,7 +106,6 @@ fun QuickWaypointSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Marcador Personalizado
             OutlinedTextField(
                 value = customName,
                 onValueChange = { customName = it },
@@ -137,7 +139,6 @@ fun QuickWaypointSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Enlace a Gestión Completa de Waypoints
             OutlinedButton(
                 onClick = {
                     onClose()
@@ -147,12 +148,19 @@ fun QuickWaypointSheet(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00D4FF)),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = "📋 Ver y administrar todos los Waypoints",
-                    color = Color(0xFF00D4FF),
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    ListLinesIcon(color = Color(0xFF00D4FF), size = 15.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Ver y administrar todos los Waypoints",
+                        color = Color(0xFF00D4FF),
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
@@ -160,25 +168,24 @@ fun QuickWaypointSheet(
 
 @Composable
 private fun QuickButtonItem(
-    icon: String,
     title: String,
     color: Color,
+    icon: @Composable (Color) -> Unit,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(color.copy(alpha = 0.15f))
+            .background(color.copy(alpha = 0.14f))
             .clickable { onClick() }
             .padding(vertical = 12.dp, horizontal = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(text = icon, fontSize = 24.sp)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(text = title, color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            icon(color)
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(text = title, color = color, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
-

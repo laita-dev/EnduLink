@@ -87,7 +87,7 @@ fun AppUpdateDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (isAndroid) "EnduLink · Android" else "motillOS · iOS",
+                        text = if (isAndroid) "EnduLink · Android" else "EnduLink · iOS",
                         color = EnduPalette.TextMuted,
                         fontSize = 10.5.sp
                     )
@@ -205,8 +205,8 @@ private fun AppUpdateSectionContent(
                     text = when {
                         isAndroid && isTestChannel -> "EnduLink-test"
                         isAndroid -> "EnduLink"
-                        isTestChannel -> "motillOS-test"
-                        else -> "motillOS"
+                        isTestChannel -> "EnduLink-test"
+                        else -> "EnduLink"
                     },
                     color = EnduPalette.TextPrimary,
                     fontSize = 15.5.sp,

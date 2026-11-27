@@ -148,11 +148,11 @@ jobs:
           fi
 
           if [[ "$IS_TEST" == "true" ]]; then
-            BUNDLE_ID="com.oscar.endulink.test"
-            APP_NAME="motillOS-test"
+            BUNDLE_ID="com.laitadev.endulink.test"
+            APP_NAME="EnduLink-test"
           else
-            BUNDLE_ID="com.oscar.endulink"
-            APP_NAME="motillOS"
+            BUNDLE_ID="com.laitadev.endulink"
+            APP_NAME="EnduLink"
           fi
 
           echo "iOS build -> appName=$APP_NAME bundleId=$BUNDLE_ID version=${TARGET_VER:-default} code=${TARGET_CODE:-default}"
@@ -235,7 +235,7 @@ jobs:
           CURRENT_TAG="${GITHUB_REF_NAME}"
           PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -Fxv "$CURRENT_TAG" | head -n 1 || true)
           {
-            echo "### Novedades de EnduLink / motillOS (${CURRENT_TAG})"
+            echo "### Novedades de EnduLink (${CURRENT_TAG})"
             echo ""
             if [ -n "$PREV_TAG" ]; then
               echo "Cambios desde \`${PREV_TAG}\`:"

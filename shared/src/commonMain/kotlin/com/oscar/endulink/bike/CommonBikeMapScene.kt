@@ -595,9 +595,12 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
         } else {
             waypoints
         }
+        val wptCullX = w * 0.72f
+        val wptCullY = h * 0.72f
+        var drawnTftWptLabels = 0
         for (wpt in allWaypoints) {
             val (wx, wy) = geoToLocal(wpt.coordinate)
-            if (wx in -w..w && wy in -h..h) {
+            if (wx in -wptCullX..wptCullX && wy in -wptCullY..wptCullY) {
                 val sym = wpt.symbol?.lowercase().orEmpty()
                 val pinColor = when {
                     sym.contains("danger") || sym.contains("hazard") || sym.contains("alert") -> Color(255, 69, 58)
@@ -614,7 +617,8 @@ class CommonBikeMapScene(private val tileStore: TileStore) {
                 waypointPinPaint.color = Color.White
                 canvas.drawCircle(Offset(wx, wy), 3f * scale * wptPinScale, waypointPinPaint)
 
-                if (config.showWaypointLabelsOnTft && wpt.name.isNotBlank()) {
+                if (config.showWaypointLabelsOnTft && drawnTftWptLabels < 20 && wpt.name.isNotBlank()) {
+                    drawnTftWptLabels++
                     canvas.save()
                     canvas.translate(wx, wy)
                     canvas.rotate(heading.toFloat())

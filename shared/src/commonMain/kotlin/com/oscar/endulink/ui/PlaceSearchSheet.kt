@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import com.oscar.endulink.trail.GPXRoute
 import com.oscar.endulink.trail.GPXWaypoint
 import com.oscar.endulink.trail.GeoCoord
+import com.oscar.endulink.trail.RouteTerrainProfile
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -37,6 +38,10 @@ fun PlaceSearchSheet(
     title: String = "Buscar Destino",
     hasActiveRoute: Boolean = false,
     isSearchingForStop: Boolean = false,
+    selectedProfile: RouteTerrainProfile = RouteTerrainProfile.ROAD_FAST,
+    showTerrainSelector: Boolean = true,
+    onSelectProfile: (RouteTerrainProfile) -> Unit = {},
+    onOpenRouteGenerator: () -> Unit = {},
     onSelectDestination: (SearchResultItem) -> Unit,
     onAddIntermediateStop: (SearchResultItem) -> Unit = {},
     onPickOnMap: () -> Unit,
@@ -102,39 +107,41 @@ fun PlaceSearchSheet(
                 .padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
             // Barra superior con título y botón Cerrar
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = title,
-                    color = EnduPalette.TextPrimary,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Cerrar",
-                    color = EnduPalette.Accent,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .clickable { onClose() }
-                        .padding(6.dp)
-                )
-            }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = title,
+                        color = EnduPalette.TextPrimary,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(EnduPalette.SurfaceHigh)
+                            .clickable { onClose() }
+                    ) {
+                        CloseCrossIcon(color = EnduPalette.TextPrimary, size = 13.dp)
+                    }
+                }
 
-            // Cuadro de texto de búsqueda en la parte SUPERIOR
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(EnduPalette.Surface)
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = "🔍", fontSize = 15.sp)
-                Spacer(modifier = Modifier.width(8.dp))
+                // Cuadro de texto de búsqueda en la parte SUPERIOR
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(EnduPalette.Surface)
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SearchLensIcon(color = EnduPalette.TextSecondary, size = 16.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
                 TextField(
                     value = query,
                     onValueChange = { query = it },
@@ -176,15 +183,14 @@ fun PlaceSearchSheet(
                         strokeWidth = 2.dp
                     )
                 } else if (query.isNotEmpty()) {
-                    Text(
-                        text = "✕",
-                        color = EnduPalette.TextMuted,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
+                    Box(
+                        contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .clickable { query = "" }
                             .padding(6.dp)
-                    )
+                    ) {
+                        CloseCrossIcon(color = EnduPalette.TextMuted, size = 13.dp)
+                    }
                 }
             }
 
@@ -198,6 +204,21 @@ fun PlaceSearchSheet(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+
+            if (showTerrainSelector && !isSearchingForStop) {
+                Text(
+                    text = "Tipo de camino al pulsar Ir:",
+                    color = EnduPalette.TextMuted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 5.dp, start = 2.dp)
+                )
+                TerrainProfileSelectorRow(
+                    selectedProfile = selectedProfile,
+                    onSelectProfile = onSelectProfile,
+                    modifier = Modifier.padding(bottom = 10.dp)
+                )
+            }
 
             // Botón destacado para seleccionar directamente en el mapa
             Row(
@@ -217,9 +238,9 @@ fun PlaceSearchSheet(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(EnduPalette.Accent.copy(alpha = 0.22f))
+                        .background(EnduPalette.Accent.copy(alpha = 0.18f))
                 ) {
-                    Text(text = "🎯", fontSize = 16.sp)
+                    MapPinTargetIcon(color = EnduPalette.Accent, size = 16.dp)
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -235,12 +256,46 @@ fun PlaceSearchSheet(
                         fontSize = 11.sp
                     )
                 }
-                Text(
-                    text = "➔",
-                    color = EnduPalette.Accent,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                ChevronRightIcon(color = EnduPalette.Accent, size = 15.dp)
+            }
+
+            if (showTerrainSelector && !isSearchingForStop) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(EnduPalette.Surface)
+                        .border(1.dp, EnduPalette.Outline, RoundedCornerShape(12.dp))
+                        .clickable { onOpenRouteGenerator() }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(EnduPalette.SurfaceHigh)
+                    ) {
+                        LoopRouteIcon(color = EnduPalette.Accent, size = 16.dp)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Generador de Rutas / Loop Circular",
+                            color = EnduPalette.TextPrimary,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Elige A→B o bucle por km con dificultad Trail/Enduro",
+                            color = EnduPalette.TextMuted,
+                            fontSize = 11.sp
+                        )
+                    }
+                    ChevronRightIcon(color = EnduPalette.TextMuted, size = 15.dp)
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -268,7 +323,7 @@ fun PlaceSearchSheet(
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = "📍", fontSize = 18.sp)
+                        QuickPinIcon(color = EnduPalette.TextSecondary, size = 16.dp)
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -300,8 +355,8 @@ fun PlaceSearchSheet(
                         // ofrecemos explícitamente elegir entre parada intermedia o nuevo destino.
                         if (hasActiveRoute && !isSearchingForStop) {
                             Spacer(modifier = Modifier.width(8.dp))
-                            Box(
-                                contentAlignment = Alignment.Center,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(Color(0xFF00D4FF).copy(alpha = 0.2f))
@@ -312,16 +367,18 @@ fun PlaceSearchSheet(
                                     }
                                     .padding(horizontal = 8.dp, vertical = 5.dp)
                             ) {
+                                PlusAddIcon(color = Color(0xFF00D4FF), size = 11.dp)
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "➕ Parada",
+                                    text = "Parada",
                                     color = Color(0xFF00D4FF),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                             Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                contentAlignment = Alignment.Center,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(EnduPalette.Accent)
@@ -331,8 +388,10 @@ fun PlaceSearchSheet(
                                     }
                                     .padding(horizontal = 8.dp, vertical = 5.dp)
                             ) {
+                                FlagDestinationIcon(color = Color.White, size = 11.dp)
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "🏁 Destino",
+                                    text = "Destino",
                                     color = Color.White,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold

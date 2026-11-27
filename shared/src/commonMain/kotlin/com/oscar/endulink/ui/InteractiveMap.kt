@@ -575,24 +575,30 @@ fun InteractiveMap(
                 drawCircle(color = EnduPalette.Accent, radius = 4.5.dp.toPx(), center = scrubPos)
             }
 
-            // 14. Marcadores y Waypoints con chinchetas visuales y etiquetas (incluyendo los embebidos en el GPX activo)
-            if (activeRoute != null && activeRoute.isVisible) {
-                for (wpt in activeRoute.waypoints) {
-                    val pt = geoToScreen(wpt.coordinate)
-                    drawWaypointMarker(
-                        pos = pt,
-                        wpt = wpt,
-                        heading = heading,
-                        textMeasurer = textMeasurer,
-                        labelLayoutCache = labelLayoutCache,
-                        labelStyle = waypointLabelStyle,
-                        showLabel = displaySettings.showWaypointLabelsOnMap,
-                        pinScale = pinScale
-                    )
-                }
+            // 14. Marcadores y Waypoints con culling de viewport y control de densidad de etiquetas (soporte fluido para GPX con 200+ waypoints como TET)
+            val routeWaypoints = if (activeRoute != null && activeRoute.isVisible) activeRoute.waypoints else emptyList()
+            val showRouteWptLabels = displaySettings.showWaypointLabelsOnMap && (zoom >= 10.0 || routeWaypoints.size <= 35)
+            var drawnRouteWptLabels = 0
+            val maxRouteWptLabels = 32
+            for (wpt in routeWaypoints) {
+                val pt = geoToScreen(wpt.coordinate)
+                if (pt.x !in viewMinX..viewMaxX || pt.y !in viewMinY..viewMaxY) continue
+                val drawLbl = showRouteWptLabels && drawnRouteWptLabels < maxRouteWptLabels
+                if (drawLbl) drawnRouteWptLabels++
+                drawWaypointMarker(
+                    pos = pt,
+                    wpt = wpt,
+                    heading = heading,
+                    textMeasurer = textMeasurer,
+                    labelLayoutCache = labelLayoutCache,
+                    labelStyle = waypointLabelStyle,
+                    showLabel = drawLbl,
+                    pinScale = pinScale
+                )
             }
             for (wpt in quickMarkers) {
                 val pt = geoToScreen(wpt.coordinate)
+                if (pt.x !in viewMinX..viewMaxX || pt.y !in viewMinY..viewMaxY) continue
                 drawWaypointMarker(
                     pos = pt,
                     wpt = wpt,
@@ -973,7 +979,7 @@ private fun DrawScope.drawWaypointMarker(
                 text = wpt.name,
                 style = labelStyle
             ).also {
-                if (labelLayoutCache.size > 128) labelLayoutCache.clear()
+                if (labelLayoutCache.size > 512) labelLayoutCache.clear()
                 labelLayoutCache[wpt.name] = it
             }
             val padH = (5f * pinScale).dp.toPx()

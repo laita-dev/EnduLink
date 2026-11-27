@@ -14,6 +14,8 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.oscar.endulink.trail.LoopDirection
+import com.oscar.endulink.trail.RouteTerrainProfile
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -1023,6 +1025,398 @@ fun QrCodeIcon(
         drawRect(color = color, topLeft = Offset(w * 0.12f, h * 0.58f), size = Size(box, box), style = Stroke(strokeW))
         drawRect(color = color, topLeft = Offset(w * 0.58f, h * 0.58f), size = Size(w * 0.13f, h * 0.13f))
         drawRect(color = color, topLeft = Offset(w * 0.75f, h * 0.75f), size = Size(w * 0.13f, h * 0.13f))
+    }
+}
+
+@Composable
+fun RecordDotIcon(
+    isRecording: Boolean,
+    color: Color = if (isRecording) EnduPalette.Danger else EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 17.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val c = Offset(w / 2f, h / 2f)
+        val strokeW = 1.7f.dp.toPx()
+        drawCircle(color = color, radius = w * 0.40f, center = c, style = Stroke(strokeW))
+        drawCircle(
+            color = if (isRecording) EnduPalette.Danger else color,
+            radius = if (isRecording) w * 0.22f else w * 0.16f,
+            center = c
+        )
+    }
+}
+
+@Composable
+fun RoutePathIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.7f.dp.toPx()
+        val r = w * 0.11f
+        drawCircle(color = color, radius = r, center = Offset(w * 0.22f, h * 0.76f), style = Stroke(strokeW))
+        drawCircle(color = color, radius = r, center = Offset(w * 0.78f, h * 0.24f))
+        val curve = Path().apply {
+            moveTo(w * 0.30f, h * 0.68f)
+            cubicTo(w * 0.52f, h * 0.68f, w * 0.44f, h * 0.24f, w * 0.68f, h * 0.24f)
+        }
+        drawPath(curve, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun LoopRouteIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.7f.dp.toPx()
+        val rect = androidx.compose.ui.geometry.Rect(w * 0.18f, h * 0.18f, w * 0.82f, h * 0.82f)
+        drawArc(
+            color = color,
+            startAngle = -60f,
+            sweepAngle = 285f,
+            useCenter = false,
+            topLeft = rect.topLeft,
+            size = rect.size,
+            style = Stroke(strokeW, cap = StrokeCap.Round)
+        )
+        val arrow = Path().apply {
+            moveTo(w * 0.60f, h * 0.12f)
+            lineTo(w * 0.76f, h * 0.22f)
+            lineTo(w * 0.62f, h * 0.34f)
+        }
+        drawPath(arrow, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun RoadHighwayIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.7f.dp.toPx()
+        drawLine(color, Offset(w * 0.32f, h * 0.16f), Offset(w * 0.16f, h * 0.84f), strokeW, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.68f, h * 0.16f), Offset(w * 0.84f, h * 0.84f), strokeW, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.50f, h * 0.22f), Offset(w * 0.50f, h * 0.36f), strokeW * 0.9f, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.50f, h * 0.50f), Offset(w * 0.50f, h * 0.64f), strokeW * 0.9f, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.50f, h * 0.76f), Offset(w * 0.50f, h * 0.84f), strokeW * 0.9f, StrokeCap.Round)
+    }
+}
+
+@Composable
+fun RoadTwistyIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.9f.dp.toPx()
+        val sCurve = Path().apply {
+            moveTo(w * 0.24f, h * 0.84f)
+            cubicTo(w * 0.24f, h * 0.56f, w * 0.78f, h * 0.62f, w * 0.76f, h * 0.42f)
+            cubicTo(w * 0.74f, h * 0.22f, w * 0.26f, h * 0.30f, w * 0.54f, h * 0.14f)
+        }
+        drawPath(sCurve, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun TrailGravelIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.7f.dp.toPx()
+        val wave = Path().apply {
+            moveTo(w * 0.12f, h * 0.62f)
+            quadraticTo(w * 0.34f, h * 0.28f, w * 0.54f, h * 0.54f)
+            quadraticTo(w * 0.72f, h * 0.74f, w * 0.88f, h * 0.36f)
+        }
+        drawPath(wave, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        val dotR = 1.2f.dp.toPx()
+        drawCircle(color, dotR, Offset(w * 0.26f, h * 0.78f))
+        drawCircle(color, dotR, Offset(w * 0.50f, h * 0.80f))
+        drawCircle(color, dotR, Offset(w * 0.74f, h * 0.76f))
+    }
+}
+
+@Composable
+fun OffroadForestIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.7f.dp.toPx()
+        val tree = Path().apply {
+            moveTo(w * 0.50f, h * 0.14f)
+            lineTo(w * 0.76f, h * 0.46f)
+            lineTo(w * 0.62f, h * 0.46f)
+            lineTo(w * 0.82f, h * 0.72f)
+            lineTo(w * 0.18f, h * 0.72f)
+            lineTo(w * 0.38f, h * 0.46f)
+            lineTo(w * 0.24f, h * 0.46f)
+            close()
+        }
+        drawPath(tree, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawLine(color, Offset(w * 0.50f, h * 0.72f), Offset(w * 0.50f, h * 0.88f), strokeW, StrokeCap.Round)
+    }
+}
+
+@Composable
+fun EnduroMountainIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.7f.dp.toPx()
+        val peaks = Path().apply {
+            moveTo(w * 0.10f, h * 0.82f)
+            lineTo(w * 0.38f, h * 0.26f)
+            lineTo(w * 0.56f, h * 0.60f)
+            lineTo(w * 0.70f, h * 0.38f)
+            lineTo(w * 0.90f, h * 0.82f)
+            close()
+        }
+        drawPath(peaks, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun TerrainProfileIcon(
+    profile: RouteTerrainProfile,
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    when (profile) {
+        RouteTerrainProfile.ROAD_FAST -> RoadHighwayIcon(color = color, modifier = modifier, size = size)
+        RouteTerrainProfile.ROAD_TWISTY -> RoadTwistyIcon(color = color, modifier = modifier, size = size)
+        RouteTerrainProfile.TRAIL_EASY -> TrailGravelIcon(color = color, modifier = modifier, size = size)
+        RouteTerrainProfile.OFFROAD_MEDIUM -> OffroadForestIcon(color = color, modifier = modifier, size = size)
+        RouteTerrainProfile.ENDURO_HARD -> EnduroMountainIcon(color = color, modifier = modifier, size = size)
+    }
+}
+
+@Composable
+fun LoopDirectionIcon(
+    direction: LoopDirection,
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 14.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.7f.dp.toPx()
+        when (direction) {
+            LoopDirection.AUTO -> {
+                drawCircle(color, w * 0.38f, Offset(w / 2f, h / 2f), style = Stroke(strokeW))
+                drawCircle(color, w * 0.11f, Offset(w / 2f, h / 2f))
+            }
+            LoopDirection.NORTH -> {
+                drawLine(color, Offset(w * 0.5f, h * 0.82f), Offset(w * 0.5f, h * 0.20f), strokeW, StrokeCap.Round)
+                val head = Path().apply {
+                    moveTo(w * 0.26f, h * 0.44f); lineTo(w * 0.5f, h * 0.18f); lineTo(w * 0.74f, h * 0.44f)
+                }
+                drawPath(head, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+            LoopDirection.SOUTH -> {
+                drawLine(color, Offset(w * 0.5f, h * 0.18f), Offset(w * 0.5f, h * 0.80f), strokeW, StrokeCap.Round)
+                val head = Path().apply {
+                    moveTo(w * 0.26f, h * 0.56f); lineTo(w * 0.5f, h * 0.82f); lineTo(w * 0.74f, h * 0.56f)
+                }
+                drawPath(head, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+            LoopDirection.EAST -> {
+                drawLine(color, Offset(w * 0.18f, h * 0.5f), Offset(w * 0.80f, h * 0.5f), strokeW, StrokeCap.Round)
+                val head = Path().apply {
+                    moveTo(w * 0.56f, h * 0.26f); lineTo(w * 0.82f, h * 0.5f); lineTo(w * 0.56f, h * 0.74f)
+                }
+                drawPath(head, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+            LoopDirection.WEST -> {
+                drawLine(color, Offset(w * 0.82f, h * 0.5f), Offset(w * 0.20f, h * 0.5f), strokeW, StrokeCap.Round)
+                val head = Path().apply {
+                    moveTo(w * 0.44f, h * 0.26f); lineTo(w * 0.18f, h * 0.5f); lineTo(w * 0.44f, h * 0.74f)
+                }
+                drawPath(head, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+        }
+    }
+}
+
+@Composable
+fun SaveBookmarkIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 14.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.6f.dp.toPx()
+        val path = Path().apply {
+            moveTo(w * 0.24f, h * 0.14f)
+            lineTo(w * 0.76f, h * 0.14f)
+            lineTo(w * 0.76f, h * 0.86f)
+            lineTo(w * 0.50f, h * 0.66f)
+            lineTo(w * 0.24f, h * 0.86f)
+            close()
+        }
+        drawPath(path, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun PlusAddIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 13.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.8f.dp.toPx()
+        drawLine(color, Offset(w * 0.18f, h * 0.5f), Offset(w * 0.82f, h * 0.5f), strokeW, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.5f, h * 0.18f), Offset(w * 0.5f, h * 0.82f), strokeW, StrokeCap.Round)
+    }
+}
+
+@Composable
+fun FlagDestinationIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 14.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.6f.dp.toPx()
+        drawLine(color, Offset(w * 0.24f, h * 0.16f), Offset(w * 0.24f, h * 0.86f), strokeW, StrokeCap.Round)
+        val flag = Path().apply {
+            moveTo(w * 0.24f, h * 0.18f)
+            lineTo(w * 0.80f, h * 0.30f)
+            lineTo(w * 0.24f, h * 0.52f)
+            close()
+        }
+        drawPath(flag, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun CheckMarkIcon(
+    color: Color = EnduPalette.Success,
+    modifier: Modifier = Modifier,
+    size: Dp = 15.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 2.0f.dp.toPx()
+        val p = Path().apply {
+            moveTo(w * 0.18f, h * 0.52f)
+            lineTo(w * 0.42f, h * 0.76f)
+            lineTo(w * 0.84f, h * 0.26f)
+        }
+        drawPath(p, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun ChevronRightIcon(
+    color: Color = EnduPalette.TextMuted,
+    modifier: Modifier = Modifier,
+    size: Dp = 14.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.8f.dp.toPx()
+        val p = Path().apply {
+            moveTo(w * 0.34f, h * 0.20f)
+            lineTo(w * 0.68f, h * 0.50f)
+            lineTo(w * 0.34f, h * 0.80f)
+        }
+        drawPath(p, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun GateBarrierIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.7f.dp.toPx()
+        drawLine(color, Offset(w * 0.18f, h * 0.22f), Offset(w * 0.18f, h * 0.84f), strokeW, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.82f, h * 0.22f), Offset(w * 0.82f, h * 0.84f), strokeW, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.18f, h * 0.36f), Offset(w * 0.82f, h * 0.36f), strokeW, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.18f, h * 0.60f), Offset(w * 0.82f, h * 0.60f), strokeW, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.32f, h * 0.36f), Offset(w * 0.68f, h * 0.60f), strokeW * 0.85f, StrokeCap.Round)
+    }
+}
+
+@Composable
+fun WaterDropIcon(
+    color: Color = EnduPalette.AccentBlue,
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.7f.dp.toPx()
+        val drop = Path().apply {
+            moveTo(w * 0.50f, h * 0.14f)
+            cubicTo(w * 0.78f, h * 0.46f, w * 0.82f, h * 0.84f, w * 0.50f, h * 0.86f)
+            cubicTo(w * 0.18f, h * 0.84f, w * 0.22f, h * 0.46f, w * 0.50f, h * 0.14f)
+            close()
+        }
+        drawPath(drop, color, style = Stroke(strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun ListLinesIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 15.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.7f.dp.toPx()
+        drawLine(color, Offset(w * 0.18f, h * 0.26f), Offset(w * 0.84f, h * 0.26f), strokeW, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.18f, h * 0.50f), Offset(w * 0.84f, h * 0.50f), strokeW, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.18f, h * 0.74f), Offset(w * 0.64f, h * 0.74f), strokeW, StrokeCap.Round)
     }
 }
 

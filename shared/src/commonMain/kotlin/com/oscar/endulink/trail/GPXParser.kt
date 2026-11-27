@@ -6,6 +6,8 @@ import kotlin.math.abs
 
 object GPXParser {
 
+    private const val MAX_STORED_TRACK_POINTS = 35_000
+
     fun stripInvSuffix(rawName: String): String {
         var clean = rawName
         while (clean.endsWith(" (Inv)")) {
@@ -19,6 +21,7 @@ object GPXParser {
         if (s.startsWith("<![CDATA[") && s.endsWith("]]>")) {
             s = s.removePrefix("<![CDATA[").removeSuffix("]]>").trim()
         }
+        if (!s.contains('&')) return s
         return s
             .replace("&amp;", "&")
             .replace("&lt;", "<")
@@ -28,83 +31,317 @@ object GPXParser {
             .trim()
     }
 
+    private fun isTagBoundary(c: Char): Boolean {
+        return c == '>' || c == '/' || c == ' ' || c == '\t' || c == '\r' || c == '\n'
+    }
+
+    private fun matchesTagName(xml: String, nameStart: Int, expected: String): Boolean {
+        val len = expected.length
+        val end = nameStart + len
+        if (end > xml.length) return false
+        for (k in 0 until len) {
+            if (xml[nameStart + k].lowercaseChar() != expected[k]) return false
+        }
+        return end == xml.length || isTagBoundary(xml[end])
+    }
+
+    private fun indexOfIgnoreCase(text: String, needle: String, startIndex: Int, endIndex: Int = text.length): Int {
+        val nLen = needle.length
+        if (nLen == 0) return startIndex
+        val limit = endIndex - nLen
+        if (limit < startIndex) return -1
+        val firstLower = needle[0].lowercaseChar()
+        var i = startIndex
+        while (i <= limit) {
+            if (text[i].lowercaseChar() == firstLower) {
+                var matched = true
+                for (j in 1 until nLen) {
+                    if (text[i + j].lowercaseChar() != needle[j].lowercaseChar()) {
+                        matched = false
+                        break
+                    }
+                }
+                if (matched) return i
+            }
+            i++
+        }
+        return -1
+    }
+
+    /**
+     * Extrae un atributo XML (ej. lat="40.12" o lon='-3.70') dentro del rango [start, end) sin usar Regex.
+     */
+    private fun extractDoubleAttr(xml: String, start: Int, end: Int, attrName: String): Double? {
+        val aLen = attrName.length
+        var i = start
+        while (i < end - aLen - 2) {
+            val prev = xml[i - 1]
+            if (prev == ' ' || prev == '\t' || prev == '\r' || prev == '\n') {
+                var match = true
+                for (k in 0 until aLen) {
+                    if (xml[i + k].lowercaseChar() != attrName[k]) {
+                        match = false
+                        break
+                    }
+                }
+                if (match) {
+                    var j = i + aLen
+                    while (j < end && (xml[j] == ' ' || xml[j] == '\t')) j++
+                    if (j < end && xml[j] == '=') {
+                        j++
+                        while (j < end && (xml[j] == ' ' || xml[j] == '\t')) j++
+                        if (j < end && (xml[j] == '"' || xml[j] == '\'')) {
+                            val quote = xml[j]
+                            val valStart = j + 1
+                            val valEnd = xml.indexOf(quote, valStart)
+                            if (valEnd in valStart until end) {
+                                return xml.substring(valStart, valEnd).trim().toDoubleOrNull()
+                            }
+                        }
+                    }
+                }
+            }
+            i++
+        }
+        return null
+    }
+
+    /**
+     * Extrae el texto interno de una subetiqueta simple (<ele>, <name>, <sym>) dentro de [bodyStart, bodyEnd).
+     */
+    private fun extractChildTagText(xml: String, bodyStart: Int, bodyEnd: Int, tagName: String): String? {
+        val openNeedle = "<$tagName"
+        var searchPos = bodyStart
+        while (searchPos < bodyEnd) {
+            val openIdx = indexOfIgnoreCase(xml, openNeedle, searchPos, bodyEnd)
+            if (openIdx < 0) return null
+            val afterName = openIdx + openNeedle.length
+            if (afterName >= bodyEnd) return null
+            val boundary = xml[afterName]
+            if (boundary != '>' && boundary != ' ' && boundary != '\t' && boundary != '\r' && boundary != '\n' && boundary != '/') {
+                searchPos = afterName
+                continue
+            }
+            val openEnd = xml.indexOf('>', afterName)
+            if (openEnd < 0 || openEnd >= bodyEnd) return null
+            if (xml[openEnd - 1] == '/') return null
+            val closeNeedle = "</$tagName>"
+            val closeIdx = indexOfIgnoreCase(xml, closeNeedle, openEnd + 1, bodyEnd)
+            if (closeIdx < 0) return null
+            return xml.substring(openEnd + 1, closeIdx)
+        }
+        return null
+    }
+
+    /**
+     * Parser GPX lineal O(N) sin backtracking de Regex.
+     * Soporta ficheros masivos (ej. TET de 2–25 MB y decenas de miles de puntos) sin StackOverflowError ni bloqueos.
+     */
     fun parse(xmlContent: String, fallbackName: String, color: TrackColor = TrackColor.ORANGE): GPXRoute {
-        var routeName = ""
-        val trkPoints = mutableListOf<GPXPoint>()
-        val rtePoints = mutableListOf<GPXPoint>()
-        val waypoints = mutableListOf<GPXWaypoint>()
+        val len = xmlContent.length
+        val trkPoints = ArrayList<GPXPoint>(1024)
+        val rtePoints = ArrayList<GPXPoint>(64)
+        val waypoints = ArrayList<GPXWaypoint>(32)
 
-        // Extraer nombre priorizando <trk><name>, <metadata><name> o <rte><name> para no confundirlo con <wpt><name>
-        val trkNameRegex = Regex("(?s)<(?:trk|metadata|rte)\\b[^>]*>.*?<name>(.*?)</name>", RegexOption.IGNORE_CASE)
-        val fallbackNameRegex = Regex("(?s)<name>(.*?)</name>", RegexOption.IGNORE_CASE)
+        val headerNameCandidates = ArrayList<String>(4)
+        var fallbackNameCandidate: String? = null
+        var parsedNotes = ""
 
-        val candidates = trkNameRegex.findAll(xmlContent).map { cleanXmlText(it.groupValues[1]) }.toList() +
-            fallbackNameRegex.findAll(xmlContent).map { cleanXmlText(it.groupValues[1]) }.toList()
+        var inHeaderContainer = 0 // profundidad dentro de <metadata>, <trk> o <rte>
+        var inTrackSeg = false
+        val nowMs = Clock.System.now().toEpochMilliseconds()
 
-        routeName = candidates.firstOrNull { it.isNotEmpty() && !it.startsWith("http", ignoreCase = true) }.orEmpty()
+        var pos = 0
+        while (pos < len) {
+            val lt = xmlContent.indexOf('<', pos)
+            if (lt < 0 || lt + 1 >= len) break
 
-        // Soporta tanto etiquetas con cuerpo (<trkpt ...>...</trkpt>) como autocerradas (<trkpt .../>)
-        val ptRegex = Regex("(?s)<(trkpt|rtept|wpt)\\s+([^/>]+?)(?:/>|>(.*?)</\\1>)", RegexOption.IGNORE_CASE)
-        val latRegex = Regex("lat=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE)
-        val lonRegex = Regex("lon=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE)
-        val eleRegex = Regex("<ele>([^<]+)</ele>", RegexOption.IGNORE_CASE)
-        val wptNameRegex = Regex("(?s)<name>(.*?)</name>", RegexOption.IGNORE_CASE)
-        val symRegex = Regex("<sym>([^<]+)</sym>", RegexOption.IGNORE_CASE)
+            val nextCh = xmlContent[lt + 1]
 
-        for (match in ptRegex.findAll(xmlContent)) {
-            val tag = match.groupValues[1].lowercase()
-            val attrs = match.groupValues[2]
-            val body = match.groupValues[3]
+            // Comentarios XML <!-- ... -->
+            if (nextCh == '!' && lt + 3 < len && xmlContent[lt + 2] == '-' && xmlContent[lt + 3] == '-') {
+                val commentEnd = xmlContent.indexOf("-->", lt + 4)
+                pos = if (commentEnd >= 0) commentEnd + 3 else len
+                continue
+            }
 
-            val latStr = latRegex.find(attrs)?.groupValues?.get(1)
-            val lonStr = lonRegex.find(attrs)?.groupValues?.get(1)
-            val lat = latStr?.toDoubleOrNull() ?: continue
-            val lon = lonStr?.toDoubleOrNull() ?: continue
-            val ele = if (body.isNotEmpty()) eleRegex.find(body)?.groupValues?.get(1)?.trim()?.toDoubleOrNull() else null
+            // CDATA <![CDATA[ ... ]]>
+            if (nextCh == '!' && xmlContent.regionMatches(lt, "<![CDATA[", 0, 9, ignoreCase = false)) {
+                val cdataEnd = xmlContent.indexOf("]]>", lt + 9)
+                pos = if (cdataEnd >= 0) cdataEnd + 3 else len
+                continue
+            }
 
-            when (tag) {
-                "trkpt" -> {
-                    trkPoints.add(GPXPoint(lat, lon, ele))
+            // Declaración <?xml ... ?> o DOCTYPE
+            if (nextCh == '?' || nextCh == '!') {
+                val close = xmlContent.indexOf('>', lt + 2)
+                pos = if (close >= 0) close + 1 else len
+                continue
+            }
+
+            // Etiquetas de cierre </...>
+            if (nextCh == '/') {
+                val nameStart = lt + 2
+                val close = xmlContent.indexOf('>', nameStart)
+                if (close < 0) break
+                if (matchesTagName(xmlContent, nameStart, "trkseg")) {
+                    inTrackSeg = false
+                } else if (
+                    matchesTagName(xmlContent, nameStart, "metadata") ||
+                    matchesTagName(xmlContent, nameStart, "trk") ||
+                    matchesTagName(xmlContent, nameStart, "rte")
+                ) {
+                    if (inHeaderContainer > 0) inHeaderContainer--
                 }
-                "rtept" -> {
-                    rtePoints.add(GPXPoint(lat, lon, ele))
+                pos = close + 1
+                continue
+            }
+
+            val nameStart = lt + 1
+            val openEnd = xmlContent.indexOf('>', nameStart)
+            if (openEnd < 0) break
+            val isSelfClosing = xmlContent[openEnd - 1] == '/'
+
+            when {
+                matchesTagName(xmlContent, nameStart, "trkpt") -> {
+                    val lat = extractDoubleAttr(xmlContent, nameStart + 5, openEnd, "lat")
+                    val lon = extractDoubleAttr(xmlContent, nameStart + 5, openEnd, "lon")
+                    var ele: Double? = null
+                    var nextPos = openEnd + 1
+                    if (!isSelfClosing) {
+                        val closeIdx = indexOfIgnoreCase(xmlContent, "</trkpt>", openEnd + 1, len)
+                        if (closeIdx >= 0) {
+                            ele = extractChildTagText(xmlContent, openEnd + 1, closeIdx, "ele")
+                                ?.trim()?.toDoubleOrNull()
+                            nextPos = closeIdx + 8
+                        }
+                    }
+                    if (lat != null && lon != null) {
+                        trkPoints.add(GPXPoint(lat, lon, ele))
+                    }
+                    pos = nextPos
                 }
-                "wpt" -> {
-                    val rawWptName = if (body.isNotEmpty()) wptNameRegex.find(body)?.groupValues?.get(1) else null
-                    val wptName = rawWptName?.let { cleanXmlText(it) }?.takeIf { it.isNotEmpty() } ?: "Punto"
-                    val sym = if (body.isNotEmpty()) symRegex.find(body)?.groupValues?.get(1)?.trim() else null
-                    waypoints.add(
-                        GPXWaypoint(
-                            id = "$wptName-$lat-$lon",
-                            name = wptName,
-                            latitude = lat,
-                            longitude = lon,
-                            elevation = ele,
-                            symbol = sym,
-                            createdAtEpochMs = Clock.System.now().toEpochMilliseconds()
+
+                matchesTagName(xmlContent, nameStart, "rtept") -> {
+                    val lat = extractDoubleAttr(xmlContent, nameStart + 5, openEnd, "lat")
+                    val lon = extractDoubleAttr(xmlContent, nameStart + 5, openEnd, "lon")
+                    var ele: Double? = null
+                    var nextPos = openEnd + 1
+                    if (!isSelfClosing) {
+                        val closeIdx = indexOfIgnoreCase(xmlContent, "</rtept>", openEnd + 1, len)
+                        if (closeIdx >= 0) {
+                            ele = extractChildTagText(xmlContent, openEnd + 1, closeIdx, "ele")
+                                ?.trim()?.toDoubleOrNull()
+                            nextPos = closeIdx + 8
+                        }
+                    }
+                    if (lat != null && lon != null) {
+                        rtePoints.add(GPXPoint(lat, lon, ele))
+                    }
+                    pos = nextPos
+                }
+
+                matchesTagName(xmlContent, nameStart, "wpt") -> {
+                    val lat = extractDoubleAttr(xmlContent, nameStart + 3, openEnd, "lat")
+                    val lon = extractDoubleAttr(xmlContent, nameStart + 3, openEnd, "lon")
+                    var ele: Double? = null
+                    var wptName = "Punto"
+                    var sym: String? = null
+                    var nextPos = openEnd + 1
+                    if (!isSelfClosing) {
+                        val closeIdx = indexOfIgnoreCase(xmlContent, "</wpt>", openEnd + 1, len)
+                        if (closeIdx >= 0) {
+                            ele = extractChildTagText(xmlContent, openEnd + 1, closeIdx, "ele")
+                                ?.trim()?.toDoubleOrNull()
+                            val rawWptName = extractChildTagText(xmlContent, openEnd + 1, closeIdx, "name")
+                            wptName = rawWptName?.let { cleanXmlText(it) }?.takeIf { it.isNotEmpty() } ?: "Punto"
+                            sym = extractChildTagText(xmlContent, openEnd + 1, closeIdx, "sym")?.trim()?.takeIf { it.isNotEmpty() }
+                            nextPos = closeIdx + 6
+                        }
+                    }
+                    if (lat != null && lon != null) {
+                        waypoints.add(
+                            GPXWaypoint(
+                                id = "$wptName-$lat-$lon",
+                                name = wptName,
+                                latitude = lat,
+                                longitude = lon,
+                                elevation = ele,
+                                symbol = sym,
+                                createdAtEpochMs = nowMs
+                            )
                         )
-                    )
+                    }
+                    pos = nextPos
+                }
+
+                matchesTagName(xmlContent, nameStart, "trkseg") -> {
+                    if (!isSelfClosing) inTrackSeg = true
+                    pos = openEnd + 1
+                }
+
+                matchesTagName(xmlContent, nameStart, "metadata") ||
+                    matchesTagName(xmlContent, nameStart, "trk") ||
+                    matchesTagName(xmlContent, nameStart, "rte") -> {
+                    if (!isSelfClosing) inHeaderContainer++
+                    pos = openEnd + 1
+                }
+
+                !inTrackSeg && matchesTagName(xmlContent, nameStart, "name") -> {
+                    var nextPos = openEnd + 1
+                    if (!isSelfClosing) {
+                        val closeIdx = indexOfIgnoreCase(xmlContent, "</name>", openEnd + 1, len)
+                        if (closeIdx >= 0) {
+                            val cleaned = cleanXmlText(xmlContent.substring(openEnd + 1, closeIdx))
+                            if (cleaned.isNotEmpty() && !cleaned.startsWith("http", ignoreCase = true)) {
+                                if (inHeaderContainer > 0) {
+                                    headerNameCandidates.add(cleaned)
+                                } else if (fallbackNameCandidate == null) {
+                                    fallbackNameCandidate = cleaned
+                                }
+                            }
+                            nextPos = closeIdx + 7
+                        }
+                    }
+                    pos = nextPos
+                }
+
+                !inTrackSeg && inHeaderContainer > 0 && parsedNotes.isEmpty() && matchesTagName(xmlContent, nameStart, "desc") -> {
+                    var nextPos = openEnd + 1
+                    if (!isSelfClosing) {
+                        val closeIdx = indexOfIgnoreCase(xmlContent, "</desc>", openEnd + 1, len)
+                        if (closeIdx >= 0) {
+                            val cleaned = cleanXmlText(xmlContent.substring(openEnd + 1, closeIdx))
+                            if (cleaned.isNotEmpty() && !cleaned.contains("<") && cleaned.length <= 280) {
+                                parsedNotes = cleaned
+                            }
+                            nextPos = closeIdx + 7
+                        }
+                    }
+                    pos = nextPos
+                }
+
+                else -> {
+                    pos = openEnd + 1
                 }
             }
         }
 
-        val chosenPoints = if (trkPoints.isNotEmpty()) trkPoints else rtePoints
-        if (chosenPoints.size < 2) {
+        val rawPoints = if (trkPoints.isNotEmpty()) trkPoints else rtePoints
+        if (rawPoints.size < 2) {
             throw BikeWireException.Io("El archivo GPX no contiene suficientes puntos de ruta (<trkpt> o <rtept>)")
         }
 
-        val stats = computeStats(chosenPoints)
+        val stats = computeStats(rawPoints)
+        val chosenPoints = if (rawPoints.size > MAX_STORED_TRACK_POINTS) {
+            downsamplePreservingEndpoints(rawPoints, MAX_STORED_TRACK_POINTS)
+        } else {
+            rawPoints
+        }
+
+        val routeName = headerNameCandidates.firstOrNull() ?: fallbackNameCandidate.orEmpty()
         val cleanFallback = fallbackName.substringBeforeLast(".")
         val finalName = if (routeName.isNotBlank()) routeName else cleanFallback
-
-        // Leer descripción limpia de metadata/trk si no contiene markup HTML externo largo
-        val descMatch = Regex("(?s)<(?:metadata|trk|rte)\\b[^>]*>.*?<desc>(.*?)</desc>", RegexOption.IGNORE_CASE)
-            .find(xmlContent)
-        val parsedNotes = descMatch?.groupValues?.get(1)?.let { cleanXmlText(it) }
-            ?.takeIf { it.isNotEmpty() && !it.contains("<") && it.length <= 280 }
-            .orEmpty()
-
-        val nowMs = Clock.System.now().toEpochMilliseconds()
         val routeId = "${nowMs}_${abs(finalName.hashCode())}"
 
         return GPXRoute(
@@ -120,6 +357,26 @@ object GPXParser {
             color = color,
             notes = parsedNotes
         )
+    }
+
+    /**
+     * Reduce tracks extremadamente densos (> 35.000 puntos) manteniendo inicio, final y
+     * puntos equidistantes en distancia acumulada para proteger RAM, disco y fluidez del mapa.
+     */
+    internal fun downsamplePreservingEndpoints(points: List<GPXPoint>, maxPoints: Int): List<GPXPoint> {
+        if (points.size <= maxPoints || maxPoints < 2) return points
+        val result = ArrayList<GPXPoint>(maxPoints)
+        val lastIdx = points.lastIndex
+        val step = lastIdx.toDouble() / (maxPoints - 1).toDouble()
+        result.add(points[0])
+        var prevPicked = 0
+        for (k in 1 until maxPoints - 1) {
+            val idx = (k * step).toInt().coerceIn(prevPicked + 1, lastIdx - 1)
+            result.add(points[idx])
+            prevPicked = idx
+        }
+        result.add(points[lastIdx])
+        return result
     }
 
     /**

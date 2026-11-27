@@ -98,4 +98,34 @@ class SettingsStoreTest {
         assertEquals(1.4f, cfg.trackStrokeScale)
         assertFalse(cfg.showTrackDirectionArrows)
     }
+
+    @Test
+    fun testHudButtonsLayoutPresetsAndNormalization() {
+        val balanced = HudButtonsLayout.fromPreset(HudLayoutPreset.BALANCED)
+        assertEquals(HudButtonSlot.BOTTOM, balanced.recSlot)
+        assertEquals(HudButtonSlot.BOTTOM, balanced.routesSlot)
+        assertEquals(HudButtonSlot.RIGHT, balanced.quickPinSlot)
+
+        val minimal = HudButtonsLayout.fromPreset(HudLayoutPreset.MINIMAL_BAR)
+        assertEquals(HudButtonSlot.RIGHT, minimal.recSlot)
+        assertEquals(HudButtonSlot.BOTTOM, minimal.routesSlot)
+
+        val leftHand = HudButtonsLayout.fromPreset(HudLayoutPreset.LEFT_HAND)
+        assertEquals(HudButtonSlot.LEFT, leftHand.recSlot)
+        assertEquals(HudButtonSlot.LEFT, leftHand.compassSlot)
+        assertEquals(HudButtonSlot.LEFT, leftHand.gpsSide)
+
+        // Normalización impide ocultar Rutas o colocar Brújula/Zoom/GPS en barra inferior
+        val invalid = HudButtonsLayout(
+            routesSlot = HudButtonSlot.HIDDEN,
+            compassSlot = HudButtonSlot.BOTTOM,
+            zoomSlot = HudButtonSlot.BOTTOM,
+            gpsSide = HudButtonSlot.HIDDEN
+        ).normalized()
+
+        assertEquals(HudButtonSlot.BOTTOM, invalid.routesSlot)
+        assertEquals(HudButtonSlot.RIGHT, invalid.compassSlot)
+        assertEquals(HudButtonSlot.RIGHT, invalid.zoomSlot)
+        assertEquals(HudButtonSlot.RIGHT, invalid.gpsSide)
+    }
 }

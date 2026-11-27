@@ -25,6 +25,13 @@ enum class ApproachTarget {
     FINISH
 }
 
+enum class MapPickTarget {
+    DESTINATION,
+    STOP,
+    GENERATOR_ORIGIN,
+    GENERATOR_DESTINATION
+}
+
 class EnduController {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -79,6 +86,31 @@ class EnduController {
 
     private val _isCalculatingDestinationRoute = MutableStateFlow(false)
     val isCalculatingDestinationRoute: StateFlow<Boolean> = _isCalculatingDestinationRoute.asStateFlow()
+
+    // Perfil de terreno/dificultad estilo DMD2 y Generador de Rutas (A→B y Loop)
+    private val _selectedRouteProfile = MutableStateFlow(RouteTerrainProfile.ROAD_FAST)
+    val selectedRouteProfile: StateFlow<RouteTerrainProfile> = _selectedRouteProfile.asStateFlow()
+
+    private val _showRouteGenerator = MutableStateFlow(false)
+    val showRouteGenerator: StateFlow<Boolean> = _showRouteGenerator.asStateFlow()
+
+    private val _generatorOriginPin = MutableStateFlow<SearchResultItem?>(null)
+    val generatorOriginPin: StateFlow<SearchResultItem?> = _generatorOriginPin.asStateFlow()
+
+    private val _generatorDestPin = MutableStateFlow<SearchResultItem?>(null)
+    val generatorDestPin: StateFlow<SearchResultItem?> = _generatorDestPin.asStateFlow()
+
+    private val _generatorIsLoop = MutableStateFlow(false)
+    val generatorIsLoop: StateFlow<Boolean> = _generatorIsLoop.asStateFlow()
+
+    private val _generatorLoopKm = MutableStateFlow(60)
+    val generatorLoopKm: StateFlow<Int> = _generatorLoopKm.asStateFlow()
+
+    private val _generatorLoopDirection = MutableStateFlow(LoopDirection.AUTO)
+    val generatorLoopDirection: StateFlow<LoopDirection> = _generatorLoopDirection.asStateFlow()
+
+    private val _customRouteOrigin = MutableStateFlow<SearchResultItem?>(null)
+    private val _activeLoopSpec = MutableStateFlow<Triple<SearchResultItem, Int, LoopDirection>?>(null)
 
     val destinationRoadRoute: CalculatedRoadRoute?
         get() {
@@ -241,6 +273,18 @@ class EnduController {
     private var consecutiveOffGpxSamples = 0
     private var lastApproachTarget = ApproachTarget.NEAREST
 
+    private val routeSaveLock = SynchronizedLock()
+    private var routeSaveJob: Job? = null
+
+    private fun saveRoutesAsync(snapshot: List<GPXRoute>) {
+        routeSaveLock.withLock {
+            routeSaveJob?.cancel()
+            routeSaveJob = scope.launch(Dispatchers.Default) {
+                RouteStore.saveRoutes(snapshot)
+            }
+        }
+    }
+
     // Compatibilidad para búsqueda
     val destination: StateFlow<SearchResultItem?> get() = _searchPin
 
@@ -262,7 +306,14 @@ class EnduController {
         _bikeQr.value = savedSettings.bikeQr
         _allowLocalLanTesting.value = true
         _quickMarkers.value = WaypointStore.loadWaypoints()
-        _routes.value = RouteStore.loadRoutes()
+        scope.launch(Dispatchers.Default) {
+            val loadedRoutes = RouteStore.loadRoutes()
+            if (loadedRoutes.isNotEmpty()) {
+                val existingIds = _routes.value.map { it.id }.toHashSet()
+                val merged = loadedRoutes.filter { it.id !in existingIds } + _routes.value
+                _routes.value = merged
+            }
+        }
         groupManager.loadConfig(savedSettings.groupConfig)
         groupManager.updateFallbackCoordinate(_mapCenter.value)
         if (!savedSettings.lanTestingDefaultApplied || !savedSettings.allowLocalLanTesting) {
@@ -287,7 +338,19 @@ class EnduController {
             }
         }
 
-        // Monitor automático de Wi-Fi de la moto (activa la pantalla TFT en cuanto el móvil se conecta al Wi-Fi de la moto) y cronómetro REC
+        // Auto-ocultar cualquier aviso flotante superior a los 3 segundos
+        scope.launch {
+            _statusBannerMessage.collectLatest { msg ->
+                if (msg != null) {
+                    delay(3000L)
+                    if (_statusBannerMessage.value == msg) {
+                        _statusBannerMessage.value = null
+                    }
+                }
+            }
+        }
+
+        // Monitor pasivo de Wi-Fi de la moto (actualiza el estado de red; NO conecta automáticamente al abrir la app) y cronómetro REC
         scope.launch {
             var tick = 0
             var wasOnBikeWifi = false
@@ -298,21 +361,10 @@ class EnduController {
                     _wifiSnapshot.value = snap
                     val onBikeWifi = snap?.isLikelyBikeWifi(_bikeQr.value) == true
                     if (!onBikeWifi && wasOnBikeWifi) {
-                        manuallyStoppedOnCurrentBikeWifi = false
                         val curBikeState = _bikeState.value
                         if (bikeLink?.isOpen == true && (curBikeState == BikeState.SHOWING || curBikeState == BikeState.GREETED)) {
-                            logBike("Wi-Fi de la moto perdido · Cerrando sesión TCP anterior para reconectar en cuanto vuelva...")
+                            logBike("Wi-Fi de la moto perdido · Cerrando sesión TCP activa...")
                             bikeLink?.dropActiveSession("Wi-Fi de la moto desconectado")
-                        }
-                    }
-                    if (onBikeWifi && (!wasOnBikeWifi || _bikeState.value == BikeState.CLOSED)) {
-                        if (!manuallyStoppedOnCurrentBikeWifi) {
-                            val curBikeState = _bikeState.value
-                            if (bikeLink?.isOpen == true && (curBikeState == BikeState.SHOWING || curBikeState == BikeState.GREETED)) {
-                                bikeLink?.dropActiveSession("Reconexión a Wi-Fi de la moto")
-                            }
-                            logBike("Wi-Fi de la moto detectado (${snap?.ssid ?: snap?.gatewayCandidateIP}) · Activando pantalla TFT automáticamente...")
-                            startBikeStream()
                         }
                     }
                     wasOnBikeWifi = onBikeWifi
@@ -421,7 +473,7 @@ class EnduController {
                                     if (consecutiveOffRoadSamples >= 2 && nowMs - lastAutoRecalcMs >= 8_000L) {
                                         consecutiveOffRoadSamples = 0
                                         lastAutoRecalcMs = nowMs
-                                        if (activeRoad != null) {
+                                        if (activeRoad != null && _activeLoopSpec.value == null) {
                                             _searchPin.value?.let { dest ->
                                                 calculateRouteToSearchPin(
                                                     dest = dest,
@@ -583,7 +635,6 @@ class EnduController {
 
     fun start() {
         locationProvider.startTracking()
-        startBikeStream()
         updateBackgroundKeepAlive()
     }
 
@@ -753,6 +804,8 @@ class EnduController {
         _activeRouteFlow.value = null
         _approachRoadRoute.value = null
         _trackProgress.value = null
+        _customRouteOrigin.value = null
+        _activeLoopSpec.value = null
         _destinationRouteOptions.value = emptyList()
         _selectedDestinationOptionIndex.value = 0
         if (!keepWaypoints) {
@@ -765,6 +818,173 @@ class EnduController {
         _mapCenter.value = item.coordinate
 
         calculateRouteToSearchPin(item, autoShareWithGroup = autoShareWithGroup)
+    }
+
+    fun setRouteTerrainProfile(profile: RouteTerrainProfile) {
+        if (_selectedRouteProfile.value == profile) return
+        _selectedRouteProfile.value = profile
+        val activeLoop = _activeLoopSpec.value
+        val activeDest = _searchPin.value
+        when {
+            activeLoop != null -> {
+                calculateLoopRouteInternal(
+                    originPin = activeLoop.first,
+                    targetKm = activeLoop.second,
+                    direction = activeLoop.third,
+                    profile = profile
+                )
+            }
+            activeDest != null -> {
+                calculateRouteToSearchPin(
+                    dest = activeDest,
+                    autoShareWithGroup = false,
+                    isAutoRecalculate = false
+                )
+            }
+        }
+    }
+
+    fun openRouteGenerator(initialIsLoop: Boolean = false) {
+        _generatorIsLoop.value = initialIsLoop
+        _showRouteGenerator.value = true
+    }
+
+    fun closeRouteGenerator() {
+        _showRouteGenerator.value = false
+    }
+
+    fun setGeneratorIsLoop(isLoop: Boolean) {
+        _generatorIsLoop.value = isLoop
+    }
+
+    fun setGeneratorOriginPin(item: SearchResultItem?) {
+        _generatorOriginPin.value = item
+    }
+
+    fun setGeneratorDestPin(item: SearchResultItem?) {
+        _generatorDestPin.value = item
+    }
+
+    fun setGeneratorLoopKm(km: Int) {
+        _generatorLoopKm.value = km.coerceIn(15, 250)
+    }
+
+    fun setGeneratorLoopDirection(direction: LoopDirection) {
+        _generatorLoopDirection.value = direction
+    }
+
+    fun generateCustomRoute() {
+        val profile = _selectedRouteProfile.value
+        val gps = riderTelemetry.value.coordinate ?: _mapCenter.value
+        val originPin = _generatorOriginPin.value ?: SearchResultItem(
+            title = "Mi ubicación",
+            subtitle = PlaceSearchEngine.formatCoord(gps),
+            coordinate = gps,
+            distanceKm = 0.0
+        )
+
+        if (_generatorIsLoop.value) {
+            val km = _generatorLoopKm.value
+            val dir = _generatorLoopDirection.value
+            _selectedRouteId.value = null
+            _activeRouteFlow.value = null
+            _approachRoadRoute.value = null
+            _trackProgress.value = null
+            _intermediateWaypoints.value = emptyList()
+            _customRouteOrigin.value = originPin
+            _showRouteGenerator.value = false
+            calculateLoopRouteInternal(originPin, km, dir, profile)
+        } else {
+            val destPin = _generatorDestPin.value
+            if (destPin == null) {
+                showPlatformToast("Selecciona un destino (Punto B) para generar la ruta")
+                return
+            }
+            _selectedRouteId.value = null
+            _activeRouteFlow.value = null
+            _approachRoadRoute.value = null
+            _trackProgress.value = null
+            _activeLoopSpec.value = null
+            _customRouteOrigin.value = _generatorOriginPin.value
+            _destinationRouteOptions.value = emptyList()
+            _selectedDestinationOptionIndex.value = 0
+            _searchPin.value = destPin
+            _followMode.value = MapFollowMode.FREE
+            _mapCenter.value = destPin.coordinate
+            _showRouteGenerator.value = false
+            calculateRouteToSearchPin(destPin, autoShareWithGroup = true, isAutoRecalculate = false)
+        }
+    }
+
+    private fun calculateLoopRouteInternal(
+        originPin: SearchResultItem,
+        targetKm: Int,
+        direction: LoopDirection,
+        profile: RouteTerrainProfile
+    ) {
+        routeCalcJob?.cancel()
+        val loopTitle = "Loop ${profile.shortLabel} (${targetKm} km)"
+        _activeLoopSpec.value = Triple(originPin, targetKm, direction)
+        _searchPin.value = SearchResultItem(
+            title = loopTitle,
+            subtitle = "${originPin.title} · ${profile.difficultyBadge}",
+            coordinate = originPin.coordinate,
+            distanceKm = targetKm.toDouble()
+        )
+        _destinationRouteOptions.value = emptyList()
+        _selectedDestinationOptionIndex.value = 0
+        _isCalculatingDestinationRoute.value = true
+        _followMode.value = MapFollowMode.FREE
+
+        routeCalcJob = scope.launch {
+            try {
+                val routes = RoadRouter.generateLoopRoutes(
+                    origin = originPin.coordinate,
+                    originName = originPin.title,
+                    targetDistanceKm = targetKm.toDouble(),
+                    profile = profile,
+                    direction = direction
+                )
+                _destinationRouteOptions.value = routes
+                _selectedDestinationOptionIndex.value = 0
+                _trackProgress.value = null
+                consecutiveOffRoadSamples = 0
+                _isCalculatingDestinationRoute.value = false
+
+                val first = routes.firstOrNull()
+                if (first != null) {
+                    fitCoordinates(first.coordinates)
+                    if (first.isOfflineFallback) {
+                        _statusBannerMessage.value = "Sin cobertura · Loop aproximado en modo offline"
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _isCalculatingDestinationRoute.value = false
+                _statusBannerMessage.value = "Error generando loop: ${e.message}"
+            }
+        }
+    }
+
+    fun saveActiveCalculatedRouteAsTrack(customName: String? = null): GPXRoute? {
+        val roadRoute = destinationRoadRoute ?: return null
+        val source = roadRoute.asGPXRoute
+        val now = Clock.System.now().toEpochMilliseconds()
+        val finalName = customName?.trim()?.takeIf { it.isNotBlank() } ?: source.name
+        val savedRoute = source.copy(
+            id = "gen_${now}_${kotlin.math.abs(finalName.hashCode())}",
+            name = finalName,
+            fileName = "${finalName.replace(" ", "_").take(32)}.gpx",
+            importedAtEpochMs = now,
+            color = roadRoute.profile.trackColor,
+            isVisible = true,
+            notes = "${roadRoute.profile.title} (${roadRoute.profile.difficultyBadge}) · ${(roadRoute.distanceKm * 10.0).roundToInt() / 10.0} km"
+        )
+        addRoute(savedRoute)
+        selectRoute(savedRoute, fitToBounds = true, autoShareWithGroup = false)
+        _statusBannerMessage.value = "Ruta guardada en Tracks: $finalName"
+        return savedRoute
     }
 
     /**
@@ -851,7 +1071,12 @@ class EnduController {
         isAutoRecalculate: Boolean = false
     ) {
         routeCalcJob?.cancel()
-        val origin = riderTelemetry.value.coordinate ?: _mapCenter.value
+        val origin = if (isAutoRecalculate) {
+            riderTelemetry.value.coordinate ?: _mapCenter.value
+        } else {
+            _customRouteOrigin.value?.coordinate ?: riderTelemetry.value.coordinate ?: _mapCenter.value
+        }
+        val profile = _selectedRouteProfile.value
         val waypoints = _intermediateWaypoints.value.map { it.coordinate }
         _isCalculatingDestinationRoute.value = true
         if (isAutoRecalculate) {
@@ -860,13 +1085,13 @@ class EnduController {
 
         routeCalcJob = scope.launch {
             try {
-                val routes = RoadRouter.calculateMultiWaypointRoute(
+                val routes = RoadRouter.calculateRoutesWithProfile(
                     origin = origin,
-                    waypoints = waypoints,
                     destination = dest.coordinate,
                     destinationName = dest.title,
-                    requestAlternatives = !isAutoRecalculate && waypoints.isEmpty(),
-                    color = TrackColor.CYAN
+                    waypoints = waypoints,
+                    profile = profile,
+                    requestAlternatives = !isAutoRecalculate && waypoints.isEmpty()
                 )
                 _destinationRouteOptions.value = routes
                 _selectedDestinationOptionIndex.value = 0
@@ -879,11 +1104,8 @@ class EnduController {
                     if (!isAutoRecalculate) {
                         fitCoordinates(first.coordinates)
                     }
-                    val stopsMsg = if (waypoints.isNotEmpty()) " (${waypoints.size} parada${if (waypoints.size > 1) "s" else ""})" else ""
-                    val offlineNote = if (first.isOfflineFallback) " · Sin cobertura (Enlace directo offline)" else ""
-                    val prefix = if (isAutoRecalculate) "Ruta recalculada" else "Ruta a ${dest.title}$stopsMsg"
-                    if (!isAutoRecalculate || !first.isOfflineFallback) {
-                        _statusBannerMessage.value = "$prefix: ${(first.distanceKm * 10.0).roundToInt() / 10.0} km (~${first.expectedMinutes} min)$offlineNote"
+                    if (!isAutoRecalculate && first.isOfflineFallback) {
+                        _statusBannerMessage.value = "Sin cobertura · Enlace directo offline (${(first.distanceKm * 10.0).roundToInt() / 10.0} km)"
                     }
                     if (!isAutoRecalculate && autoShareWithGroup && groupManager.activeRoomCode.value != null) {
                         groupManager.shareRoute(
@@ -925,6 +1147,8 @@ class EnduController {
         _isCalculatingDestinationRoute.value = false
         _searchPin.value = null
         _droppedPin.value = null
+        _customRouteOrigin.value = null
+        _activeLoopSpec.value = null
         _intermediateWaypoints.value = emptyList()
         _destinationRouteOptions.value = emptyList()
         _selectedDestinationOptionIndex.value = 0
@@ -1067,7 +1291,7 @@ class EnduController {
         val current = _routes.value.toMutableList()
         current.add(route)
         _routes.value = current
-        RouteStore.saveRoutes(current)
+        saveRoutesAsync(current)
     }
 
     fun shareRoute(route: GPXRoute) {
@@ -1080,18 +1304,24 @@ class EnduController {
     }
 
     fun importGPXContent(name: String, content: String, autoShareWithGroup: Boolean = true) {
-        try {
-            val route = GPXParser.parse(content, fallbackName = name)
-            addRoute(route)
-            selectRoute(route, autoShareWithGroup = autoShareWithGroup)
-            fitCoordinates(route.points.map { it.coordinate })
-            val msg = "Track importado: ${route.name} (${(route.totalDistanceKm * 10.0).roundToInt() / 10.0} km)"
-            _statusBannerMessage.value = msg
-            showPlatformToast(msg)
-        } catch (e: Exception) {
-            val err = "Error importando GPX: ${e.message}"
-            _statusBannerMessage.value = err
-            showPlatformToast(err)
+        if (content.length > 250_000) {
+            _statusBannerMessage.value = "Importando GPX ($name)..."
+        }
+        scope.launch(Dispatchers.Default) {
+            try {
+                val route = GPXParser.parse(content, fallbackName = name)
+                // Precalcular caché de proyección en hilo de fondo antes de pintar en el mapa
+                val cachedCoords = route.cachedCoordinates
+                addRoute(route)
+                selectRoute(route, fitToBounds = false, autoShareWithGroup = autoShareWithGroup)
+                fitCoordinates(cachedCoords)
+                val wptSuffix = if (route.waypoints.isNotEmpty()) " · ${route.waypoints.size} pts" else ""
+                val msg = "Track importado: ${route.name} (${(route.totalDistanceKm * 10.0).roundToInt() / 10.0} km$wptSuffix)"
+                _statusBannerMessage.value = msg
+            } catch (e: Throwable) {
+                val err = "Error importando GPX: ${e.message ?: "archivo demasiado grande o inválido"}"
+                _statusBannerMessage.value = err
+            }
         }
     }
 
@@ -1116,7 +1346,7 @@ class EnduController {
         _selectedRouteId.value = latest.id
         _activeRouteFlow.value = latest
         if (fitToBounds) {
-            fitCoordinates(latest.points.map { it.coordinate })
+            fitCoordinates(latest.cachedCoordinates)
         }
         if (autoShareWithGroup && groupManager.activeRoomCode.value != null) {
             groupManager.shareRoute(latest, isDestination = false)
@@ -1124,7 +1354,7 @@ class EnduController {
     }
 
     fun focusRouteOnMap(route: GPXRoute) {
-        fitCoordinates(route.points.map { it.coordinate })
+        fitCoordinates(route.cachedCoordinates)
     }
 
     fun deselectRoute() {
@@ -1144,15 +1374,16 @@ class EnduController {
 
     private fun updateStoredRoute(routeId: String, transform: (GPXRoute) -> GPXRoute): GPXRoute? {
         var modified: GPXRoute? = null
-        _routes.value = _routes.value.map { existing ->
+        val updatedList = _routes.value.map { existing ->
             if (existing.id == routeId) {
                 transform(existing).also { modified = it }
             } else {
                 existing
             }
         }
+        _routes.value = updatedList
         if (modified != null) {
-            RouteStore.saveRoutes(_routes.value)
+            saveRoutesAsync(updatedList)
             if (_selectedRouteId.value == routeId) {
                 _activeRouteFlow.value = modified
             }
@@ -1218,17 +1449,18 @@ class EnduController {
         if (_selectedRouteId.value == route.id) {
             deselectRoute()
         }
-        _routes.value = _routes.value.filter { it.id != route.id }
-        RouteStore.saveRoutes(_routes.value)
+        val remaining = _routes.value.filter { it.id != route.id }
+        _routes.value = remaining
+        saveRoutesAsync(remaining)
     }
 
     fun fitActiveContentOnMap() {
         val coords = mutableListOf<GeoCoord>()
         destinationRoadRoute?.let { coords.addAll(it.coordinates) }
         _approachRoadRoute.value?.let { coords.addAll(it.coordinates) }
-        selectedRoute?.takeIf { it.isVisible }?.let { coords.addAll(it.points.map { p -> p.coordinate }) }
+        selectedRoute?.takeIf { it.isVisible }?.let { coords.addAll(it.cachedCoordinates) }
         if (coords.isEmpty()) {
-            _routes.value.filter { it.isVisible }.forEach { r -> coords.addAll(r.points.map { p -> p.coordinate }) }
+            _routes.value.filter { it.isVisible }.forEach { r -> coords.addAll(r.cachedCoordinates) }
         }
         if (coords.isNotEmpty()) {
             fitCoordinates(coords)

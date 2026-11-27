@@ -217,6 +217,33 @@ data class GPXRoute(
                 color = color
             )
         }
+
+        fun fromPoints(
+            name: String,
+            points: List<GPXPoint>,
+            color: TrackColor = TrackColor.BLUE,
+            notes: String = "",
+            waypoints: List<GPXWaypoint> = emptyList(),
+            importedAtEpochMs: Long = 0L
+        ): GPXRoute {
+            val pts = points.map {
+                GPXPoint(it.latitude, it.longitude, it.elevation, cumulativeKm = 0.0)
+            }.toMutableList()
+            val stats = GPXParser.computeStats(pts)
+            return GPXRoute(
+                id = "${name.hashCode()}_${pts.size}",
+                name = name,
+                fileName = "generated_route.gpx",
+                points = pts,
+                waypoints = waypoints,
+                totalDistanceKm = stats.first,
+                elevationGainM = stats.second,
+                importedAtEpochMs = importedAtEpochMs,
+                isVisible = true,
+                color = color,
+                notes = notes
+            )
+        }
     }
 }
 

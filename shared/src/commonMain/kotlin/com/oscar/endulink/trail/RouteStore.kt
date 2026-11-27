@@ -2,6 +2,7 @@ package com.oscar.endulink.trail
 
 import com.oscar.endulink.tiles.PlatformPaths
 import com.oscar.endulink.tiles.TileDiskStorage
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -9,9 +10,11 @@ import kotlinx.serialization.json.Json
  * Almacenamiento persistente en disco para la biblioteca de tracks GPX importados y grabados con REC.
  */
 object RouteStore {
+    @OptIn(ExperimentalSerializationApi::class)
     private val json = Json {
         ignoreUnknownKeys = true
-        encodeDefaults = true
+        encodeDefaults = false
+        explicitNulls = false
     }
 
     private fun getFilePath(): String {
@@ -24,7 +27,7 @@ object RouteStore {
             val bytes = TileDiskStorage.readBytes(path) ?: return emptyList()
             val text = bytes.decodeToString()
             json.decodeFromString<List<GPXRoute>>(text)
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             emptyList()
         }
     }
@@ -34,7 +37,6 @@ object RouteStore {
             val path = getFilePath()
             val text = json.encodeToString(routes)
             TileDiskStorage.writeBytes(path, text.encodeToByteArray())
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 }
-

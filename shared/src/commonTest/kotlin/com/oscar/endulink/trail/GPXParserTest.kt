@@ -82,5 +82,41 @@ class GPXParserTest {
             GPXParser.parse("<config><item>not a gpx</item></config>", fallbackName = "config.xml")
         }
     }
+
+    @Test
+    fun testParseMassiveTetStyleGpxWithoutBacktrackingOrOverflow() {
+        val sb = StringBuilder(2_200_000)
+        sb.appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
+        sb.appendLine("""<gpx version="1.1" creator="EnduLink" xmlns="http://www.topografix.com/GPX/1/1">""")
+        sb.appendLine("""  <metadata><name>TET Portugal</name><desc>Biker owned &amp; tested</desc></metadata>""")
+        for (w in 0 until 220) {
+            val lat = 37.2 + w * 0.02
+            val lon = -8.6 + (w % 15) * 0.05
+            sb.appendLine("""  <wpt lat="$lat" lon="$lon"><name>FUEL_Station_$w</name><sym>Gas Station</sym></wpt>""")
+        }
+        sb.appendLine("  <trk>")
+        sb.appendLine("    <name>TET Portugal</name>")
+        sb.appendLine("    <trkseg>")
+        for (i in 0 until 40_000) {
+            val lat = 37.1 + i * 0.00012
+            val lon = -8.6 + (i % 200) * 0.00005
+            sb.appendLine("""      <trkpt lat="$lat" lon="$lon"/>""")
+        }
+        sb.appendLine("    </trkseg>")
+        sb.appendLine("  </trk>")
+        sb.appendLine("</gpx>")
+
+        val route = GPXParser.parse(sb.toString(), fallbackName = "TET_Portugal.gpx")
+
+        assertEquals("TET Portugal", route.name)
+        assertEquals("Biker owned & tested", route.notes)
+        assertEquals(220, route.waypoints.size)
+        assertEquals("FUEL_Station_0", route.waypoints.first().name)
+        assertEquals(35_000, route.points.size)
+        assertTrue(route.totalDistanceKm > 500.0)
+        // Comprobar preservación de extremos tras downsampling
+        assertEquals(37.1, route.points.first().latitude, 1e-6)
+        assertEquals(37.1 + 39_999 * 0.00012, route.points.last().latitude, 1e-6)
+    }
 }
 

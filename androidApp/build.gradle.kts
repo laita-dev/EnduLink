@@ -45,7 +45,7 @@ android {
         val envVersionName = project.findProperty("appVersionName") as? String
         val envVersionCode = (project.findProperty("appVersionCode") as? String)?.toIntOrNull()
 
-        val resolvedVersionName = envVersionName ?: "0.3.1"
+        val resolvedVersionName = envVersionName ?: "0.4.0"
         val isTestBuild = (project.findProperty("isTestBuild") as? String)?.toBooleanStrictOrNull()
             ?: resolvedVersionName.contains("-")
         val baseVersion = resolvedVersionName.substringBefore("-")
@@ -53,10 +53,10 @@ android {
         val derivedVersionCode = if (versionParts.size >= 3) {
             versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
         } else {
-            301
+            400
         }
 
-        applicationId = if (isTestBuild) "com.oscar.endulink.test" else "com.oscar.endulink"
+        applicationId = if (isTestBuild) "com.laitadev.endulink.test" else "com.laitadev.endulink"
         versionCode = envVersionCode ?: derivedVersionCode
         versionName = resolvedVersionName
         resValue("string", "app_name", if (isTestBuild) "EnduLink-test" else "EnduLink")

@@ -133,13 +133,19 @@ fun importGPXFromUri(context: Context, uri: Uri) {
 @Composable
 actual fun rememberGPXFilePicker(onGPXImported: (name: String, content: String) -> Unit): () -> Unit {
     val context = LocalContext.current
+    val appCtx = context.applicationContext
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
-            when (val result = readGpxFromUri(context, uri)) {
-                is GpxUriReadResult.Success -> onGPXImported(result.fileName, result.content)
-                is GpxUriReadResult.Error -> showPlatformToast(result.message)
+            gpxImportScope.launch {
+                val result = readGpxFromUri(appCtx, uri)
+                withContext(Dispatchers.Main) {
+                    when (result) {
+                        is GpxUriReadResult.Success -> onGPXImported(result.fileName, result.content)
+                        is GpxUriReadResult.Error -> showPlatformToast(result.message)
+                    }
+                }
             }
         }
     }

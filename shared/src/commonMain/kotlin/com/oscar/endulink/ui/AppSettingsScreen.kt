@@ -21,6 +21,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.oscar.endulink.platform.getPlatformName
 import com.oscar.endulink.trail.AppDisplaySettings
+import com.oscar.endulink.trail.HudButtonSlot
+import com.oscar.endulink.trail.HudButtonsLayout
+import com.oscar.endulink.trail.HudLayoutPreset
 import com.oscar.endulink.trail.KeepScreenOnMode
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -380,7 +383,17 @@ fun AppSettingsScreen(
                     }
 
                     // ------------------------------------------
-                    // TARJETA 3: MAPAS OFFLINE Y ALMACENAMIENTO
+                    // TARJETA 3: BOTONES EN PANTALLA (HUD)
+                    // ------------------------------------------
+                    HudLayoutSettingsCard(
+                        layout = settings.hudLayout.normalized(),
+                        onUpdateLayout = { updatedLayout ->
+                            onUpdateSettings { it.copy(hudLayout = updatedLayout.normalized()) }
+                        }
+                    )
+
+                    // ------------------------------------------
+                    // TARJETA 4: MAPAS OFFLINE Y ALMACENAMIENTO
                     // ------------------------------------------
                     SettingsSectionCard(title = "MAPAS OFFLINE") {
                         Row(
@@ -443,7 +456,7 @@ fun AppSettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Text(
-                            text = if (isAndroid) "EnduLink para Android" else "motillOS para iOS",
+                            text = if (isAndroid) "EnduLink para Android" else "EnduLink para iOS",
                             color = EnduPalette.TextMuted,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
@@ -713,5 +726,220 @@ private fun SettingsChoiceChip(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+@Composable
+private fun HudLayoutSettingsCard(
+    layout: HudButtonsLayout,
+    onUpdateLayout: (HudButtonsLayout) -> Unit
+) {
+    SettingsSectionCard(title = "BOTONES EN PANTALLA (HUD)") {
+        Text(
+            text = "Distribuye los botones por las guías de la pantalla (Izquierda, Derecha o Barra inferior) o elige una plantilla rápida.",
+            color = EnduPalette.TextMuted,
+            fontSize = 11.sp
+        )
+
+        HudLayoutMiniPreview(layout = layout)
+
+        Text(
+            text = "Plantillas predeterminadas",
+            color = EnduPalette.TextPrimary,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            HudLayoutPreset.entries.chunked(2).forEach { pair ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    pair.forEach { preset ->
+                        val presetLayout = HudButtonsLayout.fromPreset(preset)
+                        val isSelected = layout == presetLayout
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(if (isSelected) EnduPalette.Accent.copy(alpha = 0.16f) else EnduPalette.SurfaceHigh)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isSelected) EnduPalette.Accent else EnduPalette.Outline,
+                                    shape = RoundedCornerShape(9.dp)
+                                )
+                                .clickable { onUpdateLayout(presetLayout) }
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = preset.title,
+                                color = if (isSelected) EnduPalette.Accent else EnduPalette.TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = preset.subtitle,
+                                color = EnduPalette.TextMuted,
+                                fontSize = 10.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalDivider(color = EnduPalette.Outline.copy(alpha = 0.45f))
+
+        Text(
+            text = "Posición individual por botón",
+            color = EnduPalette.TextPrimary,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        val actionSlots = listOf(HudButtonSlot.BOTTOM, HudButtonSlot.RIGHT, HudButtonSlot.LEFT, HudButtonSlot.HIDDEN)
+        val requiredActionSlots = listOf(HudButtonSlot.BOTTOM, HudButtonSlot.RIGHT, HudButtonSlot.LEFT)
+        val sideOnlySlots = listOf(HudButtonSlot.RIGHT, HudButtonSlot.LEFT, HudButtonSlot.HIDDEN)
+        val gpsSlots = listOf(HudButtonSlot.RIGHT, HudButtonSlot.LEFT)
+
+        HudSlotConfigRow("Grabación REC", layout.recSlot, actionSlots) { onUpdateLayout(layout.copy(recSlot = it)) }
+        HudSlotConfigRow("Tracks", layout.routesSlot, requiredActionSlots) { onUpdateLayout(layout.copy(routesSlot = it)) }
+        HudSlotConfigRow("Crear Ruta", layout.routeGeneratorSlot, actionSlots) { onUpdateLayout(layout.copy(routeGeneratorSlot = it)) }
+        HudSlotConfigRow("Marcador Rápido", layout.quickPinSlot, actionSlots) { onUpdateLayout(layout.copy(quickPinSlot = it)) }
+        HudSlotConfigRow("Lista de Puntos", layout.waypointsSlot, actionSlots) { onUpdateLayout(layout.copy(waypointsSlot = it)) }
+        HudSlotConfigRow("Grupo en Vivo", layout.groupSlot, actionSlots) { onUpdateLayout(layout.copy(groupSlot = it)) }
+        HudSlotConfigRow("Pantalla Moto", layout.bikeSlot, actionSlots) { onUpdateLayout(layout.copy(bikeSlot = it)) }
+        HudSlotConfigRow("Brújula", layout.compassSlot, sideOnlySlots) { onUpdateLayout(layout.copy(compassSlot = it)) }
+        HudSlotConfigRow("Zoom + / -", layout.zoomSlot, sideOnlySlots) { onUpdateLayout(layout.copy(zoomSlot = it)) }
+        HudSlotConfigRow("Centrar GPS", layout.gpsSide, gpsSlots) { onUpdateLayout(layout.copy(gpsSide = it)) }
+    }
+}
+
+@Composable
+private fun HudLayoutMiniPreview(layout: HudButtonsLayout) {
+    fun itemsIn(slot: HudButtonSlot): List<String> {
+        val list = mutableListOf<String>()
+        if (slot != HudButtonSlot.BOTTOM) {
+            if (layout.compassSlot == slot) list.add("N")
+            if (layout.zoomSlot == slot) list.add("+/-")
+        }
+        if (layout.recSlot == slot) list.add("REC")
+        if (layout.routesSlot == slot) list.add("Tracks")
+        if (layout.routeGeneratorSlot == slot) list.add("Crear")
+        if (layout.quickPinSlot == slot) list.add("Pin")
+        if (layout.waypointsSlot == slot) list.add("Pts")
+        if (layout.groupSlot == slot) list.add("Grupo")
+        if (layout.bikeSlot == slot) list.add("Moto")
+        if (slot != HudButtonSlot.BOTTOM && layout.gpsSide == slot) list.add("GPS")
+        return list
+    }
+
+    val leftItems = itemsIn(HudButtonSlot.LEFT)
+    val rightItems = itemsIn(HudButtonSlot.RIGHT)
+    val bottomItems = itemsIn(HudButtonSlot.BOTTOM)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(EnduPalette.Background)
+            .border(1.dp, EnduPalette.Outline, RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Izq: ${leftItems.joinToString(" · ").ifEmpty { "Vacía" }}",
+                color = if (leftItems.isNotEmpty()) EnduPalette.TextPrimary else EnduPalette.TextMuted,
+                fontSize = 10.sp,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "Der: ${rightItems.joinToString(" · ").ifEmpty { "Vacía" }}",
+                color = if (rightItems.isNotEmpty()) EnduPalette.TextPrimary else EnduPalette.TextMuted,
+                fontSize = 10.sp,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(7.dp))
+                .background(EnduPalette.SurfaceHigh)
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Abajo:",
+                color = EnduPalette.Accent,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = bottomItems.joinToString(" · ").ifEmpty { "Oculta cuando no hay ruta" },
+                color = EnduPalette.TextPrimary,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun HudSlotConfigRow(
+    label: String,
+    selectedSlot: HudButtonSlot,
+    options: List<HudButtonSlot>,
+    onSelect: (HudButtonSlot) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = label,
+            color = EnduPalette.TextSecondary,
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            options.forEach { slot ->
+                val selected = slot == selectedSlot
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(29.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(if (selected) EnduPalette.Accent else EnduPalette.SurfaceHigh)
+                        .clickable { onSelect(slot) }
+                        .padding(horizontal = 4.dp)
+                ) {
+                    Text(
+                        text = slot.shortLabel,
+                        color = if (selected) Color.White else EnduPalette.TextMuted,
+                        fontSize = 10.5.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
     }
 }

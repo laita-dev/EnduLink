@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -32,6 +33,9 @@ import com.oscar.endulink.platform.RiderTelemetry
 import com.oscar.endulink.trail.AppDisplaySettings
 import com.oscar.endulink.trail.CalculatedRoadRoute
 import com.oscar.endulink.trail.GPXRoute
+import com.oscar.endulink.trail.HudButtonSlot
+import com.oscar.endulink.trail.HudButtonsLayout
+import com.oscar.endulink.trail.RouteTerrainProfile
 import com.oscar.endulink.trail.TrackProgress
 import kotlin.math.roundToInt
 
@@ -89,7 +93,12 @@ fun HudOverlay(
     onOpenSelectedRouteOptions: () -> Unit = {},
     isPickingOnMap: Boolean = false,
     isSearchingForStop: Boolean = false,
+    mapPickTarget: MapPickTarget = MapPickTarget.DESTINATION,
     pickingCoordAddress: String? = null,
+    selectedRouteProfile: RouteTerrainProfile = RouteTerrainProfile.ROAD_FAST,
+    onSelectRouteProfile: (RouteTerrainProfile) -> Unit = {},
+    onSaveCalculatedRouteAsTrack: () -> Unit = {},
+    onOpenRouteGenerator: () -> Unit = {},
     onPickOnMap: () -> Unit = {},
     onConfirmPickOnMap: () -> Unit = {},
     onConfirmPickAsStop: () -> Unit = {},
@@ -175,24 +184,70 @@ fun HudOverlay(
         )
 
         // ==========================================
-        // 2. BOTONES FLOTANTES DERECHA (Estilo 1:1 MotIOS: botones circulares limpios)
+        // 2. COLUMNAS LATERALES DINÁMICAS (IZQUIERDA Y DERECHA SEGÚN GUÍAS DE AJUSTES)
         // ==========================================
-        HudRightControls(
+        val hudLayout = displaySettings.hudLayout.normalized()
+        val showFit = roadOptions.isNotEmpty() || selectedRoute != null
+        val bottomClearance = if (isCompactHeight) 0.dp else sideBottomPadding
+
+        HudSideControlsColumn(
+            slot = HudButtonSlot.LEFT,
+            layout = hudLayout,
             followMode = followMode,
+            isRecording = isRecording,
+            bikeState = bikeState,
+            groupRoomCode = groupRoomCode,
+            groupMembers = groupMembers,
             isTablet = isTablet,
             sideBtnSize = sideBtnSize,
             zoomBtnHeight = zoomBtnHeight,
             sideBtnSpacing = sideBtnSpacing,
-            showFitRoute = roadOptions.isNotEmpty() || selectedRoute != null,
+            showFitRoute = showFit,
             onToggleOrientation = onToggleOrientation,
             onZoomIn = onZoomIn,
             onZoomOut = onZoomOut,
             onFitMap = onFitMap,
+            onToggleRecording = onToggleRecording,
+            onOpenRoutes = onOpenRoutes,
+            onOpenRouteGenerator = onOpenRouteGenerator,
             onOpenQuickMarker = onOpenQuickMarker,
+            onOpenWaypoints = onOpenWaypoints,
+            onOpenGroupSheet = onOpenGroupSheet,
+            onOpenBikeSheet = onOpenBikeSheet,
+            onToggleFollowMode = onToggleFollowMode,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(bottom = bottomClearance)
+        )
+
+        HudSideControlsColumn(
+            slot = HudButtonSlot.RIGHT,
+            layout = hudLayout,
+            followMode = followMode,
+            isRecording = isRecording,
+            bikeState = bikeState,
+            groupRoomCode = groupRoomCode,
+            groupMembers = groupMembers,
+            isTablet = isTablet,
+            sideBtnSize = sideBtnSize,
+            zoomBtnHeight = zoomBtnHeight,
+            sideBtnSpacing = sideBtnSpacing,
+            showFitRoute = showFit,
+            onToggleOrientation = onToggleOrientation,
+            onZoomIn = onZoomIn,
+            onZoomOut = onZoomOut,
+            onFitMap = onFitMap,
+            onToggleRecording = onToggleRecording,
+            onOpenRoutes = onOpenRoutes,
+            onOpenRouteGenerator = onOpenRouteGenerator,
+            onOpenQuickMarker = onOpenQuickMarker,
+            onOpenWaypoints = onOpenWaypoints,
+            onOpenGroupSheet = onOpenGroupSheet,
+            onOpenBikeSheet = onOpenBikeSheet,
             onToggleFollowMode = onToggleFollowMode,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(bottom = sideBottomPadding)
+                .padding(bottom = bottomClearance)
         )
 
         // ==========================================
@@ -213,7 +268,13 @@ fun HudOverlay(
             approachRoute = approachRoute,
             isPickingOnMap = isPickingOnMap,
             isSearchingForStop = isSearchingForStop,
+            mapPickTarget = mapPickTarget,
             pickingCoordAddress = pickingCoordAddress,
+            selectedRouteProfile = selectedRouteProfile,
+            hudLayout = hudLayout,
+            onSelectRouteProfile = onSelectRouteProfile,
+            onSaveCalculatedRouteAsTrack = onSaveCalculatedRouteAsTrack,
+            onOpenRouteGenerator = onOpenRouteGenerator,
             groupRoomCode = groupRoomCode,
             groupMembers = groupMembers,
             cardFontScale = cardFontScale,
@@ -233,6 +294,7 @@ fun HudOverlay(
             onOpenRoutes = onOpenRoutes,
             onOpenBikeSheet = onOpenBikeSheet,
             onSaveDroppedPinAsWaypoint = onSaveDroppedPinAsWaypoint,
+            onOpenQuickMarker = onOpenQuickMarker,
             onOpenWaypoints = onOpenWaypoints,
             onOpenElevation = onOpenElevation,
             onShareSelectedRoute = onShareSelectedRoute,
@@ -302,7 +364,7 @@ private fun HudTopSection(
                         .padding(horizontal = 14.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = "📍", fontSize = 16.sp)
+                    MapPinTargetIcon(color = EnduPalette.Accent, size = 16.dp)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Mueve el mapa para situar el punto",
@@ -585,14 +647,18 @@ private fun HudTopSection(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "⚠ TE HAS SALIDO DEL TRACK GPX",
-                            color = EnduPalette.Warning,
-                            fontSize = (11.5f * cardFontScale).sp,
-                            fontWeight = FontWeight.Black,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            WarningTriangleIcon(color = EnduPalette.Warning, size = 13.dp)
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "TE HAS SALIDO DEL TRACK GPX",
+                                color = EnduPalette.Warning,
+                                fontSize = (11.5f * cardFontScale).sp,
+                                fontWeight = FontWeight.Black,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         Text(
                             text = "A $offDist · Línea recta rumbo $cardinal al punto más cercano",
                             color = Color.White,
@@ -738,8 +804,14 @@ private fun HudTopSection(
 }
 
 @Composable
-private fun HudRightControls(
+private fun HudSideControlsColumn(
+    slot: HudButtonSlot,
+    layout: HudButtonsLayout,
     followMode: MapFollowMode,
+    isRecording: Boolean,
+    bikeState: BikeState,
+    groupRoomCode: String?,
+    groupMembers: List<GroupMember>,
     isTablet: Boolean,
     sideBtnSize: Dp,
     zoomBtnHeight: Dp,
@@ -749,28 +821,40 @@ private fun HudRightControls(
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,
     onFitMap: () -> Unit,
+    onToggleRecording: () -> Unit,
+    onOpenRoutes: () -> Unit,
+    onOpenRouteGenerator: () -> Unit,
     onOpenQuickMarker: () -> Unit,
+    onOpenWaypoints: () -> Unit,
+    onOpenGroupSheet: () -> Unit,
+    onOpenBikeSheet: () -> Unit,
     onToggleFollowMode: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-        Column(
-            modifier = modifier,
-            verticalArrangement = Arrangement.spacedBy(sideBtnSpacing),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // 1. Orientación / Brújula (Norte arriba vs Rumbo de avance arriba)
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(sideBtnSize)
-                    .clip(CircleShape)
-                    .background(if (followMode == MapFollowMode.FOLLOW_HEADING) EnduPalette.Accent.copy(alpha = 0.28f) else EnduPalette.Surface.copy(alpha = 0.92f))
-                    .border(
-                        width = 1.dp,
-                        color = if (followMode == MapFollowMode.FOLLOW_HEADING) EnduPalette.Accent else EnduPalette.Outline,
-                        shape = CircleShape
-                    )
-                    .clickable { onToggleOrientation() }
+    val hasItems = (layout.compassSlot == slot) ||
+        (layout.zoomSlot == slot) ||
+        (showFitRoute && layout.gpsSide == slot) ||
+        (layout.recSlot == slot) ||
+        (layout.routesSlot == slot) ||
+        (layout.routeGeneratorSlot == slot) ||
+        (layout.quickPinSlot == slot) ||
+        (layout.waypointsSlot == slot) ||
+        (layout.groupSlot == slot) ||
+        (layout.bikeSlot == slot) ||
+        (layout.gpsSide == slot)
+    if (!hasItems) return
+
+    Column(
+        modifier = modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(sideBtnSpacing),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        if (layout.compassSlot == slot) {
+            MapCircleButton(
+                isActive = followMode == MapFollowMode.FOLLOW_HEADING,
+                activeBgColor = EnduPalette.Accent.copy(alpha = 0.28f),
+                buttonSize = sideBtnSize,
+                onClick = onToggleOrientation
             ) {
                 CompassNorthIcon(
                     isHeadingMode = (followMode == MapFollowMode.FOLLOW_HEADING),
@@ -778,8 +862,9 @@ private fun HudRightControls(
                     size = if (isTablet) 17.dp else 15.dp
                 )
             }
+        }
 
-            // 2. Zoom + y -
+        if (layout.zoomSlot == slot) {
             Column(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
@@ -810,20 +895,91 @@ private fun HudRightControls(
                     ZoomMinusIcon(color = EnduPalette.TextPrimary)
                 }
             }
+        }
 
-            // 3. Ver ruta completa en pantalla (solo si hay ruta activa)
-            if (showFitRoute) {
-                MapCircleButton(buttonSize = sideBtnSize, onClick = onFitMap) {
-                    FitRouteBoundsIcon(color = EnduPalette.Accent)
+        if (showFitRoute && layout.gpsSide == slot) {
+            MapCircleButton(buttonSize = sideBtnSize, onClick = onFitMap) {
+                FitRouteBoundsIcon(color = EnduPalette.Accent)
+            }
+        }
+
+        if (layout.recSlot == slot) {
+            HudSideRecButton(
+                isRecording = isRecording,
+                buttonSize = sideBtnSize,
+                onClick = onToggleRecording
+            )
+        }
+
+        if (layout.routesSlot == slot) {
+            MapCircleButton(buttonSize = sideBtnSize, onClick = onOpenRoutes) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    RoutePathIcon(color = EnduPalette.Accent, size = 14.dp)
+                    Text("Tracks", color = EnduPalette.TextPrimary, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
                 }
             }
+        }
 
-            // 5. Marcador rápido
+        if (layout.routeGeneratorSlot == slot) {
+            MapCircleButton(buttonSize = sideBtnSize, onClick = onOpenRouteGenerator) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    LoopRouteIcon(color = EnduPalette.Accent, size = 14.dp)
+                    Text("Crear", color = EnduPalette.TextPrimary, fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        if (layout.quickPinSlot == slot) {
             MapCircleButton(buttonSize = sideBtnSize, onClick = onOpenQuickMarker) {
                 QuickPinIcon(color = Color(0xFF00E5FF))
             }
+        }
 
-            // 6. Centrar en mi ubicación GPS (con auto-zoom y sin emojis bugueados)
+        if (layout.waypointsSlot == slot) {
+            MapCircleButton(buttonSize = sideBtnSize, onClick = onOpenWaypoints) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    ListLinesIcon(color = Color(0xFF00E5FF), size = 13.dp)
+                    Text("Puntos", color = EnduPalette.TextPrimary, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        if (layout.groupSlot == slot) {
+            val isGroupActive = groupRoomCode != null
+            val hasAlert = groupMembers.any { it.status.isAlert }
+            val tint = when {
+                hasAlert -> EnduPalette.Danger
+                isGroupActive -> EnduPalette.Success
+                else -> EnduPalette.TextPrimary
+            }
+            MapCircleButton(
+                isActive = isGroupActive || hasAlert,
+                activeBgColor = tint.copy(alpha = 0.24f),
+                buttonSize = sideBtnSize,
+                onClick = onOpenGroupSheet
+            ) {
+                GroupRidersIcon(color = tint, size = 16.dp)
+            }
+        }
+
+        if (layout.bikeSlot == slot) {
+            val tint = when (bikeState) {
+                BikeState.SHOWING -> EnduPalette.Success
+                BikeState.GREETED -> EnduPalette.AccentBlue
+                BikeState.LISTENING -> EnduPalette.Warning
+                BikeState.CLOSED -> EnduPalette.TextSecondary
+            }
+            MapCircleButton(
+                isActive = bikeState == BikeState.SHOWING,
+                activeBgColor = EnduPalette.Success.copy(alpha = 0.24f),
+                buttonSize = sideBtnSize,
+                onClick = onOpenBikeSheet
+            ) {
+                MotorcycleSilhouetteIcon(color = tint, size = 16.dp)
+            }
+        }
+
+        if (layout.gpsSide == slot) {
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -843,6 +999,46 @@ private fun HudRightControls(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun HudSideRecButton(
+    isRecording: Boolean,
+    buttonSize: Dp,
+    onClick: () -> Unit
+) {
+    val bg = if (isRecording) Color(0xFF3E1216) else EnduPalette.Surface.copy(alpha = 0.92f)
+    val borderColor = if (isRecording) EnduPalette.Danger else EnduPalette.Outline
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(buttonSize)
+            .clip(CircleShape)
+            .background(bg)
+            .border(width = 1.2.dp, color = borderColor, shape = CircleShape)
+            .clickable { onClick() }
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(if (isRecording) 9.dp else 7.dp)
+                    .clip(CircleShape)
+                    .background(EnduPalette.Danger)
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "REC",
+                color = if (isRecording) EnduPalette.Danger else EnduPalette.TextPrimary,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Black,
+                lineHeight = 9.sp
+            )
+        }
+    }
 }
 
 @Composable
@@ -861,7 +1057,13 @@ private fun HudBottomSection(
     approachRoute: CalculatedRoadRoute?,
     isPickingOnMap: Boolean,
     isSearchingForStop: Boolean,
+    mapPickTarget: MapPickTarget,
     pickingCoordAddress: String?,
+    selectedRouteProfile: RouteTerrainProfile,
+    hudLayout: HudButtonsLayout,
+    onSelectRouteProfile: (RouteTerrainProfile) -> Unit,
+    onSaveCalculatedRouteAsTrack: () -> Unit,
+    onOpenRouteGenerator: () -> Unit,
     groupRoomCode: String?,
     groupMembers: List<GroupMember>,
     cardFontScale: Float,
@@ -881,6 +1083,7 @@ private fun HudBottomSection(
     onOpenRoutes: () -> Unit,
     onOpenBikeSheet: () -> Unit,
     onSaveDroppedPinAsWaypoint: () -> Unit,
+    onOpenQuickMarker: () -> Unit,
     onOpenWaypoints: () -> Unit,
     onOpenElevation: () -> Unit,
     onShareSelectedRoute: () -> Unit,
@@ -912,7 +1115,7 @@ private fun HudBottomSection(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = "🎯", fontSize = 15.sp)
+                        MapPinTargetIcon(color = EnduPalette.Accent, size = 16.dp)
                         Spacer(modifier = Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -923,7 +1126,12 @@ private fun HudBottomSection(
                                 maxLines = 1
                             )
                             Text(
-                                text = if (isSearchingForStop) "Parada intermedia fijada en el centro" else "Punto fijado en el centro de la pantalla",
+                                text = when {
+                                    mapPickTarget == MapPickTarget.GENERATOR_ORIGIN -> "Origen (Punto A) fijado en el centro"
+                                    mapPickTarget == MapPickTarget.GENERATOR_DESTINATION -> "Destino (Punto B) fijado en el centro"
+                                    isSearchingForStop -> "Parada intermedia fijada en el centro"
+                                    else -> "Punto fijado en el centro de la pantalla"
+                                },
                                 color = EnduPalette.TextMuted,
                                 fontSize = 10.5.sp
                             )
@@ -945,10 +1153,13 @@ private fun HudBottomSection(
                             Text(text = "Cancelar", color = EnduPalette.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
 
+                        val isGeneratorPick = mapPickTarget == MapPickTarget.GENERATOR_ORIGIN ||
+                            mapPickTarget == MapPickTarget.GENERATOR_DESTINATION
                         val hasActiveRoute = (searchPin != null || selectedRoute != null)
                         if (isSearchingForStop) {
-                            Box(
-                                contentAlignment = Alignment.Center,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
                                 modifier = Modifier
                                     .weight(1.5f)
                                     .height(36.dp)
@@ -956,16 +1167,19 @@ private fun HudBottomSection(
                                     .background(Color(0xFF00D4FF))
                                     .clickable { onConfirmPickAsStop() }
                             ) {
+                                CheckMarkIcon(color = Color.Black, size = 14.dp)
+                                Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = "✓ Añadir como parada",
+                                    text = "Añadir parada",
                                     color = Color.Black,
                                     fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                        } else if (hasActiveRoute) {
-                            Box(
-                                contentAlignment = Alignment.Center,
+                        } else if (hasActiveRoute && !isGeneratorPick) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
                                 modifier = Modifier
                                     .weight(1.2f)
                                     .height(36.dp)
@@ -974,15 +1188,18 @@ private fun HudBottomSection(
                                     .border(1.dp, Color(0xFF00D4FF), RoundedCornerShape(8.dp))
                                     .clickable { onConfirmPickAsStop() }
                             ) {
+                                PlusAddIcon(color = Color(0xFF00D4FF), size = 12.dp)
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "➕ Parada",
+                                    text = "Parada",
                                     color = Color(0xFF00D4FF),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                            Box(
-                                contentAlignment = Alignment.Center,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
                                 modifier = Modifier
                                     .weight(1.2f)
                                     .height(36.dp)
@@ -990,16 +1207,19 @@ private fun HudBottomSection(
                                     .background(EnduPalette.Accent)
                                     .clickable { onConfirmPickOnMap() }
                             ) {
+                                FlagDestinationIcon(color = Color.White, size = 12.dp)
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "🏁 Destino",
+                                    text = "Destino",
                                     color = Color.White,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                         } else {
-                            Box(
-                                contentAlignment = Alignment.Center,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
                                 modifier = Modifier
                                     .weight(1.5f)
                                     .height(36.dp)
@@ -1007,8 +1227,10 @@ private fun HudBottomSection(
                                     .background(EnduPalette.Accent)
                                     .clickable { onConfirmPickOnMap() }
                             ) {
+                                CheckMarkIcon(color = Color.White, size = 14.dp)
+                                Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = "✓ Confirmar este punto",
+                                    text = "Confirmar punto",
                                     color = Color.White,
                                     fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold
@@ -1022,305 +1244,39 @@ private fun HudBottomSection(
                 // Tarjeta de Chincheta Marcada por Pulsación Larga (Dropped Pin)
                 // ----------------------------------------------------
                 if (droppedPin != null) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(EnduPalette.Surface.copy(alpha = 0.96f))
-                        .border(1.dp, EnduPalette.Accent.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = "📍", fontSize = 13.sp)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = droppedPin.title,
-                                    color = EnduPalette.TextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1
-                                )
-                            }
-                            val distStr = droppedPin.distanceKm?.let { " · a ${(it * 10.0).roundToInt() / 10.0} km" } ?: ""
-                            Text(
-                                text = droppedPin.subtitle + distStr,
-                                color = EnduPalette.TextMuted,
-                                fontSize = 10.5.sp,
-                                maxLines = 1
-                            )
-                        }
-
-                        Text(
-                            text = "✕",
-                            color = EnduPalette.TextMuted,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clickable { onClearDroppedPin() }
-                                .padding(4.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(7.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        // Si ya hay un destino o track seleccionado, permitir añadir como parada intermedia
-                        if (searchPin != null || selectedRoute != null) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(32.dp)
-                                    .clip(RoundedCornerShape(7.dp))
-                                    .background(Color(0xFF00D4FF).copy(alpha = 0.22f))
-                                    .border(1.dp, Color(0xFF00D4FF), RoundedCornerShape(7.dp))
-                                    .clickable { onAddDroppedPinAsStop() }
-                                    .padding(horizontal = 6.dp)
-                            ) {
-                                Text(
-                                    text = "➕ Parada",
-                                    color = Color(0xFF00D4FF),
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        // Ir / Iniciar ruta hacia este punto
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(32.dp)
-                                .clip(RoundedCornerShape(7.dp))
-                                .background(EnduPalette.Accent)
-                                .clickable { onSetDroppedPinAsDestination() }
-                                .padding(horizontal = 6.dp)
-                        ) {
-                            Text(
-                                text = if (searchPin != null) "🏁 Cambiar" else "🚗 Ir",
-                                color = Color.White,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        // Guardar como Waypoint permanente
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(32.dp)
-                                .clip(RoundedCornerShape(7.dp))
-                                .background(Color(0xFF00E5FF).copy(alpha = 0.22f))
-                                .border(1.dp, Color(0xFF00E5FF), RoundedCornerShape(7.dp))
-                                .clickable { onSaveDroppedPinAsWaypoint() }
-                                .padding(horizontal = 6.dp)
-                        ) {
-                            Text(
-                                text = "📌 Guardar",
-                                color = Color(0xFF00E5FF),
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
+                    DroppedPinCard(
+                        droppedPin = droppedPin,
+                        hasSearchOrRoute = (searchPin != null || selectedRoute != null),
+                        hasSearchPin = (searchPin != null),
+                        selectedProfile = selectedRouteProfile,
+                        onSelectProfile = onSelectRouteProfile,
+                        onClearDroppedPin = onClearDroppedPin,
+                        onAddDroppedPinAsStop = onAddDroppedPinAsStop,
+                        onSetDroppedPinAsDestination = onSetDroppedPinAsDestination,
+                        onSaveDroppedPinAsWaypoint = onSaveDroppedPinAsWaypoint
+                    )
                 }
-            }
 
-            // ----------------------------------------------------
-            // Tarjeta de Destino Buscado con Paradas y Rutas Alternativas
-            // ----------------------------------------------------
-            if (searchPin != null) {
-                val activeOpt = roadOptions.getOrNull(selectedRoadIndex)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(EnduPalette.Surface.copy(alpha = 0.95f))
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = searchPin.title,
-                                color = EnduPalette.TextPrimary,
-                                fontSize = (13f * cardFontScale).sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            if (isCalculatingRoute) {
-                                Text(
-                                    text = "Calculando cómo llegar…",
-                                    color = EnduPalette.TextMuted,
-                                    fontSize = (11f * cardFontScale).sp
-                                )
-                            } else if (activeOpt != null) {
-                                val stopCountText = if (intermediateWaypoints.isNotEmpty()) {
-                                    " · ${intermediateWaypoints.size} parada${if (intermediateWaypoints.size > 1) "s" else ""}"
-                                } else ""
-                                Text(
-                                    text = "${activeOpt.expectedMinutes} min · ${(activeOpt.distanceKm * 10.0).roundToInt() / 10.0} km$stopCountText",
-                                    color = EnduPalette.Accent,
-                                    fontSize = (11f * cardFontScale).sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            } else {
-                                Text(
-                                    text = searchPin.subtitle,
-                                    color = EnduPalette.TextMuted,
-                                    fontSize = (11f * cardFontScale).sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-
-                        // Cerrar destino: quita la ruta y el pin de pantalla
-                        Text(
-                            text = "✕",
-                            color = EnduPalette.TextMuted,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clickable { onClearDestination() }
-                                .padding(4.dp)
-                        )
-                    }
-
-                    // Lista secuencial de paradas intermedias
-                    if (intermediateWaypoints.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            intermediateWaypoints.forEachIndexed { idx, wpt ->
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(EnduPalette.SurfaceHigh.copy(alpha = 0.7f))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier
-                                            .size(16.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF00D4FF))
-                                    ) {
-                                        Text(
-                                            text = "${idx + 1}",
-                                            color = Color.Black,
-                                            fontSize = 9.5.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = wpt.title,
-                                        color = EnduPalette.TextPrimary,
-                                        fontSize = 11.5.sp,
-                                        maxLines = 1,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    wpt.distanceKm?.let { d ->
-                                        Text(
-                                            text = "${(d * 10.0).roundToInt() / 10.0} km",
-                                            color = EnduPalette.TextMuted,
-                                            fontSize = 10.sp
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "✕",
-                                        color = EnduPalette.TextMuted,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier
-                                            .clickable { onRemoveIntermediateWaypoint(idx) }
-                                            .padding(2.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Botón para añadir parada intermedia
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF00D4FF).copy(alpha = 0.18f))
-                                .border(1.dp, Color(0xFF00D4FF).copy(alpha = 0.6f), RoundedCornerShape(6.dp))
-                                .clickable { onOpenAddStopSearch() }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = "➕", fontSize = 10.sp)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Añadir parada",
-                                    color = Color(0xFF00D4FF),
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        // Píldoras de Rutas Alternativas
-                        if (roadOptions.size > 1) {
-                            Row(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                roadOptions.forEachIndexed { idx, opt ->
-                                    val isSelected = (idx == selectedRoadIndex)
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (isSelected) EnduPalette.Accent else EnduPalette.SurfaceHigh)
-                                            .clickable { onSelectRoadAlternative(idx) }
-                                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(
-                                            text = "${opt.routeLabel} · ${opt.expectedMinutes} min (${(opt.distanceKm).roundToInt()} km)",
-                                            color = if (isSelected) Color.White else EnduPalette.TextPrimary,
-                                            fontSize = 10.5.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                // ----------------------------------------------------
+                // Tarjeta de Destino Buscado / Ruta Generada con Terreno, Paradas y Alternativas
+                // ----------------------------------------------------
+                if (searchPin != null) {
+                    DestinationRouteCard(
+                        searchPin = searchPin,
+                        intermediateWaypoints = intermediateWaypoints,
+                        roadOptions = roadOptions,
+                        selectedRoadIndex = selectedRoadIndex,
+                        isCalculatingRoute = isCalculatingRoute,
+                        selectedProfile = selectedRouteProfile,
+                        cardFontScale = cardFontScale,
+                        onSelectProfile = onSelectRouteProfile,
+                        onClearDestination = onClearDestination,
+                        onRemoveIntermediateWaypoint = onRemoveIntermediateWaypoint,
+                        onOpenAddStopSearch = onOpenAddStopSearch,
+                        onSaveAsTrack = onSaveCalculatedRouteAsTrack,
+                        onSelectRoadAlternative = onSelectRoadAlternative
+                    )
                 }
-            }
 
             // Tarjeta informativa de Track GPX Seleccionado (con paradas y botón ✕ para deseleccionar)
             if (selectedRoute != null && searchPin == null) {
@@ -1426,8 +1382,8 @@ private fun HudBottomSection(
                             Spacer(modifier = Modifier.width(6.dp))
 
                             // Botón para añadir parada intermedia hacia el track
-                            Box(
-                                contentAlignment = Alignment.Center,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(Color(0xFF00D4FF).copy(alpha = 0.18f))
@@ -1435,8 +1391,10 @@ private fun HudBottomSection(
                                     .clickable { onOpenAddStopSearch() }
                                     .padding(horizontal = 7.dp, vertical = 3.dp)
                             ) {
+                                PlusAddIcon(color = Color(0xFF00D4FF), size = 10.dp)
+                                Spacer(modifier = Modifier.width(3.dp))
                                 Text(
-                                    text = "➕ Parada",
+                                    text = "Parada",
                                     color = Color(0xFF00D4FF),
                                     fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Bold
@@ -1514,121 +1472,174 @@ private fun HudBottomSection(
                 }
             }
 
-            // Barra inferior con controles de ruta y botón MOTO anclado a la derecha
+            // Barra inferior configurable según guías de Ajustes
+            HudBottomBar(
+                layout = hudLayout,
+                bikeState = bikeState,
+                isNavigating = isNavigating,
+                isRecording = isRecording,
+                searchPin = searchPin,
+                roadOptions = roadOptions,
+                selectedRoute = selectedRoute,
+                approachRoute = approachRoute,
+                groupRoomCode = groupRoomCode,
+                groupMembers = groupMembers,
+                onRequestStartNavigation = onRequestStartNavigation,
+                onStopNavigation = onStopNavigation,
+                onRequestApproach = onRequestApproach,
+                onClearApproach = onClearApproach,
+                onToggleRecording = onToggleRecording,
+                onOpenRoutes = onOpenRoutes,
+                onOpenRouteGenerator = onOpenRouteGenerator,
+                onOpenQuickMarker = onOpenQuickMarker,
+                onOpenWaypoints = onOpenWaypoints,
+                onOpenGroupSheet = onOpenGroupSheet,
+                onOpenBikeSheet = onOpenBikeSheet
+            )
+            }
+        }
+}
+
+@Composable
+private fun HudBottomBar(
+    layout: HudButtonsLayout,
+    bikeState: BikeState,
+    isNavigating: Boolean,
+    isRecording: Boolean,
+    searchPin: SearchResultItem?,
+    roadOptions: List<CalculatedRoadRoute>,
+    selectedRoute: GPXRoute?,
+    approachRoute: CalculatedRoadRoute?,
+    groupRoomCode: String?,
+    groupMembers: List<GroupMember>,
+    onRequestStartNavigation: () -> Unit,
+    onStopNavigation: () -> Unit,
+    onRequestApproach: () -> Unit,
+    onClearApproach: () -> Unit,
+    onToggleRecording: () -> Unit,
+    onOpenRoutes: () -> Unit,
+    onOpenRouteGenerator: () -> Unit,
+    onOpenQuickMarker: () -> Unit,
+    onOpenWaypoints: () -> Unit,
+    onOpenGroupSheet: () -> Unit,
+    onOpenBikeSheet: () -> Unit
+) {
+    val hasTarget = (roadOptions.isNotEmpty() || (selectedRoute?.isVisible == true))
+    val showNavBtn = isNavigating || hasTarget
+    val showApproachBtn = selectedRoute != null && searchPin == null
+    val showLeftItems = showNavBtn || showApproachBtn ||
+        layout.recSlot == HudButtonSlot.BOTTOM ||
+        layout.routesSlot == HudButtonSlot.BOTTOM ||
+        layout.routeGeneratorSlot == HudButtonSlot.BOTTOM ||
+        layout.quickPinSlot == HudButtonSlot.BOTTOM ||
+        layout.waypointsSlot == HudButtonSlot.BOTTOM ||
+        layout.groupSlot == HudButtonSlot.BOTTOM
+    val showBikeBtn = layout.bikeSlot == HudButtonSlot.BOTTOM
+
+    if (!showLeftItems && !showBikeBtn) return
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(EnduPalette.Surface.copy(alpha = 0.95f))
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (showLeftItems) {
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(EnduPalette.Surface.copy(alpha = 0.95f))
-                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Zona izquierda desplazable para los controles de ruta y navegación
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // 1. Botón INICIAR RUTA / PARAR
-                    val hasTarget = (roadOptions.isNotEmpty() || (selectedRoute?.isVisible == true))
-                    if (isNavigating || hasTarget) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .height(34.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isNavigating) EnduPalette.Danger else EnduPalette.Success)
-                                .clickable {
-                                    if (isNavigating) onStopNavigation() else onRequestStartNavigation()
-                                }
-                                .padding(horizontal = 9.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (isNavigating) {
-                                    StopSquareIcon(color = Color.White)
-                                } else {
-                                    NavArrowIcon(color = Color.White)
-                                }
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text(
-                                    text = if (isNavigating) "Parar" else "Iniciar ruta",
-                                    color = Color.White,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    // 2. Enlace a ruta GPX
-                    if (selectedRoute != null && searchPin == null) {
-                        if (approachRoute != null) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .height(34.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(EnduPalette.Accent.copy(alpha = 0.22f))
-                                    .clickable { onClearApproach() }
-                                    .padding(horizontal = 7.dp)
-                            ) {
-                                Text(
-                                    text = "✕ Enlace",
-                                    color = EnduPalette.Accent,
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        } else {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .height(34.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(EnduPalette.SurfaceHigh)
-                                    .clickable { onRequestApproach() }
-                                    .padding(horizontal = 7.dp)
-                            ) {
-                                Text(
-                                    text = "↗️ Enlace",
-                                    color = EnduPalette.TextPrimary,
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    // 3. REC (Grabación en vivo)
+                if (showNavBtn) {
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .height(34.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isRecording) EnduPalette.Danger.copy(alpha = 0.22f) else EnduPalette.SurfaceHigh)
-                            .clickable { onToggleRecording() }
-                            .padding(horizontal = 7.dp)
+                            .background(if (isNavigating) EnduPalette.Danger else EnduPalette.Success)
+                            .clickable {
+                                if (isNavigating) onStopNavigation() else onRequestStartNavigation()
+                            }
+                            .padding(horizontal = 9.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isRecording) EnduPalette.Danger else EnduPalette.TextMuted)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            if (isNavigating) {
+                                StopSquareIcon(color = Color.White)
+                            } else {
+                                NavArrowIcon(color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.width(5.dp))
                             Text(
-                                text = "REC",
-                                color = if (isRecording) EnduPalette.Danger else EnduPalette.TextPrimary,
-                                fontSize = 11.sp,
+                                text = if (isNavigating) "Parar" else "Iniciar ruta",
+                                color = Color.White,
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
+                }
 
-                    // 4. Gestor de Tracks GPX
+                if (showApproachBtn) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (approachRoute != null) EnduPalette.Accent.copy(alpha = 0.22f) else EnduPalette.SurfaceHigh)
+                            .clickable { if (approachRoute != null) onClearApproach() else onRequestApproach() }
+                            .padding(horizontal = 8.dp)
+                    ) {
+                        if (approachRoute != null) {
+                            CloseCrossIcon(color = EnduPalette.Accent, size = 10.dp)
+                        } else {
+                            RoutePathIcon(color = EnduPalette.TextPrimary, size = 13.dp)
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Enlace",
+                            color = if (approachRoute != null) EnduPalette.Accent else EnduPalette.TextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (layout.recSlot == HudButtonSlot.BOTTOM) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isRecording) EnduPalette.Danger.copy(alpha = 0.24f) else EnduPalette.SurfaceHigh)
+                            .border(
+                                width = if (isRecording) 1.dp else 0.dp,
+                                color = if (isRecording) EnduPalette.Danger else Color.Transparent,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable { onToggleRecording() }
+                            .padding(horizontal = 8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(EnduPalette.Danger)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "REC",
+                            color = if (isRecording) EnduPalette.Danger else EnduPalette.TextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+
+                if (layout.routesSlot == HudButtonSlot.BOTTOM) {
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
@@ -1636,17 +1647,58 @@ private fun HudBottomSection(
                             .clip(RoundedCornerShape(8.dp))
                             .background(EnduPalette.SurfaceHigh)
                             .clickable { onOpenRoutes() }
-                            .padding(horizontal = 7.dp)
+                            .padding(horizontal = 11.dp)
                     ) {
                         Text(
                             text = "Tracks",
                             color = EnduPalette.Accent,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (layout.routeGeneratorSlot == HudButtonSlot.BOTTOM) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(EnduPalette.SurfaceHigh)
+                            .clickable { onOpenRouteGenerator() }
+                            .padding(horizontal = 9.dp)
+                    ) {
+                        Text(
+                            text = "Crear",
+                            color = EnduPalette.TextPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
+                }
 
-                    // 5. Gestor de Waypoints
+                if (layout.quickPinSlot == HudButtonSlot.BOTTOM) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(EnduPalette.SurfaceHigh)
+                            .clickable { onOpenQuickMarker() }
+                            .padding(horizontal = 8.dp)
+                    ) {
+                        QuickPinIcon(color = Color(0xFF00E5FF), size = 13.dp)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Pin",
+                            color = EnduPalette.TextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (layout.waypointsSlot == HudButtonSlot.BOTTOM) {
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
@@ -1654,7 +1706,7 @@ private fun HudBottomSection(
                             .clip(RoundedCornerShape(8.dp))
                             .background(EnduPalette.SurfaceHigh)
                             .clickable { onOpenWaypoints() }
-                            .padding(horizontal = 7.dp)
+                            .padding(horizontal = 8.dp)
                     ) {
                         Text(
                             text = "Puntos",
@@ -1663,8 +1715,9 @@ private fun HudBottomSection(
                             fontWeight = FontWeight.Bold
                         )
                     }
+                }
 
-                    // 6. Grupo en Tiempo Real
+                if (layout.groupSlot == HudButtonSlot.BOTTOM) {
                     val isGroupActive = groupRoomCode != null
                     val alertRider = groupMembers.firstOrNull { it.status.isAlert }
                     val groupBg = when {
@@ -1677,8 +1730,8 @@ private fun HudBottomSection(
                         isGroupActive -> EnduPalette.Success
                         else -> EnduPalette.TextPrimary
                     }
-                    Box(
-                        contentAlignment = Alignment.Center,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .height(34.dp)
                             .clip(RoundedCornerShape(8.dp))
@@ -1686,74 +1739,427 @@ private fun HudBottomSection(
                             .clickable { onOpenGroupSheet() }
                             .padding(horizontal = 8.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            GroupRidersIcon(color = groupTint, size = 14.dp)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = when {
-                                    alertRider != null -> "${alertRider.status.tftTag.ifBlank { "AVISO" }} · ${alertRider.name.take(6)}"
-                                    isGroupActive -> "Grupo (${groupMembers.size + 1})"
-                                    else -> "Grupo"
-                                },
-                                color = groupTint,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                // 6. Conexión Pantalla Moto (Anclado siempre a la derecha)
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (bikeState == BikeState.SHOWING) EnduPalette.Success.copy(alpha = 0.22f)
-                            else EnduPalette.SurfaceHigh
-                        )
-                        .clickable { onOpenBikeSheet() }
-                        .padding(horizontal = 8.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        MotorcycleSilhouetteIcon(
-                            color = when (bikeState) {
-                                BikeState.SHOWING -> EnduPalette.Success
-                                BikeState.GREETED -> EnduPalette.AccentBlue
-                                BikeState.LISTENING -> EnduPalette.Warning
-                                BikeState.CLOSED -> EnduPalette.TextSecondary
-                            },
-                            size = 15.dp
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(5.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    when (bikeState) {
-                                        BikeState.SHOWING -> EnduPalette.Success
-                                        BikeState.GREETED -> EnduPalette.AccentBlue
-                                        BikeState.LISTENING -> EnduPalette.Warning
-                                        BikeState.CLOSED -> EnduPalette.TextMuted
-                                    }
-                                )
-                        )
+                        GroupRidersIcon(color = groupTint, size = 14.dp)
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (bikeState == BikeState.SHOWING) "En moto" else "Moto",
-                            color = EnduPalette.TextPrimary,
-                            fontSize = 11.5.sp,
+                            text = when {
+                                alertRider != null -> "${alertRider.status.tftTag.ifBlank { "AVISO" }} · ${alertRider.name.take(6)}"
+                                isGroupActive -> "Grupo (${groupMembers.size + 1})"
+                                else -> "Grupo"
+                            },
+                            color = groupTint,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
+        } else {
+            Spacer(modifier = Modifier.weight(1f))
+        }
+
+        if (showBikeBtn) {
+            if (showLeftItems) Spacer(modifier = Modifier.width(6.dp))
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .height(34.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (bikeState == BikeState.SHOWING) EnduPalette.Success.copy(alpha = 0.22f)
+                        else EnduPalette.SurfaceHigh
+                    )
+                    .clickable { onOpenBikeSheet() }
+                    .padding(horizontal = 8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    MotorcycleSilhouetteIcon(
+                        color = when (bikeState) {
+                            BikeState.SHOWING -> EnduPalette.Success
+                            BikeState.GREETED -> EnduPalette.AccentBlue
+                            BikeState.LISTENING -> EnduPalette.Warning
+                            BikeState.CLOSED -> EnduPalette.TextSecondary
+                        },
+                        size = 15.dp
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when (bikeState) {
+                                    BikeState.SHOWING -> EnduPalette.Success
+                                    BikeState.GREETED -> EnduPalette.AccentBlue
+                                    BikeState.LISTENING -> EnduPalette.Warning
+                                    BikeState.CLOSED -> EnduPalette.TextMuted
+                                }
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (bikeState == BikeState.SHOWING) "En moto" else "Moto",
+                        color = EnduPalette.TextPrimary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun DroppedPinCard(
+    droppedPin: SearchResultItem,
+    hasSearchOrRoute: Boolean,
+    hasSearchPin: Boolean,
+    selectedProfile: RouteTerrainProfile,
+    onSelectProfile: (RouteTerrainProfile) -> Unit,
+    onClearDroppedPin: () -> Unit,
+    onAddDroppedPinAsStop: () -> Unit,
+    onSetDroppedPinAsDestination: () -> Unit,
+    onSaveDroppedPinAsWaypoint: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(EnduPalette.Surface.copy(alpha = 0.96f))
+            .border(1.dp, EnduPalette.Accent.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    QuickPinIcon(color = EnduPalette.Accent, size = 14.dp)
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = droppedPin.title,
+                        color = EnduPalette.TextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+                val distStr = droppedPin.distanceKm?.let { " · a ${(it * 10.0).roundToInt() / 10.0} km" } ?: ""
+                Text(
+                    text = droppedPin.subtitle + distStr,
+                    color = EnduPalette.TextMuted,
+                    fontSize = 10.5.sp,
+                    maxLines = 1
+                )
+            }
+
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .clickable { onClearDroppedPin() }
+                    .padding(6.dp)
+            ) {
+                CloseCrossIcon(color = EnduPalette.TextMuted, size = 13.dp)
+            }
+        }
+
+        TerrainProfileSelectorRow(
+            selectedProfile = selectedProfile,
+            onSelectProfile = onSelectProfile
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (hasSearchOrRoute) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(32.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(Color(0xFF00D4FF).copy(alpha = 0.22f))
+                        .border(1.dp, Color(0xFF00D4FF), RoundedCornerShape(7.dp))
+                        .clickable { onAddDroppedPinAsStop() }
+                        .padding(horizontal = 6.dp)
+                ) {
+                    PlusAddIcon(color = Color(0xFF00D4FF), size = 11.dp)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Parada",
+                        color = Color(0xFF00D4FF),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(EnduPalette.Accent)
+                    .clickable { onSetDroppedPinAsDestination() }
+                    .padding(horizontal = 6.dp)
+            ) {
+                if (hasSearchPin) {
+                    FlagDestinationIcon(color = Color.White, size = 12.dp)
+                } else {
+                    NavArrowIcon(color = Color.White, size = 11.dp)
+                }
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = if (hasSearchPin) "Cambiar" else "Ir",
+                    color = Color.White,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(Color(0xFF00E5FF).copy(alpha = 0.22f))
+                    .border(1.dp, Color(0xFF00E5FF), RoundedCornerShape(7.dp))
+                    .clickable { onSaveDroppedPinAsWaypoint() }
+                    .padding(horizontal = 6.dp)
+            ) {
+                SaveBookmarkIcon(color = Color(0xFF00E5FF), size = 12.dp)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Guardar",
+                    color = Color(0xFF00E5FF),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DestinationRouteCard(
+    searchPin: SearchResultItem,
+    intermediateWaypoints: List<SearchResultItem>,
+    roadOptions: List<CalculatedRoadRoute>,
+    selectedRoadIndex: Int,
+    isCalculatingRoute: Boolean,
+    selectedProfile: RouteTerrainProfile,
+    cardFontScale: Float,
+    onSelectProfile: (RouteTerrainProfile) -> Unit,
+    onClearDestination: () -> Unit,
+    onRemoveIntermediateWaypoint: (Int) -> Unit,
+    onOpenAddStopSearch: () -> Unit,
+    onSaveAsTrack: () -> Unit,
+    onSelectRoadAlternative: (Int) -> Unit
+) {
+    val activeOpt = roadOptions.getOrNull(selectedRoadIndex)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(EnduPalette.Surface.copy(alpha = 0.95f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = searchPin.title,
+                    color = EnduPalette.TextPrimary,
+                    fontSize = (13f * cardFontScale).sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (isCalculatingRoute) {
+                    Text(
+                        text = "Calculando ruta ${selectedProfile.shortLabel}…",
+                        color = EnduPalette.TextMuted,
+                        fontSize = (11f * cardFontScale).sp
+                    )
+                } else if (activeOpt != null) {
+                    val stopCountText = if (intermediateWaypoints.isNotEmpty()) {
+                        " · ${intermediateWaypoints.size} parada${if (intermediateWaypoints.size > 1) "s" else ""}"
+                    } else ""
+                    val elevText = if (activeOpt.elevationGainM > 5.0) {
+                        " · +${activeOpt.elevationGainM.roundToInt()} m"
+                    } else ""
+                    Text(
+                        text = "${activeOpt.expectedMinutes} min · ${(activeOpt.distanceKm * 10.0).roundToInt() / 10.0} km$elevText$stopCountText",
+                        color = EnduPalette.Accent,
+                        fontSize = (11f * cardFontScale).sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                } else {
+                    Text(
+                        text = searchPin.subtitle,
+                        color = EnduPalette.TextMuted,
+                        fontSize = (11f * cardFontScale).sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Text(
+                text = "✕",
+                color = EnduPalette.TextMuted,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clickable { onClearDestination() }
+                    .padding(4.dp)
+            )
+        }
+
+        TerrainProfileSelectorRow(
+            selectedProfile = selectedProfile,
+            onSelectProfile = onSelectProfile
+        )
+
+        if (intermediateWaypoints.isNotEmpty()) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                intermediateWaypoints.forEachIndexed { idx, wpt ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(EnduPalette.SurfaceHigh.copy(alpha = 0.7f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF00D4FF))
+                        ) {
+                            Text(
+                                text = "${idx + 1}",
+                                color = Color.Black,
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = wpt.title,
+                            color = EnduPalette.TextPrimary,
+                            fontSize = 11.5.sp,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f)
+                        )
+                        wpt.distanceKm?.let { d ->
+                            Text(
+                                text = "${(d * 10.0).roundToInt() / 10.0} km",
+                                color = EnduPalette.TextMuted,
+                                fontSize = 10.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "✕",
+                            color = EnduPalette.TextMuted,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { onRemoveIntermediateWaypoint(idx) }
+                                .padding(2.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF00D4FF).copy(alpha = 0.18f))
+                    .border(1.dp, Color(0xFF00D4FF).copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                    .clickable { onOpenAddStopSearch() }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                PlusAddIcon(color = Color(0xFF00D4FF), size = 10.dp)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Parada",
+                    color = Color(0xFF00D4FF),
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            if (activeOpt != null && !isCalculatingRoute) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(EnduPalette.Success.copy(alpha = 0.18f))
+                        .border(1.dp, EnduPalette.Success.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
+                        .clickable { onSaveAsTrack() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    SaveBookmarkIcon(color = EnduPalette.Success, size = 11.dp)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Guardar en Tracks",
+                        color = EnduPalette.Success,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            if (roadOptions.size > 1) {
+                roadOptions.forEachIndexed { idx, opt ->
+                    val isSelected = (idx == selectedRoadIndex)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isSelected) EnduPalette.Accent else EnduPalette.SurfaceHigh)
+                            .clickable { onSelectRoadAlternative(idx) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "${opt.routeLabel} · ${opt.expectedMinutes} min (${opt.distanceKm.roundToInt()} km)",
+                            color = if (isSelected) Color.White else EnduPalette.TextPrimary,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

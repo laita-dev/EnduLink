@@ -129,7 +129,7 @@ final class BackgroundKeepAlive {
 
     private func beginTransitionTask() {
         endTransitionTask()
-        bgTask = UIApplication.shared.beginBackgroundTask(withName: "motillOS-LockStreamBridge") { [weak self] in
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "EnduLink-LockStreamBridge") { [weak self] in
             self?.endTransitionTask()
         }
     }

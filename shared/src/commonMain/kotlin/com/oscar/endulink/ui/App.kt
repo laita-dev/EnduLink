@@ -100,6 +100,13 @@ fun App() {
     val pendingGroupJoinCode by controller.pendingGroupJoinCode.collectAsState()
     val isOffGpxTrack by controller.isOffGpxTrack.collectAsState()
     val displaySettings by controller.appDisplaySettings.collectAsState()
+    val selectedRouteProfile by controller.selectedRouteProfile.collectAsState()
+    val showRouteGenerator by controller.showRouteGenerator.collectAsState()
+    val generatorOriginPin by controller.generatorOriginPin.collectAsState()
+    val generatorDestPin by controller.generatorDestPin.collectAsState()
+    val generatorIsLoop by controller.generatorIsLoop.collectAsState()
+    val generatorLoopKm by controller.generatorLoopKm.collectAsState()
+    val generatorLoopDirection by controller.generatorLoopDirection.collectAsState()
 
     val keepScreenOn = when (displaySettings.keepScreenOnMode) {
         KeepScreenOnMode.OFF -> false
@@ -132,6 +139,7 @@ fun App() {
     var showSearchSheet by remember { mutableStateOf(false) }
     var isSearchingForStop by remember { mutableStateOf(false) }
     var isPickingOnMap by remember { mutableStateOf(false) }
+    var mapPickTarget by remember { mutableStateOf(MapPickTarget.DESTINATION) }
     var pickingAddress by remember { mutableStateOf<String?>(null) }
     var showElevationSheet by remember { mutableStateOf(false) }
     var showSaveRecordingDialog by remember { mutableStateOf(false) }
@@ -200,8 +208,18 @@ fun App() {
             showSearchSheet -> {
                 isSearchingForStop = false
                 showSearchSheet = false
+                if (!showRouteGenerator) {
+                    mapPickTarget = MapPickTarget.DESTINATION
+                }
             }
-            isPickingOnMap -> isPickingOnMap = false
+            isPickingOnMap -> {
+                isPickingOnMap = false
+                isSearchingForStop = false
+                if (!showRouteGenerator) {
+                    mapPickTarget = MapPickTarget.DESTINATION
+                }
+            }
+            showRouteGenerator -> controller.closeRouteGenerator()
             showSaveWaypointDialog -> {
                 showSaveWaypointDialog = false
                 waypointToEdit = null
@@ -325,6 +343,7 @@ fun App() {
                     crowFliesActive = crowFliesActive,
                     onOpenSearch = {
                         isSearchingForStop = false
+                        mapPickTarget = MapPickTarget.DESTINATION
                         showSearchSheet = true
                     },
                     onClearDestination = { controller.clearSearchAndDestinationRoute() },
@@ -334,6 +353,7 @@ fun App() {
                     onRemoveIntermediateWaypoint = { idx -> controller.removeIntermediateWaypoint(idx) },
                     onOpenAddStopSearch = {
                         isSearchingForStop = true
+                        mapPickTarget = MapPickTarget.STOP
                         showSearchSheet = true
                     },
                     onDeselectRoute = { controller.deselectRoute() },
@@ -390,8 +410,14 @@ fun App() {
                     },
                     isPickingOnMap = isPickingOnMap,
                     isSearchingForStop = isSearchingForStop,
+                    mapPickTarget = mapPickTarget,
                     pickingCoordAddress = pickingAddress,
+                    selectedRouteProfile = selectedRouteProfile,
+                    onSelectRouteProfile = { controller.setRouteTerrainProfile(it) },
+                    onSaveCalculatedRouteAsTrack = { controller.saveActiveCalculatedRouteAsTrack() },
+                    onOpenRouteGenerator = { controller.openRouteGenerator(initialIsLoop = false) },
                     onPickOnMap = {
+                        mapPickTarget = if (isSearchingForStop) MapPickTarget.STOP else MapPickTarget.DESTINATION
                         isPickingOnMap = true
                     },
                     onConfirmPickOnMap = {
@@ -403,13 +429,21 @@ fun App() {
                             coordinate = center,
                             distanceKm = dist
                         )
-                        if (isSearchingForStop) {
-                            controller.addIntermediateWaypoint(item)
-                        } else {
-                            controller.selectSearchResult(item)
+                        when (mapPickTarget) {
+                            MapPickTarget.GENERATOR_ORIGIN -> controller.setGeneratorOriginPin(item)
+                            MapPickTarget.GENERATOR_DESTINATION -> controller.setGeneratorDestPin(item)
+                            MapPickTarget.STOP -> controller.addIntermediateWaypoint(item)
+                            MapPickTarget.DESTINATION -> {
+                                if (isSearchingForStop) {
+                                    controller.addIntermediateWaypoint(item)
+                                } else {
+                                    controller.selectSearchResult(item)
+                                }
+                            }
                         }
                         isPickingOnMap = false
                         isSearchingForStop = false
+                        mapPickTarget = MapPickTarget.DESTINATION
                     },
                     onConfirmPickAsStop = {
                         val pos = rider.coordinate
@@ -423,10 +457,12 @@ fun App() {
                         controller.addIntermediateWaypoint(item)
                         isPickingOnMap = false
                         isSearchingForStop = false
+                        mapPickTarget = MapPickTarget.DESTINATION
                     },
                     onCancelPickOnMap = {
                         isPickingOnMap = false
                         isSearchingForStop = false
+                        mapPickTarget = MapPickTarget.DESTINATION
                     },
                     groupRoomCode = groupRoomCode,
                     groupMembers = groupMembers,
@@ -513,23 +549,90 @@ fun App() {
 
                 // 4. VENTANAS MODALES COMPLETAS
 
-                // Búsqueda de Destino o Parada Intermedia
+                // Generador de Rutas (Punto a Punto o Loop Circular estilo DMD2)
+                if (showRouteGenerator && !isPickingOnMap && !showSearchSheet) {
+                    RouteGeneratorSheet(
+                        isLoopMode = generatorIsLoop,
+                        originPin = generatorOriginPin,
+                        destPin = generatorDestPin,
+                        loopKm = generatorLoopKm,
+                        loopDirection = generatorLoopDirection,
+                        selectedProfile = selectedRouteProfile,
+                        onSetLoopMode = { controller.setGeneratorIsLoop(it) },
+                        onResetOriginToGps = { controller.setGeneratorOriginPin(null) },
+                        onSearchOrigin = {
+                            isSearchingForStop = false
+                            mapPickTarget = MapPickTarget.GENERATOR_ORIGIN
+                            showSearchSheet = true
+                        },
+                        onPickOriginOnMap = {
+                            isSearchingForStop = false
+                            mapPickTarget = MapPickTarget.GENERATOR_ORIGIN
+                            isPickingOnMap = true
+                        },
+                        onSearchDest = {
+                            isSearchingForStop = false
+                            mapPickTarget = MapPickTarget.GENERATOR_DESTINATION
+                            showSearchSheet = true
+                        },
+                        onPickDestOnMap = {
+                            isSearchingForStop = false
+                            mapPickTarget = MapPickTarget.GENERATOR_DESTINATION
+                            isPickingOnMap = true
+                        },
+                        onSetLoopKm = { controller.setGeneratorLoopKm(it) },
+                        onSetLoopDirection = { controller.setGeneratorLoopDirection(it) },
+                        onSelectProfile = { controller.setRouteTerrainProfile(it) },
+                        onGenerateRoute = { controller.generateCustomRoute() },
+                        onClose = {
+                            mapPickTarget = MapPickTarget.DESTINATION
+                            controller.closeRouteGenerator()
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(32f)
+                    )
+                }
+
+                // Búsqueda de Destino, Parada Intermedia o Puntos del Generador
                 if (showSearchSheet) {
+                    val searchTitle = when {
+                        mapPickTarget == MapPickTarget.GENERATOR_ORIGIN -> "Origen (Punto A)"
+                        mapPickTarget == MapPickTarget.GENERATOR_DESTINATION -> "Destino (Punto B)"
+                        isSearchingForStop -> "Añadir Parada Intermedia"
+                        else -> "Buscar Destino"
+                    }
+                    val isGeneratorPick = mapPickTarget == MapPickTarget.GENERATOR_ORIGIN ||
+                        mapPickTarget == MapPickTarget.GENERATOR_DESTINATION
                     PlaceSearchSheet(
                         riderCoord = rider.coordinate ?: center,
                         routes = routes,
                         waypoints = quickMarkers,
-                        title = if (isSearchingForStop) "Añadir Parada Intermedia" else "Buscar Destino",
-                        hasActiveRoute = (searchPin != null || activeRoute != null),
+                        title = searchTitle,
+                        hasActiveRoute = !isGeneratorPick && (searchPin != null || activeRoute != null),
                         isSearchingForStop = isSearchingForStop,
+                        selectedProfile = selectedRouteProfile,
+                        showTerrainSelector = !isGeneratorPick,
+                        onSelectProfile = { controller.setRouteTerrainProfile(it) },
+                        onOpenRouteGenerator = {
+                            showSearchSheet = false
+                            mapPickTarget = MapPickTarget.DESTINATION
+                            controller.openRouteGenerator(initialIsLoop = false)
+                        },
                         onSelectDestination = { item ->
-                            controller.selectSearchResult(item)
+                            when (mapPickTarget) {
+                                MapPickTarget.GENERATOR_ORIGIN -> controller.setGeneratorOriginPin(item)
+                                MapPickTarget.GENERATOR_DESTINATION -> controller.setGeneratorDestPin(item)
+                                else -> controller.selectSearchResult(item)
+                            }
                             isSearchingForStop = false
+                            mapPickTarget = MapPickTarget.DESTINATION
                             showSearchSheet = false
                         },
                         onAddIntermediateStop = { item ->
                             controller.addIntermediateWaypoint(item)
                             isSearchingForStop = false
+                            mapPickTarget = MapPickTarget.DESTINATION
                             showSearchSheet = false
                         },
                         onPickOnMap = {
@@ -538,8 +641,12 @@ fun App() {
                         },
                         onClose = {
                             isSearchingForStop = false
+                            mapPickTarget = MapPickTarget.DESTINATION
                             showSearchSheet = false
-                        }
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(34f)
                     )
                 }
 
@@ -602,6 +709,10 @@ fun App() {
                         onDeleteRoute = { controller.deleteRoute(it) },
                         onImportGPX = {
                             pickGPX()
+                        },
+                        onOpenRouteGenerator = {
+                            showRoutesSheet = false
+                            controller.openRouteGenerator(initialIsLoop = false)
                         },
                         onLoadSample = {
                             val sample = """

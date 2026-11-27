@@ -1,6 +1,6 @@
 {
   "name": "EnduLink Releases",
-  "identifier": "com.oscar.endulink.source",
+  "identifier": "com.laitadev.endulink.source",
   "subtitle": "Navegación off-road para moto y enlace TFT",
   "description": "Canal oficial de distribución de EnduLink para iOS.",
   "iconURL": "https://raw.githubusercontent.com/laita-dev/EnduLink/main/iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
@@ -8,14 +8,14 @@
   "website": "https://github.com/laita-dev/EnduLink",
   "apps": [
     {
-      "name": "motillOS",
-      "bundleIdentifier": "com.oscar.endulink",
+      "name": "EnduLink",
+      "bundleIdentifier": "com.laitadev.endulink",
       "developerName": "Oscar Laita",
-      "version": "0.3.1",
-      "versionDate": "2026-11-26",
-      "versionDescription": "Versión 0.3.1: Nueva pantalla completa de Ajustes con escalado libre de fuentes para telemetría, waypoints y cuadro TFT (Android e iOS), vista previa en vivo, telemetría siempre visible, mantener pantalla encendida, grosor/flechas de traza GPX, tolerancia configurable fuera de track, Mapas Offline a pantalla completa para horizontal, reconexión Wi-Fi/TCP más rápida tras dar contacto y rotación del certificado de firma Android.",
+      "version": "0.4.0",
+      "versionDate": "2026-11-27",
+      "versionDescription": "Versión 0.4.0: Generador de rutas estilo DMD2 (punto a punto A→B y rutas circulares Loop por km y rumbo) con perfiles de carretera y dificultad Trail/Off-Road/Enduro (BRouter + altimetría 3D), guardar rutas generadas en Tracks, administrador de botones del HUD por guías en Ajustes, estética vectorial minimalista unificada, carga segura de GPX masivos (30k+ puntos) y preparación oficial para App Store.",
       "downloadURL": "https://github.com/laita-dev/EnduLink/releases/latest/download/EnduLink-unsigned.ipa",
-      "localizedDescription": "App de navegación trail / enduro motillOS con visualización de tracks GPX, perfiles de elevación, grabación en vivo y espejo H.264 para cuadros TFT de motocicletas.",
+      "localizedDescription": "App de navegación trail / enduro EnduLink con visualización de tracks GPX, perfiles de elevación, grabación en vivo y espejo H.264 para cuadros TFT de motocicletas.",
       "iconURL": "https://raw.githubusercontent.com/laita-dev/EnduLink/main/iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
       "tintColor": "00D4FF",
       "size": 42000000
