@@ -31,7 +31,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          BUG_RELAY_WEBHOOK_URL: ${{ secrets.BUG_RELAY_WEBHOOK_URL }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
