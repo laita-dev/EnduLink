@@ -71,13 +71,27 @@ def post_json(url: str, payload: dict) -> bool:
         return False
 
 
-def fetch_open_issues() -> list[dict]:
+def fetch_recent_issues(state: str = "open", limit: int = 80) -> list[dict]:
     try:
-        items = gh_api("GET", f"/repos/{REPO}/issues?state=open&per_page=80")
+        items = gh_api("GET", f"/repos/{REPO}/issues?state={state}&per_page={limit}")
         return [it for it in items if "pull_request" not in it]
     except Exception as exc:
-        print(f"Failed to list issues: {exc}")
+        print(f"Failed to list issues ({state}): {exc}")
         return []
+
+
+def fetch_open_issues() -> list[dict]:
+    return fetch_recent_issues(state="open", limit=80)
+
+
+def find_issue_by_report_id(report_id: str, issues: list[dict]) -> int | None:
+    if not report_id:
+        return None
+    marker = f"endulink-report-id: {report_id}"
+    for issue in issues:
+        if marker in (issue.get("body") or ""):
+            return issue.get("number")
+    return None
 
 
 def ensure_labels(labels: list[str]):
@@ -102,35 +116,6 @@ def ensure_labels(labels: list[str]):
             pass
 
 
-def call_github_models(prompt: str) -> dict | None:
-    if not GITHUB_TOKEN:
-        return None
-    try:
-        body = {
-            "model": "gpt-4o",
-            "temperature": 0.2,
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": "Eres el arquitecto lead de EnduLink. Responde ÚNICAMENTE con un objeto JSON válido."},
-                {"role": "user", "content": prompt},
-            ],
-        }
-        req = urllib.request.Request(
-            "https://models.inference.ai.azure.com/chat/completions",
-            data=json.dumps(body).encode("utf-8"),
-            method="POST",
-        )
-        req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
-        req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=35) as resp:
-            parsed = json.loads(resp.read().decode("utf-8"))
-            content = parsed["choices"][0]["message"]["content"]
-            return json.loads(content)
-    except Exception as exc:
-        print(f"GitHub Models fallback ({exc})")
-        return None
-
-
 def call_gemini(prompt: str) -> dict | None:
     if not GEMINI_API_KEY:
         return None
@@ -151,21 +136,71 @@ def call_gemini(prompt: str) -> dict | None:
         return None
 
 
+def _normalize_text(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9áéíóúüñ]+", (text or "").lower()))
+
+
+def _extract_user_fields_from_issue(issue: dict) -> tuple[str, str]:
+    """Extrae título y mensaje original del usuario del cuerpo generado por EnduLink."""
+    issue_title = re.sub(r"^\[[^\]]+\]\s*", "", issue.get("title") or "").strip()
+    body = issue.get("body") or ""
+    title_match = re.search(r"\*\*Título usuario:\*\*\s*(.+)", body)
+    extracted_title = title_match.group(1).strip() if title_match else issue_title
+    if extracted_title == "(sin título)":
+        extracted_title = issue_title
+
+    msg_match = re.search(
+        r"## Mensaje Original del Usuario \(Intacto\)(.*?)(?:\n<details>|\n<!-- endulink-report-id:|\Z)",
+        body,
+        flags=re.DOTALL,
+    )
+    if msg_match:
+        block_lines = [
+            line.lstrip("> ").strip()
+            for line in msg_match.group(1).splitlines()
+            if line.strip().startswith(">") and "**Título usuario:**" not in line and "**Categoría:**" not in line and not line.strip().startswith("> - **Ubicación")
+        ]
+        extracted_msg = " ".join(ln for ln in block_lines if ln)
+    else:
+        extracted_msg = body[:400]
+
+    return extracted_title or issue_title, extracted_msg
+
+
 def heuristic_triage(report: dict, open_issues: list[dict]) -> dict:
     raw_msg = (report.get("userMessage") or "").strip()
     raw_title = (report.get("userTitle") or "").strip()
-    combined = f"{raw_title} {raw_msg}".lower()
+    norm_title = _normalize_text(raw_title)
+    norm_msg = _normalize_text(raw_msg)
+    norm_combined = _normalize_text(f"{raw_title} {raw_msg}")
+    combined_tokens = set(norm_combined.split())
 
     best_num = None
-    best_ratio = 0.0
+    best_score = 0.0
     for issue in open_issues:
-        candidate_text = f"{issue.get('title', '')} {issue.get('body', '')[:500]}".lower()
-        ratio = difflib.SequenceMatcher(None, combined[:300], candidate_text[:300]).ratio()
-        if ratio > best_ratio:
-            best_ratio = ratio
+        cand_title, cand_msg = _extract_user_fields_from_issue(issue)
+        cand_norm_title = _normalize_text(cand_title)
+        cand_norm_msg = _normalize_text(cand_msg)
+        cand_combined = _normalize_text(f"{cand_title} {cand_msg}")
+        cand_tokens = set(cand_combined.split())
+
+        if (norm_msg and cand_norm_msg == norm_msg) or (
+            norm_title and norm_msg and cand_norm_title == norm_title and cand_norm_msg == norm_msg
+        ):
+            best_score = 1.0
+            best_num = issue.get("number")
+            break
+
+        seq_ratio = difflib.SequenceMatcher(None, norm_combined[:300], cand_combined[:300]).ratio() if norm_combined and cand_combined else 0.0
+        msg_ratio = difflib.SequenceMatcher(None, norm_msg[:300], cand_norm_msg[:300]).ratio() if norm_msg and cand_norm_msg else 0.0
+        union = combined_tokens | cand_tokens
+        jaccard = (len(combined_tokens & cand_tokens) / len(union)) if union else 0.0
+        score = max(seq_ratio, msg_ratio, jaccard)
+        if score > best_score:
+            best_score = score
             best_num = issue.get("number")
 
-    is_dup = best_num is not None and best_ratio >= 0.72
+    is_dup = best_num is not None and best_score >= 0.72
     cat = report.get("category", "BUG")
     labels = ["ia-triage"]
     if cat == "IMPROVEMENT":
@@ -276,6 +311,9 @@ def format_issue_body(report: dict, ai: dict) -> str:
         sections.append(f"<details>\n<summary>Registro de cierre inesperado (Crash Log)</summary>\n\n```\n{crash}\n```\n</details>")
     if logs:
         sections.append(f"<details>\n<summary>Últimos logs TFT / conexión moto</summary>\n\n```\n{logs}\n```\n</details>")
+    report_id = (report.get("reportId") or "").strip()
+    if report_id:
+        sections.append(f"<!-- endulink-report-id: {report_id} -->")
 
     return "\n\n".join(sections)
 
@@ -298,6 +336,9 @@ def format_duplicate_comment(report: dict, ai: dict) -> str:
         out.append(f"<details><summary>Diagnóstico adjunto</summary>\n\n```\n{diag}\n```\n</details>")
     if crash:
         out.append(f"<details><summary>Crash log adjunto</summary>\n\n```\n{crash}\n```\n</details>")
+    report_id = (report.get("reportId") or "").strip()
+    if report_id:
+        out.append(f"<!-- endulink-report-id: {report_id} -->")
     return "\n\n".join(out)
 
 
@@ -309,9 +350,16 @@ def handle_dispatch():
         print("Empty dispatch report; nothing to process.")
         return
 
-    open_issues = fetch_open_issues()
+    report_id = (report.get("reportId") or "").strip()
+    recent_all_issues = fetch_recent_issues(state="all", limit=100)
+    already_issue_num = find_issue_by_report_id(report_id, recent_all_issues)
+    if already_issue_num is not None:
+        print(f"Report {report_id} already processed in issue #{already_issue_num}; skipping duplicate dispatch.")
+        return
+
+    open_issues = [it for it in recent_all_issues if it.get("state") == "open"]
     prompt = build_prompt(report, open_issues)
-    ai = call_github_models(prompt) or call_gemini(prompt) or heuristic_triage(report, open_issues)
+    ai = call_gemini(prompt) or heuristic_triage(report, open_issues)
 
     labels = list({*(ai.get("labels") or []), "ia-triage"})
     ensure_labels(labels)
@@ -376,7 +424,7 @@ def handle_manual_issue():
         "isTestChannel": False,
     }
     prompt = build_prompt(pseudo_report, open_issues)
-    ai = call_github_models(prompt) or call_gemini(prompt) or heuristic_triage(pseudo_report, open_issues)
+    ai = call_gemini(prompt) or heuristic_triage(pseudo_report, open_issues)
     plan_md = "\n".join(f"- {step}" for step in (ai.get("solution_plan") or []))
     comment = (
         f"## Análisis del Agente IA\n"

@@ -5,6 +5,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BugReportManagerTest {
@@ -53,5 +54,13 @@ class BugReportManagerTest {
             BugReportManager.DEFAULT_RELAY_WEBHOOK_URL,
             BugReportManager.resolveWebhookUrl("http://insecure-not-allowed")
         )
+    }
+
+    @Test
+    fun testRelayResponseAcceptanceChecksStatusAndJsonOkFlag() {
+        assertTrue(BugReportManager.isRelayResponseAccepted(200, """{"ok":true,"dispatchedToGitHub":true}"""))
+        assertFalse(BugReportManager.isRelayResponseAccepted(302, ""))
+        assertFalse(BugReportManager.isRelayResponseAccepted(200, """{"ok": false, "error": "bad json"}"""))
+        assertFalse(BugReportManager.isRelayResponseAccepted(500, """{"ok":true}"""))
     }
 }

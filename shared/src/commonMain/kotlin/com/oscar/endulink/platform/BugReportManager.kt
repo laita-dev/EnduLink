@@ -8,6 +8,8 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
@@ -67,11 +69,14 @@ object BugReportManager {
     private const val MAX_CRASH_CHARS = 4_000
 
     private val lock = SynchronizedLock()
+    private val relayMutex = Mutex()
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
-    private val httpClient = HttpClient()
+    private val httpClient = HttpClient {
+        followRedirects = false
+    }
 
     private fun pendingFilePath(): String {
         return PlatformPaths.getAppDataDir() + "/pending_bug_reports.json"
@@ -125,14 +130,15 @@ object BugReportManager {
             return@withContext BugSubmitOutcome.QUEUED_OFFLINE
         }
 
-        val sent = postReportToRelay(webhookUrl, report)
-        if (sent) {
-            val remaining = loadPendingReports().filterNot { it.reportId == report.reportId }
-            savePendingReports(remaining)
-            BugSubmitOutcome.SENT_ONLINE
-        } else {
-            enqueueOffline(report)
-            BugSubmitOutcome.QUEUED_OFFLINE
+        relayMutex.withLock {
+            val sent = postReportToRelay(webhookUrl, report)
+            if (sent) {
+                removePendingReport(report.reportId)
+                BugSubmitOutcome.SENT_ONLINE
+            } else {
+                enqueueOffline(report)
+                BugSubmitOutcome.QUEUED_OFFLINE
+            }
         }
     }
 
@@ -140,29 +146,40 @@ object BugReportManager {
         val webhookUrl = resolveWebhookUrl(customWebhookUrl)
         if (webhookUrl.isBlank()) return@withContext 0
 
-        val pending = loadPendingReports()
-        if (pending.isEmpty()) return@withContext 0
+        relayMutex.withLock {
+            val pending = loadPendingReports()
+            if (pending.isEmpty()) return@withLock 0
 
-        var sentCount = 0
-        val stillPending = mutableListOf<BugReportPayload>()
-        for (report in pending) {
-            if (postReportToRelay(webhookUrl, report)) {
-                sentCount++
-            } else {
-                stillPending.add(report)
+            var sentCount = 0
+            for (report in pending) {
+                if (postReportToRelay(webhookUrl, report)) {
+                    removePendingReport(report.reportId)
+                    sentCount++
+                }
             }
+            sentCount
         }
-        if (sentCount > 0 || stillPending.size != pending.size) {
-            savePendingReports(stillPending)
+    }
+
+    private fun removePendingReport(reportId: String) {
+        val current = loadPendingReports()
+        val remaining = current.filterNot { it.reportId == reportId }
+        if (remaining.size != current.size) {
+            savePendingReports(remaining)
         }
-        sentCount
+    }
+
+    internal fun isRelayResponseAccepted(statusCode: Int, body: String): Boolean {
+        if (statusCode !in 200..299) return false
+        val compact = body.replace(" ", "").replace("\n", "").replace("\r", "")
+        return !compact.contains("\"ok\":false", ignoreCase = true)
     }
 
     private suspend fun postReportToRelay(webhookUrl: String, report: BugReportPayload): Boolean {
         return runCatching {
-            withTimeoutOrNull(8_000L) {
+            withTimeoutOrNull(20_000L) {
                 val payloadJson = json.encodeToString(report)
-                val response = httpClient.post(webhookUrl) {
+                var response = httpClient.post(webhookUrl) {
                     contentType(ContentType.Application.Json)
                     headers {
                         append(HttpHeaders.UserAgent, "EnduLink-BugReporter")
@@ -170,10 +187,24 @@ object BugReportManager {
                     }
                     setBody(payloadJson)
                 }
-                val okStatus = response.status.value in 200..299
-                if (!okStatus) return@withTimeoutOrNull false
+
+                // Google Apps Script ejecuta doPost(e) y responde HTTP 302 hacia script.googleusercontent.com/macros/echo,
+                // que debe consultarse con GET (Ktor no redirige POST automáticamente por defecto).
+                var hops = 0
+                while (response.status.value in setOf(301, 302, 303, 307, 308) && hops < 4) {
+                    val location = response.headers[HttpHeaders.Location]?.trim().orEmpty()
+                    if (location.isBlank()) break
+                    response = httpClient.get(location) {
+                        headers {
+                            append(HttpHeaders.UserAgent, "EnduLink-BugReporter")
+                            append(HttpHeaders.Accept, "application/json")
+                        }
+                    }
+                    hops++
+                }
+
                 val body = runCatching { response.bodyAsText() }.getOrDefault("")
-                !body.contains("\"ok\":false", ignoreCase = true)
+                isRelayResponseAccepted(response.status.value, body)
             } ?: false
         }.getOrDefault(false)
     }

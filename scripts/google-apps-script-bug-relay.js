@@ -34,6 +34,16 @@ function doPost(e) {
     }
 
     // Caso B: Reporte nuevo enviado directamente desde la app EnduLink
+    // Idempotencia rápida de 10 minutos por reportId por si hay un reintento de red móvil
+    var reportId = data && data.reportId ? String(data.reportId) : '';
+    if (reportId) {
+      var cache = CacheService.getScriptCache();
+      if (cache.get('rep_' + reportId)) {
+        return jsonResponse({ ok: true, deduplicatedAtRelay: true });
+      }
+      cache.put('rep_' + reportId, '1', 600);
+    }
+
     var callbackUrl = '';
     try {
       callbackUrl = ScriptApp.getService().getUrl() || '';
