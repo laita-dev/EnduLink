@@ -1268,6 +1268,11 @@ final class TftNotificationBridgeDelegate: NSObject, UNUserNotificationCenterDel
 @main
 struct iOSApp: App {
     init() {
+        NSSetUncaughtExceptionHandler { exception in
+            let stack = exception.callStackSymbols.prefix(35).joined(separator: "\n")
+            let info = "\(exception.name.rawValue): \(exception.reason ?? "Unknown")\n\(stack)"
+            MainViewControllerKt.recordIosCrashLog(threadName: "main-ios", details: info)
+        }
         IosH264BridgeHolder.shared.bridge = VideoToolboxBridge()
         IosWifiBridgeHolder.shared.bridge = IosWifiBridgeImpl()
         IosQrScannerBridgeHolder.shared.bridge = IosQrScannerBridgeImpl()

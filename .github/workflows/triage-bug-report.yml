@@ -1,0 +1,37 @@
+name: Triaje IA de Bugs y Mejoras
+
+on:
+  repository_dispatch:
+    types: [user_bug_report]
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: read
+  models: read
+
+jobs:
+  ai-triage:
+    name: Analizar, Deduplicar y Planificar Solución con IA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código de EnduLink
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Ejecutar Agente IA de Triaje y Deduplicación
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BUG_RELAY_WEBHOOK_URL: ${{ secrets.BUG_RELAY_WEBHOOK_URL }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+          ISSUE_JSON: ${{ toJson(github.event.issue) }}
+        run: |
+          python3 scripts/ai_triage_agent.py

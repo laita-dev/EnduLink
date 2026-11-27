@@ -1,6 +1,7 @@
 package com.oscar.endulink
 
 import androidx.compose.ui.window.ComposeUIViewController
+import com.oscar.endulink.platform.BugReportManager
 import com.oscar.endulink.platform.PhoneNotificationCenter
 import com.oscar.endulink.platform.showPlatformToast
 import com.oscar.endulink.ui.App
@@ -37,5 +38,9 @@ fun postIosIncomingNotification(appName: String, title: String, body: String) {
 
 fun onIosAppWillTerminate() {
     EnduController.shared.stop()
+}
+
+fun recordIosCrashLog(threadName: String, details: String) {
+    BugReportManager.recordCrashLog(threadName, details)
 }
 

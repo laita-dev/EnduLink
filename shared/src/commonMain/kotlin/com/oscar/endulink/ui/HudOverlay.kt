@@ -99,6 +99,8 @@ fun HudOverlay(
     onSelectRouteProfile: (RouteTerrainProfile) -> Unit = {},
     onSaveCalculatedRouteAsTrack: () -> Unit = {},
     onOpenRouteGenerator: () -> Unit = {},
+    hasPendingCrashLog: Boolean = false,
+    onOpenBugReport: () -> Unit = {},
     onPickOnMap: () -> Unit = {},
     onConfirmPickOnMap: () -> Unit = {},
     onConfirmPickAsStop: () -> Unit = {},
@@ -198,6 +200,7 @@ fun HudOverlay(
             bikeState = bikeState,
             groupRoomCode = groupRoomCode,
             groupMembers = groupMembers,
+            hasPendingCrashLog = hasPendingCrashLog,
             isTablet = isTablet,
             sideBtnSize = sideBtnSize,
             zoomBtnHeight = zoomBtnHeight,
@@ -214,6 +217,7 @@ fun HudOverlay(
             onOpenWaypoints = onOpenWaypoints,
             onOpenGroupSheet = onOpenGroupSheet,
             onOpenBikeSheet = onOpenBikeSheet,
+            onOpenBugReport = onOpenBugReport,
             onToggleFollowMode = onToggleFollowMode,
             modifier = Modifier
                 .align(Alignment.CenterStart)
@@ -228,6 +232,7 @@ fun HudOverlay(
             bikeState = bikeState,
             groupRoomCode = groupRoomCode,
             groupMembers = groupMembers,
+            hasPendingCrashLog = hasPendingCrashLog,
             isTablet = isTablet,
             sideBtnSize = sideBtnSize,
             zoomBtnHeight = zoomBtnHeight,
@@ -244,6 +249,7 @@ fun HudOverlay(
             onOpenWaypoints = onOpenWaypoints,
             onOpenGroupSheet = onOpenGroupSheet,
             onOpenBikeSheet = onOpenBikeSheet,
+            onOpenBugReport = onOpenBugReport,
             onToggleFollowMode = onToggleFollowMode,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
@@ -296,6 +302,8 @@ fun HudOverlay(
             onSaveDroppedPinAsWaypoint = onSaveDroppedPinAsWaypoint,
             onOpenQuickMarker = onOpenQuickMarker,
             onOpenWaypoints = onOpenWaypoints,
+            hasPendingCrashLog = hasPendingCrashLog,
+            onOpenBugReport = onOpenBugReport,
             onOpenElevation = onOpenElevation,
             onShareSelectedRoute = onShareSelectedRoute,
             onOpenSelectedRouteOptions = onOpenSelectedRouteOptions,
@@ -812,6 +820,7 @@ private fun HudSideControlsColumn(
     bikeState: BikeState,
     groupRoomCode: String?,
     groupMembers: List<GroupMember>,
+    hasPendingCrashLog: Boolean,
     isTablet: Boolean,
     sideBtnSize: Dp,
     zoomBtnHeight: Dp,
@@ -828,6 +837,7 @@ private fun HudSideControlsColumn(
     onOpenWaypoints: () -> Unit,
     onOpenGroupSheet: () -> Unit,
     onOpenBikeSheet: () -> Unit,
+    onOpenBugReport: () -> Unit,
     onToggleFollowMode: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -841,6 +851,7 @@ private fun HudSideControlsColumn(
         (layout.waypointsSlot == slot) ||
         (layout.groupSlot == slot) ||
         (layout.bikeSlot == slot) ||
+        (layout.bugReportSlot == slot) ||
         (layout.gpsSide == slot)
     if (!hasItems) return
 
@@ -979,6 +990,32 @@ private fun HudSideControlsColumn(
             }
         }
 
+        if (layout.bugReportSlot == slot) {
+            Box(contentAlignment = Alignment.Center) {
+                MapCircleButton(
+                    isActive = hasPendingCrashLog,
+                    activeBgColor = EnduPalette.Danger.copy(alpha = 0.24f),
+                    buttonSize = sideBtnSize,
+                    onClick = onOpenBugReport
+                ) {
+                    BugReportIcon(
+                        color = if (hasPendingCrashLog) EnduPalette.Danger else EnduPalette.TextPrimary,
+                        size = 16.dp
+                    )
+                }
+                if (hasPendingCrashLog) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(2.dp)
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(EnduPalette.Danger)
+                    )
+                }
+            }
+        }
+
         if (layout.gpsSide == slot) {
             Box(
                 contentAlignment = Alignment.Center,
@@ -1085,6 +1122,8 @@ private fun HudBottomSection(
     onSaveDroppedPinAsWaypoint: () -> Unit,
     onOpenQuickMarker: () -> Unit,
     onOpenWaypoints: () -> Unit,
+    hasPendingCrashLog: Boolean,
+    onOpenBugReport: () -> Unit,
     onOpenElevation: () -> Unit,
     onShareSelectedRoute: () -> Unit,
     onOpenSelectedRouteOptions: () -> Unit,
@@ -1129,6 +1168,7 @@ private fun HudBottomSection(
                                 text = when {
                                     mapPickTarget == MapPickTarget.GENERATOR_ORIGIN -> "Origen (Punto A) fijado en el centro"
                                     mapPickTarget == MapPickTarget.GENERATOR_DESTINATION -> "Destino (Punto B) fijado en el centro"
+                                    mapPickTarget == MapPickTarget.BUG_REPORT_LOCATION -> "Punto del fallo fijado en el centro"
                                     isSearchingForStop -> "Parada intermedia fijada en el centro"
                                     else -> "Punto fijado en el centro de la pantalla"
                                 },
@@ -1154,7 +1194,8 @@ private fun HudBottomSection(
                         }
 
                         val isGeneratorPick = mapPickTarget == MapPickTarget.GENERATOR_ORIGIN ||
-                            mapPickTarget == MapPickTarget.GENERATOR_DESTINATION
+                            mapPickTarget == MapPickTarget.GENERATOR_DESTINATION ||
+                            mapPickTarget == MapPickTarget.BUG_REPORT_LOCATION
                         val hasActiveRoute = (searchPin != null || selectedRoute != null)
                         if (isSearchingForStop) {
                             Row(
@@ -1494,7 +1535,9 @@ private fun HudBottomSection(
                 onOpenQuickMarker = onOpenQuickMarker,
                 onOpenWaypoints = onOpenWaypoints,
                 onOpenGroupSheet = onOpenGroupSheet,
-                onOpenBikeSheet = onOpenBikeSheet
+                onOpenBikeSheet = onOpenBikeSheet,
+                hasPendingCrashLog = hasPendingCrashLog,
+                onOpenBugReport = onOpenBugReport
             )
             }
         }
@@ -1522,7 +1565,9 @@ private fun HudBottomBar(
     onOpenQuickMarker: () -> Unit,
     onOpenWaypoints: () -> Unit,
     onOpenGroupSheet: () -> Unit,
-    onOpenBikeSheet: () -> Unit
+    onOpenBikeSheet: () -> Unit,
+    hasPendingCrashLog: Boolean,
+    onOpenBugReport: () -> Unit
 ) {
     val hasTarget = (roadOptions.isNotEmpty() || (selectedRoute?.isVisible == true))
     val showNavBtn = isNavigating || hasTarget
@@ -1533,6 +1578,7 @@ private fun HudBottomBar(
         layout.routeGeneratorSlot == HudButtonSlot.BOTTOM ||
         layout.quickPinSlot == HudButtonSlot.BOTTOM ||
         layout.waypointsSlot == HudButtonSlot.BOTTOM ||
+        layout.bugReportSlot == HudButtonSlot.BOTTOM ||
         layout.groupSlot == HudButtonSlot.BOTTOM
     val showBikeBtn = layout.bikeSlot == HudButtonSlot.BOTTOM
 
@@ -1711,6 +1757,30 @@ private fun HudBottomBar(
                         Text(
                             text = "Puntos",
                             color = Color(0xFF00E5FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (layout.bugReportSlot == HudButtonSlot.BOTTOM) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (hasPendingCrashLog) EnduPalette.Danger.copy(alpha = 0.22f) else EnduPalette.SurfaceHigh)
+                            .clickable { onOpenBugReport() }
+                            .padding(horizontal = 8.dp)
+                    ) {
+                        BugReportIcon(
+                            color = if (hasPendingCrashLog) EnduPalette.Danger else EnduPalette.TextPrimary,
+                            size = 13.dp
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Bug",
+                            color = if (hasPendingCrashLog) EnduPalette.Danger else EnduPalette.TextPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )

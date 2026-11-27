@@ -42,6 +42,7 @@ data class HudButtonsLayout(
     val quickPinSlot: HudButtonSlot = HudButtonSlot.RIGHT,
     val groupSlot: HudButtonSlot = HudButtonSlot.BOTTOM,
     val bikeSlot: HudButtonSlot = HudButtonSlot.BOTTOM,
+    val bugReportSlot: HudButtonSlot = HudButtonSlot.RIGHT,
     val compassSlot: HudButtonSlot = HudButtonSlot.RIGHT,
     val zoomSlot: HudButtonSlot = HudButtonSlot.RIGHT,
     val gpsSide: HudButtonSlot = HudButtonSlot.RIGHT
@@ -64,6 +65,7 @@ data class HudButtonsLayout(
                 quickPinSlot = HudButtonSlot.RIGHT,
                 groupSlot = HudButtonSlot.BOTTOM,
                 bikeSlot = HudButtonSlot.BOTTOM,
+                bugReportSlot = HudButtonSlot.RIGHT,
                 compassSlot = HudButtonSlot.RIGHT,
                 zoomSlot = HudButtonSlot.RIGHT,
                 gpsSide = HudButtonSlot.RIGHT
@@ -76,6 +78,7 @@ data class HudButtonsLayout(
                 quickPinSlot = HudButtonSlot.RIGHT,
                 groupSlot = HudButtonSlot.BOTTOM,
                 bikeSlot = HudButtonSlot.BOTTOM,
+                bugReportSlot = HudButtonSlot.RIGHT,
                 compassSlot = HudButtonSlot.RIGHT,
                 zoomSlot = HudButtonSlot.RIGHT,
                 gpsSide = HudButtonSlot.RIGHT
@@ -88,6 +91,7 @@ data class HudButtonsLayout(
                 quickPinSlot = HudButtonSlot.LEFT,
                 groupSlot = HudButtonSlot.BOTTOM,
                 bikeSlot = HudButtonSlot.BOTTOM,
+                bugReportSlot = HudButtonSlot.LEFT,
                 compassSlot = HudButtonSlot.LEFT,
                 zoomSlot = HudButtonSlot.LEFT,
                 gpsSide = HudButtonSlot.LEFT
@@ -106,7 +110,8 @@ data class AppDisplaySettings(
     val showTrackDirectionArrows: Boolean = true,
     val gpxOffTrackThresholdMeters: Int = 35,
     val keepScreenOnMode: KeepScreenOnMode = KeepScreenOnMode.OFF,
-    val hudLayout: HudButtonsLayout = HudButtonsLayout()
+    val hudLayout: HudButtonsLayout = HudButtonsLayout(),
+    val bugRelayWebhookUrl: String = ""
 ) {
     fun normalized(): AppDisplaySettings = copy(
         hudFontScale = hudFontScale.coerceIn(0.9f, 1.8f),

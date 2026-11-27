@@ -29,7 +29,8 @@ enum class MapPickTarget {
     DESTINATION,
     STOP,
     GENERATOR_ORIGIN,
-    GENERATOR_DESTINATION
+    GENERATOR_DESTINATION,
+    BUG_REPORT_LOCATION
 }
 
 class EnduController {
@@ -111,6 +112,22 @@ class EnduController {
 
     private val _customRouteOrigin = MutableStateFlow<SearchResultItem?>(null)
     private val _activeLoopSpec = MutableStateFlow<Triple<SearchResultItem, Int, LoopDirection>?>(null)
+
+    // Sistema de Reporte de Bugs / Mejoras (Cola offline + Diagnóstico + Crash log)
+    private val _showBugReportSheet = MutableStateFlow(false)
+    val showBugReportSheet: StateFlow<Boolean> = _showBugReportSheet.asStateFlow()
+
+    private val _bugReportPin = MutableStateFlow<SearchResultItem?>(null)
+    val bugReportPin: StateFlow<SearchResultItem?> = _bugReportPin.asStateFlow()
+
+    private val _pendingBugReportsCount = MutableStateFlow(0)
+    val pendingBugReportsCount: StateFlow<Int> = _pendingBugReportsCount.asStateFlow()
+
+    private val _lastCrashLog = MutableStateFlow<String?>(null)
+    val lastCrashLog: StateFlow<String?> = _lastCrashLog.asStateFlow()
+
+    private val _isSubmittingBugReport = MutableStateFlow(false)
+    val isSubmittingBugReport: StateFlow<Boolean> = _isSubmittingBugReport.asStateFlow()
 
     val destinationRoadRoute: CalculatedRoadRoute?
         get() {
@@ -347,6 +364,23 @@ class EnduController {
                         _statusBannerMessage.value = null
                     }
                 }
+            }
+        }
+
+        // Cargar último crash y reintentar envíos de reportes guardados en cola offline
+        scope.launch(Dispatchers.Default) {
+            _lastCrashLog.value = BugReportManager.loadLastCrashLog()
+            _pendingBugReportsCount.value = BugReportManager.loadPendingReports().size
+            while (isActive) {
+                if (_pendingBugReportsCount.value > 0) {
+                    val sent = BugReportManager.flushPendingReports(_appDisplaySettings.value.bugRelayWebhookUrl)
+                    val remaining = BugReportManager.loadPendingReports().size
+                    _pendingBugReportsCount.value = remaining
+                    if (sent > 0) {
+                        _statusBannerMessage.value = "Enviado${if (sent > 1) "s" else ""} $sent reporte${if (sent > 1) "s" else ""} pendiente${if (sent > 1) "s" else ""}"
+                    }
+                }
+                delay(60_000L)
             }
         }
 
@@ -2405,6 +2439,130 @@ class EnduController {
                 }
             }
         )
+    }
+
+    fun clearLastCrashLog() {
+        BugReportManager.clearLastCrashLog()
+        _lastCrashLog.value = null
+    }
+
+    fun openBugReportSheet() {
+        _lastCrashLog.value = BugReportManager.loadLastCrashLog()
+        _pendingBugReportsCount.value = BugReportManager.loadPendingReports().size
+        _showBugReportSheet.value = true
+    }
+
+    fun closeBugReportSheet() {
+        _showBugReportSheet.value = false
+    }
+
+    fun setBugReportPin(item: SearchResultItem?) {
+        _bugReportPin.value = item
+    }
+
+    fun buildDiagnosticsSummary(): String {
+        val tel = riderTelemetry.value
+        val activeGpx = selectedRoute
+        val activeRoad = destinationRoadRoute
+        val batt = getPlatformBatteryStatus()
+        val wifi = _wifiSnapshot.value
+        val center = _mapCenter.value
+        return buildString {
+            appendLine("App: EnduLink v${PlatformAppUpdater.getAppVersionName()} (${if (PlatformAppUpdater.isTestChannel()) "test" else "release"})")
+            appendLine("Plataforma: ${getPlatformName()} · Batería: ${batt.percentage}%")
+            appendLine("Mapa: capa=${_selectedLayer.value.title} zoom=${(_mapZoom.value * 10.0).roundToInt() / 10.0} centro=${PlaceSearchEngine.formatCoord(center)}")
+            appendLine("GPS: vel=${tel.speedKmh.roundToInt()} km/h alt=${tel.altitudeM.roundToInt()} m prec=${tel.horizontalAccuracyM.roundToInt()} m fix=${tel.coordinate != null}")
+            appendLine("Navegación: activa=${_isNavigating.value} REC=${_isRecording.value} perfil=${_selectedRouteProfile.value.name}")
+            if (activeGpx != null) {
+                appendLine("Track GPX: '${activeGpx.name}' (${activeGpx.points.size} pts, ${(activeGpx.totalDistanceKm * 10.0).roundToInt() / 10.0} km, ${activeGpx.waypoints.size} wpts)")
+            }
+            if (activeRoad != null) {
+                appendLine("Ruta calculada: '${activeRoad.destinationName}' (${activeRoad.profile.shortLabel}, ${(activeRoad.distanceKm * 10.0).roundToInt() / 10.0} km, offline=${activeRoad.isOfflineFallback})")
+            }
+            appendLine("Moto TFT: estado=${_bikeState.value} wifi=${wifi?.ssid ?: "ninguno"} ip=${wifi?.phoneIP ?: "ninguna"} gateway=${wifi?.gatewayCandidateIP ?: "ninguno"}")
+            append("Grupo en vivo: ${groupManager.activeRoomCode.value ?: "inactivo"} (miembros=${groupManager.members.value.size})")
+        }
+    }
+
+    fun retryPendingBugReports() {
+        scope.launch(Dispatchers.Default) {
+            val sent = BugReportManager.flushPendingReports(_appDisplaySettings.value.bugRelayWebhookUrl)
+            val remaining = BugReportManager.loadPendingReports().size
+            _pendingBugReportsCount.value = remaining
+            _statusBannerMessage.value = when {
+                sent > 0 && remaining == 0 -> "Reportes pendientes enviados correctamente ($sent)"
+                sent > 0 -> "Enviados $sent · Quedan $remaining pendientes"
+                remaining > 0 -> "Sin conexión al servidor de reportes ($remaining en cola)"
+                else -> "No hay reportes pendientes"
+            }
+        }
+    }
+
+    fun submitUserBugReport(
+        category: BugReportCategory,
+        userTitle: String,
+        userMessage: String,
+        userContact: String,
+        includeDiagnostics: Boolean,
+        includeCrashLog: Boolean,
+        includeCurrentMapContext: Boolean,
+        onCompleted: (BugSubmitOutcome) -> Unit
+    ) {
+        val cleanMsg = userMessage.trim()
+        if (cleanMsg.isBlank() || _isSubmittingBugReport.value) return
+        _isSubmittingBugReport.value = true
+
+        val pin = _bugReportPin.value ?: if (includeCurrentMapContext) {
+            val coord = riderTelemetry.value.coordinate ?: _mapCenter.value
+            SearchResultItem(
+                title = "Posición actual",
+                subtitle = PlaceSearchEngine.formatCoord(coord),
+                coordinate = coord
+            )
+        } else {
+            null
+        }
+
+        val nowMs = Clock.System.now().toEpochMilliseconds()
+        val payload = BugReportPayload(
+            reportId = "rep_${nowMs}_${kotlin.math.abs(cleanMsg.hashCode())}",
+            createdAtEpochMs = nowMs,
+            category = category,
+            userTitle = userTitle.trim(),
+            userMessage = cleanMsg,
+            userContact = userContact.trim(),
+            appVersion = PlatformAppUpdater.getAppVersionName(),
+            platformName = getPlatformName(),
+            isTestChannel = PlatformAppUpdater.isTestChannel(),
+            pinCoordinate = pin?.coordinate,
+            pinAddress = pin?.subtitle ?: pin?.title,
+            includeDiagnostics = includeDiagnostics,
+            diagnosticsSummary = if (includeDiagnostics) buildDiagnosticsSummary() else "",
+            recentBikeLogs = if (includeDiagnostics) _bikeLogs.value.takeLast(35) else emptyList(),
+            crashLog = if (includeCrashLog) _lastCrashLog.value else null,
+            hasMapSnapshot = includeCurrentMapContext || _bugReportPin.value != null
+        )
+
+        scope.launch(Dispatchers.Default) {
+            val outcome = BugReportManager.submitReport(
+                report = payload,
+                customWebhookUrl = _appDisplaySettings.value.bugRelayWebhookUrl
+            )
+            if (includeCrashLog && outcome != BugSubmitOutcome.ERROR) {
+                BugReportManager.clearLastCrashLog()
+                _lastCrashLog.value = null
+            }
+            _pendingBugReportsCount.value = BugReportManager.loadPendingReports().size
+            _bugReportPin.value = null
+            _isSubmittingBugReport.value = false
+            _showBugReportSheet.value = false
+            _statusBannerMessage.value = when (outcome) {
+                BugSubmitOutcome.SENT_ONLINE -> "Reporte enviado · El agente IA lo analizará en GitHub"
+                BugSubmitOutcome.QUEUED_OFFLINE -> "Guardado en cola offline · Se enviará al tener red"
+                BugSubmitOutcome.ERROR -> "No se pudo guardar el reporte"
+            }
+            onCompleted(outcome)
+        }
     }
 
     fun clearBikeLogs() {

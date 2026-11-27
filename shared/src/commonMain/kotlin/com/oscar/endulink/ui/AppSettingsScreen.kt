@@ -33,10 +33,13 @@ fun AppSettingsScreen(
     settings: AppDisplaySettings,
     showGpxOffTrackWarning: Boolean,
     downloadedPackagesCount: Int,
+    pendingBugReportsCount: Int = 0,
+    hasPendingCrashLog: Boolean = false,
     onUpdateSettings: ((AppDisplaySettings) -> AppDisplaySettings) -> Unit,
     onSetGpxOffTrackWarning: (Boolean) -> Unit,
     onResetSettings: () -> Unit,
     onOpenOfflineMaps: () -> Unit,
+    onOpenBugReport: () -> Unit = {},
     onUpdateAvailabilityChanged: (Boolean) -> Unit = {},
     onClose: () -> Unit,
     modifier: Modifier = Modifier
@@ -440,7 +443,16 @@ fun AppSettingsScreen(
                     }
 
                     // ------------------------------------------
-                    // TARJETA 4 (ABAJO): ACTUALIZACIONES Y VERSIÓN
+                    // TARJETA 5: SOPORTE Y REPORTES (IA)
+                    // ------------------------------------------
+                    SupportBugReportSectionCard(
+                        pendingReportsCount = pendingBugReportsCount,
+                        hasPendingCrashLog = hasPendingCrashLog,
+                        onOpenBugReport = onOpenBugReport
+                    )
+
+                    // ------------------------------------------
+                    // TARJETA 6 (ABAJO): ACTUALIZACIONES Y VERSIÓN
                     // ------------------------------------------
                     AppUpdateSectionCard(
                         onUpdateAvailabilityChanged = onUpdateAvailabilityChanged,
@@ -814,6 +826,7 @@ private fun HudLayoutSettingsCard(
         HudSlotConfigRow("Lista de Puntos", layout.waypointsSlot, actionSlots) { onUpdateLayout(layout.copy(waypointsSlot = it)) }
         HudSlotConfigRow("Grupo en Vivo", layout.groupSlot, actionSlots) { onUpdateLayout(layout.copy(groupSlot = it)) }
         HudSlotConfigRow("Pantalla Moto", layout.bikeSlot, actionSlots) { onUpdateLayout(layout.copy(bikeSlot = it)) }
+        HudSlotConfigRow("Reportar Bug", layout.bugReportSlot, actionSlots) { onUpdateLayout(layout.copy(bugReportSlot = it)) }
         HudSlotConfigRow("Brújula", layout.compassSlot, sideOnlySlots) { onUpdateLayout(layout.copy(compassSlot = it)) }
         HudSlotConfigRow("Zoom + / -", layout.zoomSlot, sideOnlySlots) { onUpdateLayout(layout.copy(zoomSlot = it)) }
         HudSlotConfigRow("Centrar GPS", layout.gpsSide, gpsSlots) { onUpdateLayout(layout.copy(gpsSide = it)) }
@@ -835,6 +848,7 @@ private fun HudLayoutMiniPreview(layout: HudButtonsLayout) {
         if (layout.waypointsSlot == slot) list.add("Pts")
         if (layout.groupSlot == slot) list.add("Grupo")
         if (layout.bikeSlot == slot) list.add("Moto")
+        if (layout.bugReportSlot == slot) list.add("Bug")
         if (slot != HudButtonSlot.BOTTOM && layout.gpsSide == slot) list.add("GPS")
         return list
     }
@@ -940,6 +954,60 @@ private fun HudSlotConfigRow(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SupportBugReportSectionCard(
+    pendingReportsCount: Int,
+    hasPendingCrashLog: Boolean,
+    onOpenBugReport: () -> Unit
+) {
+    SettingsSectionCard(title = "SOPORTE Y REPORTES") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(EnduPalette.SurfaceHigh)
+                .clickable { onOpenBugReport() }
+                .padding(horizontal = 12.dp, vertical = 11.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                BugReportIcon(
+                    color = if (hasPendingCrashLog) EnduPalette.Danger else EnduPalette.Accent,
+                    size = 18.dp
+                )
+                Column {
+                    Text(
+                        text = "Reportar bug o sugerir mejora",
+                        color = EnduPalette.TextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = when {
+                            hasPendingCrashLog -> "Hay un registro de cierre inesperado listo para enviar"
+                            pendingReportsCount > 0 -> "$pendingReportsCount reporte${if (pendingReportsCount > 1) "s" else ""} esperando conexión"
+                            else -> "Envíanos fallos o ideas de mejora directamente desde la app"
+                        },
+                        color = if (hasPendingCrashLog) EnduPalette.Danger else EnduPalette.TextMuted,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+            Text(
+                text = "Abrir →",
+                color = EnduPalette.Accent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }

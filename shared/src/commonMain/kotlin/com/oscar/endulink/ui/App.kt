@@ -107,6 +107,11 @@ fun App() {
     val generatorIsLoop by controller.generatorIsLoop.collectAsState()
     val generatorLoopKm by controller.generatorLoopKm.collectAsState()
     val generatorLoopDirection by controller.generatorLoopDirection.collectAsState()
+    val showBugReportSheet by controller.showBugReportSheet.collectAsState()
+    val bugReportPin by controller.bugReportPin.collectAsState()
+    val pendingBugReportsCount by controller.pendingBugReportsCount.collectAsState()
+    val lastCrashLog by controller.lastCrashLog.collectAsState()
+    val isSubmittingBugReport by controller.isSubmittingBugReport.collectAsState()
 
     val keepScreenOn = when (displaySettings.keepScreenOnMode) {
         KeepScreenOnMode.OFF -> false
@@ -215,10 +220,11 @@ fun App() {
             isPickingOnMap -> {
                 isPickingOnMap = false
                 isSearchingForStop = false
-                if (!showRouteGenerator) {
+                if (!showRouteGenerator && !showBugReportSheet) {
                     mapPickTarget = MapPickTarget.DESTINATION
                 }
             }
+            showBugReportSheet -> controller.closeBugReportSheet()
             showRouteGenerator -> controller.closeRouteGenerator()
             showSaveWaypointDialog -> {
                 showSaveWaypointDialog = false
@@ -416,6 +422,8 @@ fun App() {
                     onSelectRouteProfile = { controller.setRouteTerrainProfile(it) },
                     onSaveCalculatedRouteAsTrack = { controller.saveActiveCalculatedRouteAsTrack() },
                     onOpenRouteGenerator = { controller.openRouteGenerator(initialIsLoop = false) },
+                    hasPendingCrashLog = lastCrashLog != null,
+                    onOpenBugReport = { controller.openBugReportSheet() },
                     onPickOnMap = {
                         mapPickTarget = if (isSearchingForStop) MapPickTarget.STOP else MapPickTarget.DESTINATION
                         isPickingOnMap = true
@@ -432,6 +440,7 @@ fun App() {
                         when (mapPickTarget) {
                             MapPickTarget.GENERATOR_ORIGIN -> controller.setGeneratorOriginPin(item)
                             MapPickTarget.GENERATOR_DESTINATION -> controller.setGeneratorDestPin(item)
+                            MapPickTarget.BUG_REPORT_LOCATION -> controller.setBugReportPin(item)
                             MapPickTarget.STOP -> controller.addIntermediateWaypoint(item)
                             MapPickTarget.DESTINATION -> {
                                 if (isSearchingForStop) {
@@ -1088,12 +1097,55 @@ fun App() {
                     )
                 }
 
+                // Pantalla de Reporte de Bugs / Mejoras (IA + GitHub + Email)
+                if (showBugReportSheet && !isPickingOnMap) {
+                    val diagPreview = remember(showBugReportSheet, layer, zoom, bikeState, activeRoute, isNavigating) {
+                        controller.buildDiagnosticsSummary()
+                    }
+                    BugReportSheet(
+                        diagnosticsPreview = diagPreview,
+                        lastCrashLog = lastCrashLog,
+                        pendingReportsCount = pendingBugReportsCount,
+                        selectedMapPin = bugReportPin,
+                        isSubmitting = isSubmittingBugReport,
+                        onPickLocationOnMap = {
+                            isSearchingForStop = false
+                            mapPickTarget = MapPickTarget.BUG_REPORT_LOCATION
+                            isPickingOnMap = true
+                        },
+                        onClearMapPin = { controller.setBugReportPin(null) },
+                        onDiscardCrashLog = { controller.clearLastCrashLog() },
+                        onRetryPendingReports = { controller.retryPendingBugReports() },
+                        onSubmit = { cat, title, msg, contact, incDiag, incCrash, incMap, onDone ->
+                            controller.submitUserBugReport(
+                                category = cat,
+                                userTitle = title,
+                                userMessage = msg,
+                                userContact = contact,
+                                includeDiagnostics = incDiag,
+                                includeCrashLog = incCrash,
+                                includeCurrentMapContext = incMap,
+                                onCompleted = onDone
+                            )
+                        },
+                        onClose = {
+                            mapPickTarget = MapPickTarget.DESTINATION
+                            controller.closeBugReportSheet()
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(42f)
+                    )
+                }
+
                 // Pantalla completa de Ajustes y Actualizaciones
                 if (showSettingsScreen) {
                     AppSettingsScreen(
                         settings = displaySettings,
                         showGpxOffTrackWarning = bikeMapConfig.showGpxOffTrackWarning,
                         downloadedPackagesCount = downloadedPackages.size,
+                        pendingBugReportsCount = pendingBugReportsCount,
+                        hasPendingCrashLog = lastCrashLog != null,
                         onUpdateSettings = { transform -> controller.updateAppDisplaySettings(transform) },
                         onSetGpxOffTrackWarning = { enabled -> controller.setGpxOffTrackWarningEnabled(enabled) },
                         onResetSettings = {
@@ -1103,6 +1155,10 @@ fun App() {
                         onOpenOfflineMaps = {
                             showSettingsScreen = false
                             showOfflineSheet = true
+                        },
+                        onOpenBugReport = {
+                            showSettingsScreen = false
+                            controller.openBugReportSheet()
                         },
                         onUpdateAvailabilityChanged = { available -> hasUpdateAvailable = available },
                         onClose = { showSettingsScreen = false },

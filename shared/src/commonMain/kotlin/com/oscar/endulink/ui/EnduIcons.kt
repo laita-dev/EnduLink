@@ -1420,6 +1420,49 @@ fun ListLinesIcon(
     }
 }
 
+@Composable
+fun BugReportIcon(
+    color: Color = EnduPalette.TextPrimary,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val strokeW = 1.6f.dp.toPx()
+
+        // Cuerpo ovalado
+        drawOval(
+            color = color,
+            topLeft = Offset(w * 0.28f, h * 0.34f),
+            size = Size(w * 0.44f, h * 0.50f),
+            style = Stroke(width = strokeW)
+        )
+        // Cabeza
+        drawArc(
+            color = color,
+            startAngle = 180f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(w * 0.35f, h * 0.22f),
+            size = Size(w * 0.30f, h * 0.24f),
+            style = Stroke(width = strokeW, cap = StrokeCap.Round)
+        )
+        // Antenas
+        drawLine(color, Offset(w * 0.42f, h * 0.24f), Offset(w * 0.30f, h * 0.12f), strokeW * 0.9f, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.58f, h * 0.24f), Offset(w * 0.70f, h * 0.12f), strokeW * 0.9f, StrokeCap.Round)
+        // División dorsal
+        drawLine(color, Offset(w * 0.50f, h * 0.42f), Offset(w * 0.50f, h * 0.80f), strokeW * 0.8f, StrokeCap.Round)
+        // Patas simétricas
+        drawLine(color, Offset(w * 0.28f, h * 0.48f), Offset(w * 0.12f, h * 0.42f), strokeW * 0.9f, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.28f, h * 0.62f), Offset(w * 0.10f, h * 0.62f), strokeW * 0.9f, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.28f, h * 0.76f), Offset(w * 0.14f, h * 0.84f), strokeW * 0.9f, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.72f, h * 0.48f), Offset(w * 0.88f, h * 0.42f), strokeW * 0.9f, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.72f, h * 0.62f), Offset(w * 0.90f, h * 0.62f), strokeW * 0.9f, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.72f, h * 0.76f), Offset(w * 0.86f, h * 0.84f), strokeW * 0.9f, StrokeCap.Round)
+    }
+}
+
 
 
 

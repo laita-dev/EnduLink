@@ -12,6 +12,7 @@ import androidx.core.content.IntentCompat
 import com.oscar.endulink.bike.AndroidBikeKeysStorage
 import com.oscar.endulink.platform.AndroidAppContext
 import com.oscar.endulink.platform.AndroidScreenWakeHost
+import com.oscar.endulink.platform.BugReportManager
 import com.oscar.endulink.trail.importGPXFromUri
 import com.oscar.endulink.ui.App
 
@@ -50,6 +51,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         AndroidBikeKeysStorage.appContext = applicationContext
         AndroidAppContext.appContext = applicationContext
+        installUncaughtCrashRecorder()
         AndroidScreenWakeHost.attach(this)
 
         val permissions = mutableListOf(
@@ -92,6 +94,28 @@ class MainActivity : ComponentActivity() {
             incoming.clipData = null
             importGPXFromUri(applicationContext, uri)
         }
+    }
+
+    private fun installUncaughtCrashRecorder() {
+        if (crashRecorderInstalled) return
+        crashRecorderInstalled = true
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        val handler = Thread.UncaughtExceptionHandler { thread, throwable ->
+            try {
+                val trace = throwable.stackTraceToString()
+                    .lineSequence()
+                    .take(40)
+                    .joinToString("\n")
+                BugReportManager.recordCrashLog(thread.name, trace)
+            } catch (_: Throwable) {}
+            previous?.uncaughtException(thread, throwable)
+        }
+        Thread.setDefaultUncaughtExceptionHandler(handler)
+    }
+
+    companion object {
+        @Volatile
+        private var crashRecorderInstalled = false
     }
 }
 
