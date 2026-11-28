@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EnduLink · Navegación Trail / Enduro y Enlace TFT</title>
+  <meta name="description" content="EnduLink: navegación off-road por GPX, generador de rutas DMD2, mapas topo offline, grupos en vivo y espejo H.264 al cuadro TFT de tu moto en Android e iOS." />
+  <meta name="theme-color" content="#0b0e14" />
+  <link rel="icon" type="image/png" href="./assets/icon.png" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e14;
+      --bg-elev: #121721;
+      --card: #161c28;
+      --card-hover: #1b2231;
+      --border: #263042;
+      --text: #f3f6fb;
+      --muted: #9aa7bd;
+      --accent: #ff6b2c;
+      --accent-soft: rgba(255, 107, 44, 0.14);
+      --cyan: #00d4ff;
+      --cyan-soft: rgba(0, 212, 255, 0.12);
+      --max-w: 1080px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(900px 420px at 85% -60px, rgba(255, 107, 44, 0.14), transparent 70%),
+        radial-gradient(760px 380px at 10% 10%, rgba(0, 212, 255, 0.10), transparent 65%),
+        var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; }
+
+    /* Top Nav */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      backdrop-filter: blur(12px);
+      background: rgba(11, 14, 20, 0.84);
+      border-bottom: 1px solid rgba(38, 48, 66, 0.7);
+    }
+    .topbar-inner {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      font-weight: 800;
+      font-size: 17px;
+      letter-spacing: -0.2px;
+    }
+    .brand img {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font-size: 13.5px;
+      color: var(--muted);
+    }
+    .nav-links a {
+      text-decoration: none;
+      transition: color 0.15s ease;
+    }
+    .nav-links a:hover { color: var(--text); }
+    .lang-btn {
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .lang-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+
+    .container {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+
+    /* Hero */
+    .hero {
+      position: relative;
+      padding: 54px 0 42px;
+      overflow: hidden;
+    }
+    .topo-bg {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.22;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='360' viewBox='0 0 600 360'%3E%3Cg fill='none' stroke='%233b4a66' stroke-width='1.1'%3E%3Cpath d='M-40 90 C 90 20, 170 150, 310 85 S 520 30, 640 110'/%3E%3Cpath d='M-40 140 C 110 70, 190 205, 330 135 S 530 75, 640 165'/%3E%3Cpath d='M-40 195 C 120 125, 220 250, 355 180 S 540 130, 640 220'/%3E%3Cpath d='M-40 255 C 130 190, 240 295, 385 235 S 545 190, 640 280'/%3E%3Cpath d='M-40 315 C 140 255, 260 345, 420 295 S 555 260, 640 335'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: 640px auto;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent);
+    }
+    .hero-grid {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1.35fr 0.95fr;
+      gap: 28px;
+      align-items: center;
+    }
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .pill.accent {
+      background: var(--accent-soft);
+      border-color: rgba(255, 107, 44, 0.45);
+      color: #ff9c6e;
+    }
+    .pill.cyan {
+      background: var(--cyan-soft);
+      border-color: rgba(0, 212, 255, 0.35);
+      color: #66e5ff;
+    }
+    h1 {
+      font-size: clamp(30px, 4.5vw, 46px);
+      line-height: 1.1;
+      letter-spacing: -0.9px;
+      margin: 0 0 14px;
+    }
+    .hero-sub {
+      font-size: 16.5px;
+      color: var(--muted);
+      margin: 0 0 24px;
+      max-width: 58ch;
+    }
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-size: 14.5px;
+      font-weight: 700;
+      text-decoration: none;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: transform 0.12s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary {
+      background: linear-gradient(135deg, #ff7a33, #f05319);
+      color: #fff;
+      box-shadow: 0 8px 24px rgba(255, 107, 44, 0.25);
+    }
+    .btn-secondary {
+      background: var(--card);
+      color: var(--text);
+      border-color: var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--cyan); }
+
+    /* Hero right panel (App card + Quick Join Group) */
+    .spotlight {
+      background: linear-gradient(160deg, rgba(22, 28, 40, 0.96), rgba(14, 18, 27, 0.98));
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 22px;
+      box-shadow: 0 20px 44px rgba(0, 0, 0, 0.45);
+    }
+    .app-head {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .app-head img {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+    }
+    .app-title { font-size: 18px; font-weight: 800; margin: 0; }
+    .app-meta { font-size: 12.5px; color: var(--muted); margin: 2px 0 0; }
+    .specs {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .spec-box {
+      background: rgba(11, 14, 20, 0.72);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .spec-k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .spec-v { font-size: 13.5px; font-weight: 700; color: var(--text); margin-top: 2px; }
+
+    .join-box {
+      background: rgba(0, 212, 255, 0.06);
+      border: 1px solid rgba(0, 212, 255, 0.25);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .join-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--cyan);
+      margin-bottom: 8px;
+    }
+    .join-form {
+      display: flex;
+      gap: 8px;
+    }
+    .join-form input {
+      flex: 1;
+      min-width: 0;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 9px 11px;
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+    .join-form input:focus { outline: none; border-color: var(--cyan); }
+    .join-form button {
+      background: var(--cyan);
+      color: #071018;
+      border: 0;
+      border-radius: 9px;
+      padding: 9px 13px;
+      font-weight: 800;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    /* Sections */
+    section { padding: 38px 0; }
+    .sec-head { margin-bottom: 20px; }
+    .sec-head h2 {
+      font-size: 24px;
+      margin: 0 0 6px;
+      letter-spacing: -0.4px;
+    }
+    .sec-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14.5px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .card:hover {
+      border-color: #36455f;
+      background: var(--card-hover);
+    }
+    .card-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 3px 8px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+    }
+    .card-badge.cyan {
+      color: var(--cyan);
+      background: var(--cyan-soft);
+    }
+    .card h3 {
+      font-size: 16px;
+      margin: 0 0 6px;
+    }
+    .card p {
+      margin: 0;
+      font-size: 13.5px;
+      color: var(--muted);
+    }
+    .card ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      font-size: 13.5px;
+      color: var(--muted);
+    }
+    .card li + li { margin-top: 5px; }
+
+    .mono-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
+      color: #b8c7df;
+      overflow: hidden;
+    }
+    .mono-box span {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .copy-mini {
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 5px 9px;
+      font-size: 11.5px;
+      font-weight: 700;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .copy-mini:hover { border-color: var(--cyan); color: var(--cyan); }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 26px 0 38px;
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .footer-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .footer-links a { text-decoration: none; }
+    .footer-links a:hover { color: var(--text); }
+
+    @media (max-width: 880px) {
+      .hero-grid, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+      .nav-links a.hide-sm { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#">
+        <img src="./assets/icon.png" alt="EnduLink" />
+        <span>EnduLink</span>
+      </a>
+      <nav class="nav-links">
+        <a class="hide-sm" href="#funciones" data-i18n="nav_features">Funciones</a>
+        <a class="hide-sm" href="#descargas" data-i18n="nav_downloads">Descargas</a>
+        <a href="#privacidad" data-i18n="nav_support">Privacidad y Soporte</a>
+        <button id="lang-toggle" class="lang-btn" type="button">EN</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div class="topo-bg" aria-hidden="true"></div>
+      <div class="hero-grid">
+        <div>
+          <div class="pill-row">
+            <span class="pill accent">Kotlin Multiplatform · Android &amp; iOS</span>
+            <span class="pill cyan">EasyConn / Carbit TFT</span>
+            <span class="pill">v0.4.1</span>
+          </div>
+          <h1 data-i18n="hero_title">Navegación trail y enduro por GPX directa al cuadro TFT de tu moto.</h1>
+          <p class="hero-sub" data-i18n="hero_sub">
+            Lleva tus tracks GPX, rutas circulares estilo DMD2, mapas topo offline y grupo en vivo en la pantalla de tu moto mientras el teléfono va protegido en el bolsillo, sin perder tus datos móviles 4G/5G.
+          </p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="https://github.com/laita-dev/EnduLink/releases/latest" target="_blank" rel="noopener" data-i18n="cta_releases">Descargar última versión</a>
+            <a class="btn btn-secondary" href="https://github.com/laita-dev/EnduLink" target="_blank" rel="noopener" data-i18n="cta_github">Ver proyecto en GitHub</a>
+          </div>
+        </div>
+
+        <aside class="spotlight">
+          <div class="app-head">
+            <img src="./assets/icon.png" alt="Icono EnduLink" />
+            <div>
+              <p class="app-title">EnduLink <span style="color:var(--muted);font-weight:500;font-size:13px">(motillOS en iOS)</span></p>
+              <p class="app-meta" data-i18n="app_meta">Oscar Laita · com.laitadev.endulink</p>
+            </div>
+          </div>
+
+          <div class="specs">
+            <div class="spec-box">
+              <div class="spec-k">Android</div>
+              <div class="spec-v" data-i18n="spec_android">8.0+ · APK / Play Store</div>
+            </div>
+            <div class="spec-box">
+              <div class="spec-k">iOS / iPadOS</div>
+              <div class="spec-v" data-i18n="spec_ios">16.0+ · SideStore / App Store</div>
+            </div>
+            <div class="spec-box">
+              <div class="spec-k" data-i18n="spec_tft_k">Cuadros TFT</div>
+              <div class="spec-v">H.264 Wi-Fi / TCP + QR</div>
+            </div>
+            <div class="spec-box">
+              <div class="spec-k" data-i18n="spec_offline_k">Sin cobertura</div>
+              <div class="spec-v" data-i18n="spec_offline_v">Mapas y GPX 100% offline</div>
+            </div>
+          </div>
+
+          <div class="join-box">
+            <label class="join-label" for="quick-code" data-i18n="join_label">¿Tienes un código de Grupo en Vivo?</label>
+            <form id="join-form" class="join-form">
+              <input id="quick-code" type="text" maxlength="12" placeholder="6KV-7H6" autocomplete="off" />
+              <button type="submit" data-i18n="join_btn">Entrar</button>
+            </form>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="funciones">
+      <div class="sec-head">
+        <h2 data-i18n="feat_title">Pensada para rodar por lo marrón y en carretera</h2>
+        <p data-i18n="feat_sub">Todo lo necesario para planificar, navegar, compartir ruta y proyectar al TFT sin depender de soportes ni fundas abiertas.</p>
+      </div>
+      <div class="grid-3">
+        <article class="card">
+          <span class="card-badge">TFT Link</span>
+          <h3 data-i18n="f1_t">Espejo H.264 al cuadro de la moto</h3>
+          <p data-i18n="f1_p">Compatible con cuadros EasyConn / Carbit Ride (Rieju Aventura, CFMoto, Voge, Benelli). Escaneo QR Wi-Fi, reconexión automática al dar contacto y auto-zoom dinámico por velocidad.</p>
+        </article>
+        <article class="card">
+          <span class="card-badge">DMD2 / BRouter</span>
+          <h3 data-i18n="f2_t">Generador A→B y Loops circulares</h3>
+          <p data-i18n="f2_p">Calcula rutas punto a punto o bucles por distancia y rumbo con perfiles de carretera, curvas, trail, off-road y enduro, perfil de altimetría y guardado directo en Tracks.</p>
+        </article>
+        <article class="card">
+          <span class="card-badge cyan">Offline</span>
+          <h3 data-i18n="f3_t">Mapas Topo y corredor offline</h3>
+          <p data-i18n="f3_p">Capas IGN MTN25, CyclOSM, OpenTopoMap y satélite. Descarga una zona o solo el corredor del GPX para rodar sin cobertura manteniendo la fluidez del mapa.</p>
+        </article>
+        <article class="card">
+          <span class="card-badge">GPX · REC</span>
+          <h3 data-i18n="f4_t">Tracks masivos y grabación en vivo</h3>
+          <p data-i18n="f4_p">Carga segura de archivos GPX con más de 30.000 puntos, inversión de sentido, avisos fuera de ruta y grabación REC con waypoints e incidencias de campo.</p>
+        </article>
+        <article class="card">
+          <span class="card-badge cyan">Live Group</span>
+          <h3 data-i18n="f5_t">Grupos en tiempo real y SOS</h3>
+          <p data-i18n="f5_p">Visualiza a tus compañeros en el mapa y en el TFT por Internet o red local sin cobertura. Invitaciones instantáneas mediante código, QR o enlace clicable.</p>
+        </article>
+        <article class="card">
+          <span class="card-badge">HUD &amp; IA</span>
+          <h3 data-i18n="f6_t">HUD modular y reporte integrado</h3>
+          <p data-i18n="f6_p">Personaliza qué botones aparecen en cada lateral del HUD según tu pantalla o guantes, con captura de diagnósticos y reporte directo de mejoras o fallos.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="descargas">
+      <div class="sec-head">
+        <h2 data-i18n="dl_title">Instalación y canales oficiales</h2>
+        <p data-i18n="dl_sub">Descarga las builds compiladas directamente desde GitHub Releases o mediante tu tienda habitual en cuanto estén publicadas.</p>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <span class="card-badge">Android</span>
+          <h3>EnduLink APK · Play Store</h3>
+          <p data-i18n="dl_and_p">Descarga androidApp-release.apk desde GitHub Releases. La app incluye comprobación de actualizaciones integrada desde Ajustes.</p>
+          <ul>
+            <li><strong data-i18n="req_lbl">Requisitos:</strong> Android 8.0 o superior.</li>
+            <li data-i18n="dl_and_li">Publicación en Google Play Store en preparación.</li>
+          </ul>
+          <div style="margin-top:14px">
+            <a class="btn btn-secondary" href="https://github.com/laita-dev/EnduLink/releases/latest" target="_blank" rel="noopener" data-i18n="dl_btn">Ir a GitHub Releases</a>
+          </div>
+        </div>
+
+        <div class="card">
+          <span class="card-badge cyan">iOS / iPadOS</span>
+          <h3>SideStore · Sideloadly · App Store</h3>
+          <p data-i18n="dl_ios_p">Disponible como EnduLink-unsigned.ipa para SideStore/AltStore o Sideloadly en iOS 16.0+. Distribución oficial en App Store en curso.</p>
+          <div class="mono-box">
+            <span id="sidestore-url">https://raw.githubusercontent.com/laita-dev/EnduLink/main/sidestore-source.json</span>
+            <button id="copy-sidestore" class="copy-mini" type="button" data-i18n="copy_btn">Copiar</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacidad">
+      <div class="sec-head">
+        <h2 data-i18n="priv_title">Privacidad y Soporte</h2>
+        <p data-i18n="priv_sub">Información clara sobre permisos, tratamiento de datos y contacto con el desarrollador.</p>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h3 data-i18n="priv_data_t">Uso de permisos y datos</h3>
+          <ul>
+            <li data-i18n="priv_1"><strong>Ubicación GPS (y segundo plano):</strong> se utiliza únicamente en tu dispositivo para mostrar posición, grabar tracks GPX y transmitirla cuando activas un Grupo en Vivo.</li>
+            <li data-i18n="priv_2"><strong>Cámara:</strong> usada exclusivamente bajo acción del usuario para escanear códigos QR de conexión TFT o de invitación a grupo.</li>
+            <li data-i18n="priv_3"><strong>Wi-Fi / Red local:</strong> empleada para enlazar con la pantalla TFT de la moto manteniendo los datos móviles disponibles.</li>
+            <li data-i18n="priv_4"><strong>Reportes de errores:</strong> los reportes enviados desde la app incluyen el texto que redactas y, si lo marcas, diagnóstico técnico para resolver incidencias en GitHub.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3 data-i18n="sup_t">Soporte técnico</h3>
+          <p data-i18n="sup_p">¿Has encontrado un fallo, quieres sugerir un perfil de ruta o necesitas ayuda conectando un cuadro TFT?</p>
+          <ul>
+            <li><strong>Email:</strong> <a href="mailto:laitaodev@gmail.com">laitaodev@gmail.com</a></li>
+            <li><strong>GitHub Issues:</strong> <a href="https://github.com/laita-dev/EnduLink/issues" target="_blank" rel="noopener">github.com/laita-dev/EnduLink/issues</a></li>
+            <li><strong>In-app:</strong> <span data-i18n="sup_inapp">Botón de reporte integrado en el HUD y en Ajustes → Soporte y Reportes.</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-row">
+      <span>© 2026 Oscar Laita · EnduLink</span>
+      <div class="footer-links">
+        <a href="./group/" data-i18n="foot_group">Entrar a Grupo</a>
+        <a href="https://github.com/laita-dev/EnduLink" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/laita-dev/EnduLink/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="mailto:laitaodev@gmail.com">laitaodev@gmail.com</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var form = document.getElementById("join-form");
+      var input = document.getElementById("quick-code");
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var clean = (input.value || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+        window.location.href = clean ? "./group/?c=" + encodeURIComponent(clean) : "./group/";
+      });
+
+      var copyBtn = document.getElementById("copy-sidestore");
+      var sideUrl = document.getElementById("sidestore-url").textContent.trim();
+      copyBtn.addEventListener("click", function () {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(sideUrl);
+          copyBtn.textContent = currentLang === "en" ? "Copied" : "Copiado";
+          setTimeout(function () {
+            copyBtn.textContent = currentLang === "en" ? "Copy" : "Copiar";
+          }, 1600);
+        }
+      });
+
+      var en = {
+        nav_features: "Features",
+        nav_downloads: "Downloads",
+        nav_support: "Privacy & Support",
+        hero_title: "GPX trail & enduro navigation streamed straight to your bike TFT dash.",
+        hero_sub: "Project GPX tracks, DMD2-style round-trip loops, offline topo maps and live riding groups onto your motorcycle display while keeping your phone safe in your pocket and mobile data active.",
+        cta_releases: "Download latest release",
+        cta_github: "View on GitHub",
+        app_meta: "Oscar Laita · com.laitadev.endulink",
+        spec_android: "8.0+ · APK / Play Store",
+        spec_ios: "16.0+ · SideStore / App Store",
+        spec_tft_k: "TFT Dashes",
+        spec_offline_k: "Off-grid ready",
+        spec_offline_v: "100% offline maps & GPX",
+        join_label: "Have a Live Group invite code?",
+        join_btn: "Join",
+        feat_title: "Built for off-road trails and twisty tarmac",
+        feat_sub: "Everything you need to plan, navigate, share rides and cast onto compatible TFT displays.",
+        f1_t: "H.264 Motorcycle TFT Link",
+        f1_p: "Works with EasyConn / Carbit Ride dashes (Rieju Aventura, CFMoto, Voge, Benelli). QR Wi-Fi pairing, auto-reconnect on ignition and speed-based auto-zoom.",
+        f2_t: "DMD2 A→B & Loop Generator",
+        f2_p: "Generate point-to-point routes or distance/bearing loops across road, twisty, trail, off-road and enduro profiles (BRouter) with elevation profiles.",
+        f3_t: "Topo Maps & Offline Corridor",
+        f3_p: "IGN MTN25, CyclOSM, OpenTopoMap and satellite layers. Download full areas or only a corridor along your GPX track for zero-signal rides.",
+        f4_t: "Large GPX & Live REC",
+        f4_p: "Smooth loading of 30k+ point GPX tracks, route reversal, off-track alerts and live GPX recording with trail waypoint markers.",
+        f5_t: "Real-Time Groups & SOS",
+        f5_p: "See riding buddies on your map and TFT dash over cellular or local LAN without coverage, with QR, code and shareable link invites.",
+        f6_t: "Modular HUD & Bug Reporter",
+        f6_p: "Customize which HUD controls sit on each edge of your screen and send diagnostics-assisted bug reports or feature ideas from the app.",
+        dl_title: "Installation & Official Channels",
+        dl_sub: "Get compiled builds from GitHub Releases or via store channels as they roll out.",
+        dl_and_p: "Download androidApp-release.apk from GitHub Releases with built-in update checks inside Settings.",
+        req_lbl: "Requirements:",
+        dl_and_li: "Google Play Store release in preparation.",
+        dl_btn: "Open GitHub Releases",
+        dl_ios_p: "Available as EnduLink-unsigned.ipa for SideStore/AltStore or Sideloadly on iOS 16.0+. App Store distribution in progress.",
+        copy_btn: "Copy",
+        priv_title: "Privacy & Support",
+        priv_sub: "Clear summary of app permissions, data handling and developer contact.",
+        priv_data_t: "Permissions & Data",
+        priv_1: "Location (including background): used locally to track position, record GPX logs and share coordinates when you join a Live Group.",
+        priv_2: "Camera: used only on demand to scan TFT Wi-Fi or Group invite QR codes.",
+        priv_3: "Wi-Fi / Local Network: used to stream video/map telemetry to the motorcycle TFT dash while preserving cellular data.",
+        priv_4: "Bug Reports: voluntarily submitted reports include your message and optional technical diagnostics to triage issues on GitHub.",
+        sup_t: "Support",
+        sup_p: "Found a bug, want a new routing profile or need help pairing a TFT display?",
+        sup_inapp: "Built-in reporter button in the HUD and Settings → Support & Reports.",
+        foot_group: "Join Live Group"
+      };
+
+      var es = {};
+      var i18nNodes = document.querySelectorAll("[data-i18n]");
+      i18nNodes.forEach(function (el) { es[el.getAttribute("data-i18n")] = el.textContent; });
+
+      var currentLang = "es";
+      var langBtn = document.getElementById("lang-toggle");
+      langBtn.addEventListener("click", function () {
+        currentLang = currentLang === "es" ? "en" : "es";
+        var dict = currentLang === "en" ? en : es;
+        i18nNodes.forEach(function (el) {
+          var key = el.getAttribute("data-i18n");
+          if (dict[key]) el.textContent = dict[key];
+        });
+        langBtn.textContent = currentLang === "es" ? "EN" : "ES";
+        document.documentElement.lang = currentLang;
+      });
+    })();
+  </script>
+</body>
+</html>
